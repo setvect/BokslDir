@@ -12,3 +12,5 @@ Cargo.lock
 
 # Config (user-specific)
 config/user.toml
+
+*.local.json

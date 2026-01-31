@@ -1,146 +1,48 @@
 # 복슬Dir (Boksl Dir)
 
-A modern dual-panel file manager for the terminal, built with Rust.
+Rust로 작성된 터미널 기반 듀얼 패널 파일 매니저
 
-## Features
+## 프로젝트 상태
 
-- 🎨 TUI-based dual-panel interface
-- 🖥️  Responsive layout (adapts to terminal size)
-- 🎨 Color theme support
-- ⌨️  Customizable keybindings
-- 📁 File operations (copy, move, delete)
-- 🔍 File search and filtering
-- 📚 Tabs and bookmarks
-- 🚀 Fast and memory-efficient
+🚧 **현재 Phase 1 개발 중**
 
-## Project Status
+이 프로젝트는 개발 초기 단계입니다. Mdir과 Total Commander에 영감을 받아 제작 중입니다.
 
-🚧 **Currently in Phase 0: Project Initialization**
+## 주요 기능 (계획)
 
-This is a work in progress. Currently implemented:
-- ✅ Project structure
-- ✅ Basic TUI framework
-- ✅ Hello World dual-panel UI
+- 듀얼 패널 인터페이스
+- 반응형 레이아웃
+- 테마 지원
+- 파일 작업 (복사, 이동, 삭제)
+- 빠른 탐색 및 검색
 
-## Requirements
+## 요구사항
 
 - Rust 1.93+ (2021 edition)
-- Terminal with Unicode and color support
+- Unicode 및 컬러를 지원하는 터미널
 
-## Installation
+## 설치 및 실행
 
 ```bash
-# Clone the repository
+# 저장소 클론
 git clone https://github.com/yourusername/boksldir.git
 cd boksldir
 
-# Build
-cargo build --release
-
-# Run
-cargo run
-```
-
-## Usage
-
-```bash
-# Run in development mode
+# 개발 모드 실행
 cargo run
 
-# Build and run release version
+# 릴리스 빌드
 cargo build --release
 ./target/release/boksldir
 ```
 
-### Keyboard Shortcuts (Current)
+## 개발
 
-- `q` or `Esc` - Quit
+자세한 개발 가이드는 다음 문서를 참고하세요:
+- [Requirements](docs/Requirements.md) - 요구사항
+- [PRD](docs/PRD.md) - 기능 명세
+- [Architecture](docs/Architecture.md) - 시스템 아키텍처
 
-## Development
-
-### Project Structure
-
-```
-src/
-├── main.rs           # Entry point
-├── app.rs            # Application state
-├── ui/               # UI layer
-│   ├── components/   # UI components
-│   ├── layout.rs     # Layout system
-│   ├── theme.rs      # Theme system
-│   └── renderer.rs   # Renderer
-├── core/             # Business logic
-│   ├── file_manager.rs
-│   └── navigator.rs
-├── system/           # System layer
-│   ├── filesystem.rs
-│   └── config.rs
-├── models/           # Data models
-└── utils/            # Utilities
-```
-
-### Documentation
-
-- [Requirements](docs/Requirements.md) - High-level requirements
-- [PRD](docs/PRD.md) - Product Requirements Document (detailed features)
-- [Architecture](docs/Architecture.md) - System architecture and design
-
-### Build
-
-```bash
-# Development build
-cargo build
-
-# Release build
-cargo build --release
-
-# Run tests
-cargo test
-
-# Format code
-cargo fmt
-
-# Lint
-cargo clippy
-```
-
-## Roadmap
-
-### Phase 0: Project Initialization ✅
-- [x] Cargo project setup
-- [x] Basic project structure
-- [x] Hello World TUI
-
-### Phase 1: UX/UI Foundation (In Progress)
-- [ ] Responsive layout system
-- [ ] Theme system
-- [ ] Basic UI components
-- [ ] Event handling
-
-### Phase 2: File System Integration
-- [ ] Directory reading
-- [ ] File list rendering
-- [ ] Navigation
-
-### Phase 3+
-- See [PRD.md](docs/PRD.md) for detailed roadmap
-
-## Contributing
-
-This project is currently in early development. Contributions will be welcome once the core functionality is implemented.
-
-## License
+## 라이센스
 
 MIT
-
-## Credits
-
-Inspired by:
-- Total Commander
-- Midnight Commander (mc)
-- ranger
-- broot
-
-Built with:
-- [ratatui](https://github.com/ratatui-org/ratatui) - TUI framework
-- [crossterm](https://github.com/crossterm-rs/crossterm) - Terminal backend

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Panel component - 파일 패널 컴포넌트
 //
 // 파일 리스트 표시, 선택 상태, 테두리 렌더링

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Status bar component - 상태바 컴포넌트
 //
 // 파일/디렉토리 개수, 총 크기, 선택된 항목 정보 표시

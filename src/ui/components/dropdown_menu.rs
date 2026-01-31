@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Dropdown menu component - 드롭다운 메뉴 컴포넌트
 //
 // 2단계 드롭다운 메뉴 시스템
@@ -222,7 +223,7 @@ impl MenuState {
                     while item
                         .submenu
                         .get(self.selected_submenu_item)
-                        .map_or(false, |i| i.is_separator())
+                        .is_some_and(|i| i.is_separator())
                     {
                         self.selected_submenu_item = (self.selected_submenu_item + 1) % submenu_len;
                     }
@@ -235,7 +236,7 @@ impl MenuState {
             // 구분선 건너뛰기
             while items
                 .get(self.selected_item)
-                .map_or(false, |i| i.is_separator())
+                .is_some_and(|i| i.is_separator())
             {
                 self.selected_item = (self.selected_item + 1) % len;
             }
@@ -262,7 +263,7 @@ impl MenuState {
                     while item
                         .submenu
                         .get(self.selected_submenu_item)
-                        .map_or(false, |i| i.is_separator())
+                        .is_some_and(|i| i.is_separator())
                     {
                         self.selected_submenu_item = if self.selected_submenu_item == 0 {
                             submenu_len - 1
@@ -283,7 +284,7 @@ impl MenuState {
             // 구분선 건너뛰기
             while items
                 .get(self.selected_item)
-                .map_or(false, |i| i.is_separator())
+                .is_some_and(|i| i.is_separator())
             {
                 self.selected_item = if self.selected_item == 0 {
                     len - 1
@@ -304,7 +305,7 @@ impl MenuState {
                 while item
                     .submenu
                     .get(self.selected_submenu_item)
-                    .map_or(false, |i| i.is_separator())
+                    .is_some_and(|i| i.is_separator())
                 {
                     self.selected_submenu_item += 1;
                 }

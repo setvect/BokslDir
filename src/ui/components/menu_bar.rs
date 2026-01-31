@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Menu bar component - 상단 메뉴바 컴포넌트
 //
 // 앱 이름, 메뉴 항목, 현재 경로 표시

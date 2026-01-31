@@ -25,7 +25,7 @@ Rust로 작성된 터미널 기반 듀얼 패널 파일 매니저
 
 ```bash
 # 저장소 클론
-git clone https://github.com/yourusername/boksldir.git
+git clone https://github.com/setvect/BokslDir.git
 cd boksldir
 
 # 개발 모드 실행
@@ -37,6 +37,15 @@ cargo build --release
 ```
 
 ## 개발
+
+### 코드 품질 도구
+
+```bash
+cargo fmt       # 코드 포맷팅
+cargo clippy    # 린트 검사 (ESLint와 유사)
+cargo check     # 빠른 컴파일 검사
+cargo test      # 테스트 실행
+```
 
 자세한 개발 가이드는 다음 문서를 참고하세요:
 - [Requirements](docs/Requirements.md) - 요구사항

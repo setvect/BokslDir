@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Layout system - 반응형 레이아웃 시스템
 //
 // 터미널 크기에 따른 레이아웃 모드:

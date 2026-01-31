@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Warning screen component - 경고 화면 컴포넌트
 //
 // 터미널이 너무 작을 때 표시되는 경고 화면

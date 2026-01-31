@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Command bar component - 하단 커맨드 바 컴포넌트
 //
 // F1~F12 단축키 표시

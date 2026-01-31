@@ -7,10 +7,8 @@ pub mod status_bar;
 pub mod warning;
 
 // Re-export components for convenience
-pub use command_bar::{CommandBar, CommandItem};
-pub use dropdown_menu::{
-    create_default_menus, DropdownMenu, Menu, MenuItem, MenuItemKind, MenuState,
-};
+pub use command_bar::CommandBar;
+pub use dropdown_menu::{create_default_menus, DropdownMenu, Menu, MenuState};
 pub use menu_bar::MenuBar;
 pub use panel::{Panel, PanelStatus};
 pub use status_bar::StatusBar;

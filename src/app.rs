@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::ui::{create_default_menus, ActivePanel, LayoutManager, LayoutMode, Menu, MenuState};
 use crate::utils::error::Result;
 use std::env;
@@ -150,10 +152,9 @@ impl App {
 
     /// 메뉴 액션 실행
     pub fn execute_menu_action(&mut self, action_id: &str) {
-        match action_id {
-            "quit" => self.quit(),
-            // TODO: 다른 액션들 추가
-            _ => {}
+        // TODO: 다른 액션들 추가
+        if action_id == "quit" {
+            self.quit();
         }
     }
 }

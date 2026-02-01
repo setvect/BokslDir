@@ -221,9 +221,12 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     // 드롭다운 메뉴 렌더링 (메뉴가 활성화되어 있을 때)
     if app.is_menu_active() {
         if let Some(menu) = app.menus.get(app.menu_state.selected_menu) {
-            // 메뉴 위치 계산
+            // 메뉴 위치 계산 (터미널 너비 전달)
             let menu_bar_widget = MenuBar::new().menus(&app.menus);
-            let menu_x = menu_bar_widget.get_menu_x_position(app.menu_state.selected_menu);
+            let menu_x = menu_bar_widget.get_menu_x_position(
+                app.menu_state.selected_menu,
+                f.area().width,
+            );
 
             // 드롭다운 영역 (메뉴바 아래)
             let dropdown_area = Rect {

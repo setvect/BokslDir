@@ -12,6 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 /// 메뉴바 컴포넌트
 pub struct MenuBar<'a> {
@@ -116,15 +117,23 @@ impl<'a> MenuBar<'a> {
 
     /// 메뉴 항목의 x 위치 계산
     pub fn get_menu_x_position(&self, menu_index: usize) -> u16 {
-        // [앱이름] + 공백
-        let app_name_width = self.app_name.chars().count() + 3; // "[이름] "
-        let mut x = app_name_width as u16;
+        // [앱이름] + 공백 - 한글 문자 너비 고려
+        let app_name_text = format!("[{}] ", self.app_name);
+        let mut x = app_name_text.width() as u16;
 
         for (i, menu) in self.menus.iter().enumerate() {
+            // 메뉴 사이 추가 공백 (첫 메뉴 제외)
+            if i > 0 {
+                x += 1;
+            }
+
+            // 찾는 메뉴에 도달하면 위치 반환 (드롭다운 테두리가 하이라이트 시작 위치에 맞춰짐)
             if i == menu_index {
                 break;
             }
-            x += menu.title.chars().count() as u16 + 1; // 메뉴 제목 + 공백
+
+            // 양쪽 공백(2) + 메뉴 제목 (한글 문자 너비 고려)
+            x += menu.title.width() as u16 + 2;
         }
 
         x
@@ -156,8 +165,13 @@ impl Widget for MenuBar<'_> {
                 Style::default().fg(self.fg_color)
             };
 
-            // 모든 메뉴는 오른쪽에만 공백 (선택된 메뉴는 배경색으로 구분)
-            spans.push(Span::styled(format!("{} ", menu.title), style));
+            // 메뉴 사이 여백 추가 (첫 메뉴 제외)
+            if i > 0 {
+                spans.push(Span::raw(" "));
+            }
+
+            // 양쪽 공백 동일하게 (안정감)
+            spans.push(Span::styled(format!(" {} ", menu.title), style));
         }
 
         let line = Line::from(spans);

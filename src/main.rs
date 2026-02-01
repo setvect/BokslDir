@@ -125,14 +125,9 @@ fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
             }
         }
         (_, KeyCode::Right) => {
-            // 현재 항목에 서브메뉴가 있으면 서브메뉴 열기
-            if let Some(menu) = app.menus.get(app.menu_state.selected_menu) {
-                if let Some(item) = menu.items.get(app.menu_state.selected_item) {
-                    if item.has_submenu() && !app.menu_state.submenu_open {
-                        app.open_submenu();
-                        return;
-                    }
-                }
+            // 서브메뉴가 열려있으면 닫고 다음 메뉴로 이동
+            if app.menu_state.submenu_open {
+                app.close_submenu();
             }
             app.next_menu();
         }
@@ -141,17 +136,17 @@ fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         (_, KeyCode::Down) => app.next_menu_item(),
         // 항목 선택: Enter
         (_, KeyCode::Enter) => {
-            if let Some(action_id) = app.get_selected_menu_action() {
-                // 서브메뉴가 있는 항목이면 서브메뉴 열기
-                if let Some(menu) = app.menus.get(app.menu_state.selected_menu) {
-                    if let Some(item) = menu.items.get(app.menu_state.selected_item) {
-                        if item.has_submenu() && !app.menu_state.submenu_open {
-                            app.open_submenu();
-                            return;
-                        }
+            // 서브메뉴가 있는 항목이면 서브메뉴 열기
+            if let Some(menu) = app.menus.get(app.menu_state.selected_menu) {
+                if let Some(item) = menu.items.get(app.menu_state.selected_item) {
+                    if item.has_submenu() && !app.menu_state.submenu_open {
+                        app.open_submenu();
+                        return;
                     }
                 }
-                // 액션 실행
+            }
+            // 액션이 있으면 실행
+            if let Some(action_id) = app.get_selected_menu_action() {
                 app.close_menu();
                 app.execute_menu_action(&action_id);
             }

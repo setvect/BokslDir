@@ -134,7 +134,7 @@ impl Theme {
             symlink: "#ce9178".into(),
 
             // UI 컴포넌트
-            menu_bar_bg: "#007acc".into(),
+            menu_bar_bg: "#2d2d30".into(), // 어두운 배경으로 변경하여 선택된 메뉴 강조
             menu_bar_fg: "#ffffff".into(),
             status_bar_bg: "#007acc".into(),
             status_bar_fg: "#ffffff".into(),

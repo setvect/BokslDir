@@ -541,7 +541,8 @@ impl Widget for DropdownMenu<'_> {
                 height: 1,
             };
 
-            let is_selected = i == self.state.selected_item && !self.state.submenu_open;
+            // 서브메뉴가 열려있어도 부모 메뉴 항목 하이라이트 유지
+            let is_selected = i == self.state.selected_item;
             self.render_item(item, is_selected, dropdown_area.width, buf, item_area);
         }
 

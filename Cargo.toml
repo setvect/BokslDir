@@ -27,3 +27,6 @@ chrono = "0.4"
 
 # System Directories
 dirs = "6.0"
+
+# Unicode Width Calculation
+unicode-width = "0.1"

@@ -1,0 +1,33 @@
+# Dark 테마 - 기본 테마
+# VS Code Dark 테마에서 영감을 받음
+
+# 배경/전경
+bg_primary = "#1e1e1e"
+fg_primary = "#d4d4d4"
+
+# 패널
+panel_active_border = "#0078d4"
+panel_inactive_border = "#3c3c3c"
+panel_bg = "#1e1e1e"
+
+# 파일 리스트
+file_normal = "#d4d4d4"
+file_selected = "#ffffff"
+file_selected_bg = "#0078d4"
+directory = "#569cd6"
+executable = "#4ec9b0"
+symlink = "#ce9178"
+
+# UI 컴포넌트
+menu_bar_bg = "#007acc"
+menu_bar_fg = "#ffffff"
+status_bar_bg = "#007acc"
+status_bar_fg = "#ffffff"
+command_bar_bg = "#2d2d30"
+command_bar_fg = "#cccccc"
+
+# 강조
+accent = "#0078d4"
+warning = "#ffa500"
+error = "#f44747"
+success = "#4ec9b0"

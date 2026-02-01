@@ -1,0 +1,33 @@
+# High Contrast 테마
+# 접근성을 위한 고대비 테마
+
+# 배경/전경
+bg_primary = "#000000"
+fg_primary = "#ffffff"
+
+# 패널
+panel_active_border = "#00ff00"
+panel_inactive_border = "#808080"
+panel_bg = "#000000"
+
+# 파일 리스트
+file_normal = "#ffffff"
+file_selected = "#000000"
+file_selected_bg = "#00ff00"
+directory = "#00ffff"
+executable = "#00ff00"
+symlink = "#ffff00"
+
+# UI 컴포넌트
+menu_bar_bg = "#000000"
+menu_bar_fg = "#00ff00"
+status_bar_bg = "#000000"
+status_bar_fg = "#00ff00"
+command_bar_bg = "#000000"
+command_bar_fg = "#ffffff"
+
+# 강조
+accent = "#00ff00"
+warning = "#ffff00"
+error = "#ff0000"
+success = "#00ff00"

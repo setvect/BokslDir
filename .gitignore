@@ -14,3 +14,5 @@ Cargo.lock
 config/user.toml
 
 *.local.json
+
+temp/

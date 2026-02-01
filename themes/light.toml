@@ -1,0 +1,33 @@
+# Light 테마
+# VS Code Light 테마에서 영감을 받음
+
+# 배경/전경
+bg_primary = "#ffffff"
+fg_primary = "#1e1e1e"
+
+# 패널
+panel_active_border = "#0078d4"
+panel_inactive_border = "#cccccc"
+panel_bg = "#ffffff"
+
+# 파일 리스트
+file_normal = "#1e1e1e"
+file_selected = "#000000"
+file_selected_bg = "#add6ff"
+directory = "#0066cc"
+executable = "#008080"
+symlink = "#a65e2b"
+
+# UI 컴포넌트
+menu_bar_bg = "#0078d4"
+menu_bar_fg = "#ffffff"
+status_bar_bg = "#0078d4"
+status_bar_fg = "#ffffff"
+command_bar_bg = "#f3f3f3"
+command_bar_fg = "#1e1e1e"
+
+# 강조
+accent = "#0078d4"
+warning = "#ff8c00"
+error = "#e51400"
+success = "#107c10"

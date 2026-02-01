@@ -3,6 +3,7 @@
 //
 // 파일 리스트 표시, 선택 상태, 테두리 렌더링
 
+use crate::ui::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -107,6 +108,15 @@ impl<'a> Panel<'a> {
     /// 전경색 설정
     pub fn fg_color(mut self, color: Color) -> Self {
         self.fg_color = color;
+        self
+    }
+
+    /// 테마 적용
+    pub fn theme(mut self, theme: &Theme) -> Self {
+        self.active_border_color = theme.panel_active_border.to_color();
+        self.inactive_border_color = theme.panel_inactive_border.to_color();
+        self.bg_color = theme.panel_bg.to_color();
+        self.fg_color = theme.file_normal.to_color();
         self
     }
 

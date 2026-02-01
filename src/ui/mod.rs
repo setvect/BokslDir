@@ -12,3 +12,6 @@ pub use components::{
     create_default_menus, CommandBar, DropdownMenu, Menu, MenuBar, MenuState, Panel, PanelStatus,
     StatusBar, WarningScreen,
 };
+
+// Re-export theme types
+pub use theme::{Theme, ThemeManager};

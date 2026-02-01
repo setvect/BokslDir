@@ -3,6 +3,7 @@
 //
 // 2단계 드롭다운 메뉴 시스템
 
+use crate::ui::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -378,6 +379,16 @@ impl<'a> DropdownMenu<'a> {
             state,
             ..Default::default()
         }
+    }
+
+    /// 테마 적용
+    pub fn theme(mut self, theme: &Theme) -> Self {
+        self.bg_color = theme.panel_bg.to_color();
+        self.fg_color = theme.file_normal.to_color();
+        self.selected_bg = theme.file_selected_bg.to_color();
+        self.selected_fg = theme.file_selected.to_color();
+        self.border_color = theme.panel_inactive_border.to_color();
+        self
     }
 
     /// 메뉴의 너비 계산

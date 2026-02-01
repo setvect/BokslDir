@@ -167,12 +167,14 @@ fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
 fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     let areas = app.layout.areas();
     let active_panel = app.layout.active_panel();
+    let theme = app.theme_manager.current();
 
     // 메뉴바 렌더링
     let menu_bar = MenuBar::new()
         .menus(&app.menus)
         .menu_active(app.is_menu_active())
-        .selected_menu(app.menu_state.selected_menu);
+        .selected_menu(app.menu_state.selected_menu)
+        .theme(theme);
     f.render_widget(menu_bar, areas.menu_bar);
 
     // 좌측 패널 렌더링
@@ -184,7 +186,8 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         } else {
             PanelStatus::Inactive
         })
-        .content("Press 'F9' to open menu\nPress 'Tab' to switch panels\nPress 'q' to quit");
+        .content("Press 'F9' to open menu\nPress 'Tab' to switch panels\nPress 'q' to quit")
+        .theme(theme);
     f.render_widget(left_panel, areas.left_panel);
 
     // 우측 패널 렌더링 (듀얼 패널 모드일 때만)
@@ -197,7 +200,8 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
                     PanelStatus::Active
                 } else {
                     PanelStatus::Inactive
-                });
+                })
+                .theme(theme);
         f.render_widget(right_panel, areas.right_panel);
     }
 
@@ -206,11 +210,12 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .file_count(0)
         .dir_count(0)
         .total_size("0B")
-        .layout_mode(app.layout_mode_str());
+        .layout_mode(app.layout_mode_str())
+        .theme(theme);
     f.render_widget(status_bar, areas.status_bar);
 
     // 커맨드바 렌더링
-    let command_bar = CommandBar::new();
+    let command_bar = CommandBar::new().theme(theme);
     f.render_widget(command_bar, areas.command_bar);
 
     // 드롭다운 메뉴 렌더링 (메뉴가 활성화되어 있을 때)
@@ -228,7 +233,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
                 height: f.area().height.saturating_sub(areas.menu_bar.y + 1),
             };
 
-            let dropdown = DropdownMenu::new(menu, &app.menu_state);
+            let dropdown = DropdownMenu::new(menu, &app.menu_state).theme(theme);
             f.render_widget(dropdown, dropdown_area);
         }
     }

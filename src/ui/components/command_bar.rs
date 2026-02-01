@@ -3,6 +3,7 @@
 //
 // F1~F12 단축키 표시
 
+use crate::ui::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -104,6 +105,14 @@ impl CommandBar {
     /// 레이블 전경색 설정
     pub fn label_fg_color(mut self, color: Color) -> Self {
         self.label_fg_color = color;
+        self
+    }
+
+    /// 테마 적용
+    pub fn theme(mut self, theme: &Theme) -> Self {
+        self.bg_color = theme.command_bar_bg.to_color();
+        self.key_fg_color = theme.accent.to_color();
+        self.label_fg_color = theme.command_bar_fg.to_color();
         self
     }
 }

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::ui::{create_default_menus, ActivePanel, LayoutManager, LayoutMode, Menu, MenuState};
+use crate::ui::{create_default_menus, ActivePanel, LayoutManager, LayoutMode, Menu, MenuState, ThemeManager};
 use crate::utils::error::Result;
 use std::env;
 use std::path::PathBuf;
@@ -19,6 +19,8 @@ pub struct App {
     pub menus: Vec<Menu>,
     /// 메뉴 상태
     pub menu_state: MenuState,
+    /// 테마 관리자
+    pub theme_manager: ThemeManager,
 }
 
 impl App {
@@ -32,6 +34,7 @@ impl App {
             right_path: current_dir,
             menus: create_default_menus(),
             menu_state: MenuState::new(),
+            theme_manager: ThemeManager::new(),
         })
     }
 
@@ -152,9 +155,23 @@ impl App {
 
     /// 메뉴 액션 실행
     pub fn execute_menu_action(&mut self, action_id: &str) {
-        // TODO: 다른 액션들 추가
-        if action_id == "quit" {
-            self.quit();
+        match action_id {
+            // 종료
+            "quit" => self.quit(),
+
+            // 테마 전환
+            "theme_dark" => {
+                let _ = self.theme_manager.switch_theme("dark");
+            }
+            "theme_light" => {
+                let _ = self.theme_manager.switch_theme("light");
+            }
+            "theme_contrast" => {
+                let _ = self.theme_manager.switch_theme("high_contrast");
+            }
+
+            // TODO: 다른 액션들 추가
+            _ => {}
         }
     }
 }
@@ -170,6 +187,7 @@ impl Default for App {
             right_path: current_dir,
             menus: create_default_menus(),
             menu_state: MenuState::new(),
+            theme_manager: ThemeManager::new(),
         }
     }
 }

@@ -4,6 +4,7 @@
 // 앱 이름, 메뉴 항목, 현재 경로 표시
 
 use super::dropdown_menu::Menu;
+use crate::ui::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -100,6 +101,16 @@ impl<'a> MenuBar<'a> {
     /// 강조색 설정
     pub fn accent_color(mut self, color: Color) -> Self {
         self.accent_color = color;
+        self
+    }
+
+    /// 테마 적용
+    pub fn theme(mut self, theme: &Theme) -> Self {
+        self.bg_color = theme.menu_bar_bg.to_color();
+        self.fg_color = theme.menu_bar_fg.to_color();
+        self.accent_color = theme.accent.to_color();
+        self.selected_bg = theme.accent.to_color();
+        self.selected_fg = theme.menu_bar_fg.to_color();
         self
     }
 

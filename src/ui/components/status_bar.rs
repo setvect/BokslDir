@@ -3,6 +3,7 @@
 //
 // 파일/디렉토리 개수, 총 크기, 선택된 항목 정보 표시
 
+use crate::ui::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -87,6 +88,13 @@ impl<'a> StatusBar<'a> {
     /// 전경색 설정
     pub fn fg_color(mut self, color: Color) -> Self {
         self.fg_color = color;
+        self
+    }
+
+    /// 테마 적용
+    pub fn theme(mut self, theme: &Theme) -> Self {
+        self.bg_color = theme.status_bar_bg.to_color();
+        self.fg_color = theme.status_bar_fg.to_color();
         self
     }
 }

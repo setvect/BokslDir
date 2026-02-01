@@ -7,7 +7,7 @@ use crate::ui::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::Span,
     widgets::{Block, Borders, Clear, Widget},
 };
@@ -508,7 +508,7 @@ impl Widget for DropdownMenu<'_> {
         }
 
         let width = self.calculate_width();
-        let height = self.menu.items.len() as u16 + 4; // +4 for border + header + separator
+        let height = self.menu.items.len() as u16 + 2; // +2 for border
 
         // 드롭다운 영역 계산
         let dropdown_area = Rect {
@@ -528,50 +528,15 @@ impl Widget for DropdownMenu<'_> {
             .style(Style::default().bg(self.bg_color));
         block.render(dropdown_area, buf);
 
-        // 헤더 렌더링 (메뉴 제목 - 괄호 안 단축키 제거)
-        let header_text = self
-            .menu
-            .title
-            .split('(')
-            .next()
-            .unwrap_or(&self.menu.title)
-            .trim();
-        let header_display = format!("[ {} ]", header_text);
-        let header_style = Style::default()
-            .fg(self.selected_fg)
-            .bg(self.bg_color)
-            .add_modifier(Modifier::BOLD);
-
-        // 헤더 중앙 정렬
-        let header_width = header_display.chars().count() as u16;
-        let header_x = dropdown_area.x + 1
-            + (dropdown_area.width.saturating_sub(2).saturating_sub(header_width)) / 2;
-        buf.set_span(
-            header_x,
-            dropdown_area.y + 1,
-            &Span::styled(&header_display, header_style),
-            header_width,
-        );
-
-        // 헤더 아래 구분선
-        let separator_line = "─".repeat((dropdown_area.width - 2) as usize);
-        let separator_span = Span::styled(&separator_line, Style::default().fg(self.border_color));
-        buf.set_span(
-            dropdown_area.x + 1,
-            dropdown_area.y + 2,
-            &separator_span,
-            dropdown_area.width - 2,
-        );
-
         // 메뉴 항목 렌더링
         for (i, item) in self.menu.items.iter().enumerate() {
-            if i as u16 + 3 >= dropdown_area.height - 1 {
+            if i as u16 + 1 >= dropdown_area.height - 1 {
                 break;
             }
 
             let item_area = Rect {
                 x: dropdown_area.x,
-                y: dropdown_area.y + 3 + i as u16,
+                y: dropdown_area.y + 1 + i as u16,
                 width: dropdown_area.width,
                 height: 1,
             };
@@ -589,8 +554,7 @@ impl Widget for DropdownMenu<'_> {
 
                     let submenu_x = (dropdown_area.x + dropdown_area.width)
                         .min(area.x + area.width - submenu_width);
-                    // 헤더(+1) + 구분선(+2) + 항목 인덱스
-                    let submenu_y = dropdown_area.y + 3 + self.state.selected_item as u16;
+                    let submenu_y = dropdown_area.y + 1 + self.state.selected_item as u16;
 
                     let submenu_area = Rect {
                         x: submenu_x,

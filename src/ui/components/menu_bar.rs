@@ -13,17 +13,6 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-/// 메뉴 표시 모드 (터미널 너비에 따라 결정)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MenuDisplayMode {
-    /// 전체 표시: "파일(F)"
-    Full,
-    /// 단축키 제거: "파일"
-    NoHotkey,
-    /// 단축키만: "F"
-    HotkeyOnly,
-}
-
 /// 메뉴바 컴포넌트
 pub struct MenuBar<'a> {
     /// 앱 이름
@@ -126,39 +115,16 @@ impl<'a> MenuBar<'a> {
     }
 
     /// 메뉴 항목의 x 위치 계산
-    pub fn get_menu_x_position(&self, menu_index: usize, terminal_width: u16) -> u16 {
+    pub fn get_menu_x_position(&self, menu_index: usize) -> u16 {
         // [앱이름] + 공백
         let app_name_width = self.app_name.chars().count() + 3; // "[이름] "
         let mut x = app_name_width as u16;
-
-        // 터미널 너비에 따라 표시 모드 결정
-        let display_mode = if terminal_width >= 80 {
-            MenuDisplayMode::Full
-        } else if terminal_width >= 60 {
-            MenuDisplayMode::NoHotkey
-        } else {
-            MenuDisplayMode::HotkeyOnly
-        };
 
         for (i, menu) in self.menus.iter().enumerate() {
             if i == menu_index {
                 break;
             }
-
-            let menu_width = match display_mode {
-                MenuDisplayMode::Full => menu.title.chars().count(),
-                MenuDisplayMode::NoHotkey => menu
-                    .title
-                    .split('(')
-                    .next()
-                    .unwrap_or(&menu.title)
-                    .trim()
-                    .chars()
-                    .count(),
-                MenuDisplayMode::HotkeyOnly => 1, // 단축키 1글자
-            };
-
-            x += menu_width as u16 + 1; // +1 for space
+            x += menu.title.chars().count() as u16 + 1; // 메뉴 제목 + 공백
         }
 
         x
@@ -180,15 +146,6 @@ impl Widget for MenuBar<'_> {
                 .add_modifier(Modifier::BOLD),
         ));
 
-        // 터미널 너비에 따라 메뉴 표시 방식 결정
-        let display_mode = if area.width >= 80 {
-            MenuDisplayMode::Full
-        } else if area.width >= 60 {
-            MenuDisplayMode::NoHotkey
-        } else {
-            MenuDisplayMode::HotkeyOnly
-        };
-
         // 메뉴 항목들
         for (i, menu) in self.menus.iter().enumerate() {
             let is_selected = self.menu_active && i == self.selected_menu;
@@ -199,40 +156,8 @@ impl Widget for MenuBar<'_> {
                 Style::default().fg(self.fg_color)
             };
 
-            let menu_text = match display_mode {
-                MenuDisplayMode::Full => {
-                    // 전체 표시: "파일(F)"
-                    menu.title.to_string()
-                }
-                MenuDisplayMode::NoHotkey => {
-                    // 단축키 제거: "파일"
-                    menu.title
-                        .split('(')
-                        .next()
-                        .unwrap_or(&menu.title)
-                        .trim()
-                        .to_string()
-                }
-                MenuDisplayMode::HotkeyOnly => {
-                    // 단축키만: "F"
-                    menu.hotkey
-                        .map(|c| c.to_uppercase().to_string())
-                        .unwrap_or_else(|| {
-                            // hotkey가 없으면 title에서 괄호 안 문자 추출
-                            menu.title
-                                .split('(')
-                                .nth(1)
-                                .and_then(|s| s.trim_end_matches(')').chars().next())
-                                .map(|c| c.to_uppercase().to_string())
-                                .unwrap_or_else(|| "?".to_string())
-                        })
-                }
-            };
-
             // 모든 메뉴는 오른쪽에만 공백 (선택된 메뉴는 배경색으로 구분)
-            let formatted_text = format!("{} ", menu_text);
-
-            spans.push(Span::styled(formatted_text, style));
+            spans.push(Span::styled(format!("{} ", menu.title), style));
         }
 
         let line = Line::from(spans);
@@ -265,16 +190,12 @@ mod tests {
         let menus = create_default_menus();
         let menu_bar = MenuBar::new().menus(&menus);
 
-        // 첫 번째 메뉴 위치 (80 컬럼 기준)
-        let x0 = menu_bar.get_menu_x_position(0, 80);
+        // 첫 번째 메뉴 위치
+        let x0 = menu_bar.get_menu_x_position(0);
         assert!(x0 > 0);
 
         // 두 번째 메뉴 위치는 첫 번째보다 커야 함
-        let x1 = menu_bar.get_menu_x_position(1, 80);
+        let x1 = menu_bar.get_menu_x_position(1);
         assert!(x1 > x0);
-
-        // 좁은 화면에서도 동작해야 함
-        let x0_narrow = menu_bar.get_menu_x_position(0, 50);
-        assert!(x0_narrow > 0);
     }
 }

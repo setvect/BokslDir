@@ -75,7 +75,6 @@ impl App {
     pub fn layout_mode_str(&self) -> &str {
         match self.layout.mode() {
             LayoutMode::DualPanel => "DUAL",
-            LayoutMode::SinglePanel => "SINGLE",
             LayoutMode::TooSmall => "WARN",
         }
     }

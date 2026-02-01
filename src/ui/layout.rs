@@ -3,14 +3,13 @@
 //
 // 터미널 크기에 따른 레이아웃 모드:
 // - 80+ cols: 듀얼 패널 모드
-// - 40-79 cols: 싱글 패널 모드 (Tab으로 전환)
-// - <40 cols: 경고 메시지 표시
+// - <80 cols: 경고 메시지 표시 (최소 요구사항 미충족)
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// 최소 터미널 크기 상수
-pub const MIN_WIDTH: u16 = 40;
-pub const MIN_HEIGHT: u16 = 15;
+pub const MIN_WIDTH: u16 = 80;
+pub const MIN_HEIGHT: u16 = 24;
 pub const DUAL_PANEL_MIN_WIDTH: u16 = 80;
 pub const STANDARD_HEIGHT: u16 = 24;
 
@@ -19,8 +18,6 @@ pub const STANDARD_HEIGHT: u16 = 24;
 pub enum LayoutMode {
     /// 듀얼 패널 모드 (80+ cols)
     DualPanel,
-    /// 싱글 패널 모드 (40-79 cols)
-    SinglePanel,
     /// 경고 모드 (터미널이 너무 작음)
     TooSmall,
 }
@@ -148,8 +145,6 @@ impl LayoutManager {
     fn determine_mode(width: u16, height: u16) -> LayoutMode {
         if width < MIN_WIDTH || height < MIN_HEIGHT {
             LayoutMode::TooSmall
-        } else if width < DUAL_PANEL_MIN_WIDTH {
-            LayoutMode::SinglePanel
         } else {
             LayoutMode::DualPanel
         }
@@ -172,7 +167,6 @@ impl LayoutManager {
                 warning: area,
                 ..Default::default()
             },
-            LayoutMode::SinglePanel => self.calculate_single_panel_areas(area),
             LayoutMode::DualPanel => self.calculate_dual_panel_areas(area),
         }
     }
@@ -285,9 +279,9 @@ impl LayoutManager {
         matches!(self.state.mode, LayoutMode::DualPanel)
     }
 
-    /// 싱글 패널 모드인지 확인
+    /// 싱글 패널 모드인지 확인 (더 이상 지원하지 않음, 항상 false 반환)
     pub fn is_single_panel(&self) -> bool {
-        matches!(self.state.mode, LayoutMode::SinglePanel)
+        false
     }
 
     /// 터미널이 너무 작은지 확인
@@ -325,19 +319,10 @@ mod tests {
             LayoutMode::DualPanel
         );
 
-        // 싱글 패널 모드 (40-79 cols)
-        assert_eq!(
-            LayoutManager::determine_mode(79, 24),
-            LayoutMode::SinglePanel
-        );
-        assert_eq!(
-            LayoutManager::determine_mode(40, 24),
-            LayoutMode::SinglePanel
-        );
-
-        // TooSmall 모드
-        assert_eq!(LayoutManager::determine_mode(39, 24), LayoutMode::TooSmall);
-        assert_eq!(LayoutManager::determine_mode(80, 14), LayoutMode::TooSmall);
+        // TooSmall 모드 (80 미만 또는 24 미만)
+        assert_eq!(LayoutManager::determine_mode(79, 24), LayoutMode::TooSmall);
+        assert_eq!(LayoutManager::determine_mode(40, 24), LayoutMode::TooSmall);
+        assert_eq!(LayoutManager::determine_mode(80, 23), LayoutMode::TooSmall);
     }
 
     #[test]

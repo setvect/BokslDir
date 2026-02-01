@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 // Menu bar component - 상단 메뉴바 컴포넌트
 //
-// 앱 이름, 메뉴 항목, 현재 경로 표시
+// 앱 이름, 메뉴 항목, 시스템 정보 표시
 
 use super::dropdown_menu::Menu;
 use crate::ui::Theme;
+use chrono::Local;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -24,6 +25,8 @@ pub struct MenuBar<'a> {
     menu_active: bool,
     /// 현재 선택된 메뉴 인덱스
     selected_menu: usize,
+    /// 시스템 정보 표시 여부
+    show_system_info: bool,
     /// 배경색
     bg_color: Color,
     /// 전경색
@@ -43,6 +46,7 @@ impl<'a> Default for MenuBar<'a> {
             menus: &[],
             menu_active: false,
             selected_menu: 0,
+            show_system_info: true,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
             accent_color: Color::Rgb(0, 120, 212),
@@ -105,6 +109,12 @@ impl<'a> MenuBar<'a> {
         self
     }
 
+    /// 시스템 정보 표시 설정
+    pub fn show_system_info(mut self, show: bool) -> Self {
+        self.show_system_info = show;
+        self
+    }
+
     /// 테마 적용
     pub fn theme(mut self, theme: &Theme) -> Self {
         self.bg_color = theme.menu_bar_bg.to_color();
@@ -145,10 +155,10 @@ impl Widget for MenuBar<'_> {
         // 배경 채우기
         buf.set_style(area, Style::default().bg(self.bg_color));
 
-        let mut spans = Vec::new();
+        let mut left_spans = Vec::new();
 
         // 앱 이름 - 여백 최소화 (fg_color로 표시하여 가시성 확보)
-        spans.push(Span::styled(
+        left_spans.push(Span::styled(
             format!("[{}] ", self.app_name),
             Style::default()
                 .fg(self.fg_color)
@@ -167,14 +177,36 @@ impl Widget for MenuBar<'_> {
 
             // 메뉴 사이 여백 추가 (첫 메뉴 제외)
             if i > 0 {
-                spans.push(Span::raw(" "));
+                left_spans.push(Span::raw(" "));
             }
 
             // 양쪽 공백 동일하게 (안정감)
-            spans.push(Span::styled(format!(" {} ", menu.title), style));
+            left_spans.push(Span::styled(format!(" {} ", menu.title), style));
         }
 
-        let line = Line::from(spans);
+        // 시스템 정보 (날짜/시간)
+        if self.show_system_info {
+            let now = Local::now();
+            let datetime_str = now.format("%Y-%m-%d %H:%M").to_string();
+            let datetime_width = datetime_str.width();
+
+            // 왼쪽 컨텐츠 너비 계산
+            let left_width: usize = left_spans.iter().map(|s| s.content.width()).sum();
+
+            // 오른쪽 정렬을 위한 공백 계산
+            if area.width as usize > left_width + datetime_width + 1 {
+                let padding = area.width as usize - left_width - datetime_width;
+                left_spans.push(Span::raw(" ".repeat(padding)));
+                left_spans.push(Span::styled(
+                    datetime_str,
+                    Style::default()
+                        .fg(self.fg_color)
+                        .add_modifier(Modifier::DIM),
+                ));
+            }
+        }
+
+        let line = Line::from(left_spans);
         let paragraph = Paragraph::new(line);
         paragraph.render(area, buf);
     }

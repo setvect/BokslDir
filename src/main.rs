@@ -17,7 +17,7 @@ use ui::{
     ActivePanel, CommandBar, DropdownMenu, LayoutMode, MenuBar, Panel, PanelStatus, StatusBar,
     WarningScreen,
 };
-use utils::error::Result;
+use utils::{error::Result, formatter::format_file_size};
 
 fn main() -> Result<()> {
     // Setup terminal
@@ -174,6 +174,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
     // 좌측 패널 렌더링
     let left_path = app.left_panel.current_path.to_string_lossy();
+    let show_parent_left = app.left_panel.current_path.parent().is_some();
     let left_panel = Panel::new()
         .title(&left_path)
         .status(if active_panel == ActivePanel::Left {
@@ -181,13 +182,17 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         } else {
             PanelStatus::Inactive
         })
-        .content("Press 'F9' to open menu\nPress 'Tab' to switch panels\nPress 'q' to quit")
+        .entries(&app.left_panel.entries)
+        .selected_index(app.left_panel.selected_index)
+        .scroll_offset(app.left_panel.scroll_offset)
+        .show_parent(show_parent_left)
         .theme(theme);
     f.render_widget(left_panel, areas.left_panel);
 
     // 우측 패널 렌더링 (듀얼 패널 모드일 때만)
     if app.layout.is_dual_panel() {
         let right_path = app.right_panel.current_path.to_string_lossy();
+        let show_parent_right = app.right_panel.current_path.parent().is_some();
         let right_panel = Panel::new()
             .title(&right_path)
             .status(if active_panel == ActivePanel::Right {
@@ -195,15 +200,24 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
             } else {
                 PanelStatus::Inactive
             })
+            .entries(&app.right_panel.entries)
+            .selected_index(app.right_panel.selected_index)
+            .scroll_offset(app.right_panel.scroll_offset)
+            .show_parent(show_parent_right)
             .theme(theme);
         f.render_widget(right_panel, areas.right_panel);
     }
 
     // 상태바 렌더링
+    let active_panel_state = app.active_panel_state();
+    let file_count = active_panel_state.file_count();
+    let dir_count = active_panel_state.dir_count();
+    let total_size = format_file_size(active_panel_state.total_size());
+
     let status_bar = StatusBar::new()
-        .file_count(0)
-        .dir_count(0)
-        .total_size("0B")
+        .file_count(file_count)
+        .dir_count(dir_count)
+        .total_size(&total_size)
         .layout_mode(app.layout_mode_str())
         .theme(theme);
     f.render_widget(status_bar, areas.status_bar);

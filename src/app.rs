@@ -1,9 +1,12 @@
 #![allow(dead_code)]
 
-use crate::ui::{create_default_menus, ActivePanel, LayoutManager, LayoutMode, Menu, MenuState, ThemeManager};
+use crate::models::PanelState;
+use crate::system::FileSystem;
+use crate::ui::{
+    create_default_menus, ActivePanel, LayoutManager, LayoutMode, Menu, MenuState, ThemeManager,
+};
 use crate::utils::error::Result;
 use std::env;
-use std::path::PathBuf;
 
 /// 앱 상태
 pub struct App {
@@ -11,10 +14,12 @@ pub struct App {
     pub should_quit: bool,
     /// 레이아웃 매니저
     pub layout: LayoutManager,
-    /// 좌측 패널 경로
-    pub left_path: PathBuf,
-    /// 우측 패널 경로
-    pub right_path: PathBuf,
+    /// 좌측 패널 상태
+    pub left_panel: PanelState,
+    /// 우측 패널 상태
+    pub right_panel: PanelState,
+    /// 파일 시스템
+    pub filesystem: FileSystem,
     /// 메뉴 목록
     pub menus: Vec<Menu>,
     /// 메뉴 상태
@@ -25,13 +30,36 @@ pub struct App {
 
 impl App {
     pub fn new() -> Result<Self> {
-        let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        let current_dir = env::current_dir().unwrap_or_else(|_| {
+            #[cfg(unix)]
+            {
+                std::path::PathBuf::from("/")
+            }
+            #[cfg(windows)]
+            {
+                std::path::PathBuf::from("C:\\")
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                std::path::PathBuf::from(".")
+            }
+        });
+
+        let filesystem = FileSystem::new();
+
+        // 패널 상태 초기화 및 파일 목록 로드
+        let mut left_panel = PanelState::new(current_dir.clone());
+        left_panel.refresh(&filesystem)?;
+
+        let mut right_panel = PanelState::new(current_dir);
+        right_panel.refresh(&filesystem)?;
 
         Ok(Self {
             should_quit: false,
             layout: LayoutManager::new(),
-            left_path: current_dir.clone(),
-            right_path: current_dir,
+            left_panel,
+            right_panel,
+            filesystem,
             menus: create_default_menus(),
             menu_state: MenuState::new(),
             theme_manager: ThemeManager::new(),
@@ -59,10 +87,26 @@ impl App {
     }
 
     /// 현재 활성 패널의 경로 반환
-    pub fn active_path(&self) -> &PathBuf {
+    pub fn active_path(&self) -> &std::path::Path {
         match self.layout.active_panel() {
-            ActivePanel::Left => &self.left_path,
-            ActivePanel::Right => &self.right_path,
+            ActivePanel::Left => &self.left_panel.current_path,
+            ActivePanel::Right => &self.right_panel.current_path,
+        }
+    }
+
+    /// 활성 패널 상태 반환
+    pub fn active_panel_state(&self) -> &PanelState {
+        match self.layout.active_panel() {
+            ActivePanel::Left => &self.left_panel,
+            ActivePanel::Right => &self.right_panel,
+        }
+    }
+
+    /// 활성 패널 상태 반환 (mutable)
+    pub fn active_panel_state_mut(&mut self) -> &mut PanelState {
+        match self.layout.active_panel() {
+            ActivePanel::Left => &mut self.left_panel,
+            ActivePanel::Right => &mut self.right_panel,
         }
     }
 
@@ -177,16 +221,21 @@ impl App {
 
 impl Default for App {
     fn default() -> Self {
-        let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        // Default는 에러를 무시하고 기본값 사용
+        Self::new().unwrap_or_else(|_| {
+            let current_dir = std::path::PathBuf::from(".");
+            let filesystem = FileSystem::new();
 
-        Self {
-            should_quit: false,
-            layout: LayoutManager::new(),
-            left_path: current_dir.clone(),
-            right_path: current_dir,
-            menus: create_default_menus(),
-            menu_state: MenuState::new(),
-            theme_manager: ThemeManager::new(),
-        }
+            Self {
+                should_quit: false,
+                layout: LayoutManager::new(),
+                left_panel: PanelState::new(current_dir.clone()),
+                right_panel: PanelState::new(current_dir),
+                filesystem,
+                menus: create_default_menus(),
+                menu_state: MenuState::new(),
+                theme_manager: ThemeManager::new(),
+            }
+        })
     }
 }

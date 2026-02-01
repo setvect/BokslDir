@@ -173,7 +173,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     f.render_widget(menu_bar, areas.menu_bar);
 
     // 좌측 패널 렌더링
-    let left_path = app.left_path.to_string_lossy();
+    let left_path = app.left_panel.current_path.to_string_lossy();
     let left_panel = Panel::new()
         .title(&left_path)
         .status(if active_panel == ActivePanel::Left {
@@ -187,16 +187,15 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
     // 우측 패널 렌더링 (듀얼 패널 모드일 때만)
     if app.layout.is_dual_panel() {
-        let right_path = app.right_path.to_string_lossy();
-        let right_panel =
-            Panel::new()
-                .title(&right_path)
-                .status(if active_panel == ActivePanel::Right {
-                    PanelStatus::Active
-                } else {
-                    PanelStatus::Inactive
-                })
-                .theme(theme);
+        let right_path = app.right_panel.current_path.to_string_lossy();
+        let right_panel = Panel::new()
+            .title(&right_path)
+            .status(if active_panel == ActivePanel::Right {
+                PanelStatus::Active
+            } else {
+                PanelStatus::Inactive
+            })
+            .theme(theme);
         f.render_widget(right_panel, areas.right_panel);
     }
 

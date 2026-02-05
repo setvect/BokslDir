@@ -251,11 +251,75 @@ impl App {
         }
     }
 
+    /// 페이지 위로 이동
+    pub fn move_selection_page_up(&mut self) {
+        let page_size = self.get_page_size();
+        let panel = self.active_panel_state_mut();
+
+        panel.selected_index = panel.selected_index.saturating_sub(page_size);
+        self.adjust_scroll_offset();
+    }
+
+    /// 페이지 아래로 이동
+    pub fn move_selection_page_down(&mut self) {
+        let page_size = self.get_page_size();
+        let max_index = self.get_max_index();
+
+        let panel = self.active_panel_state_mut();
+        panel.selected_index = (panel.selected_index + page_size).min(max_index);
+        self.adjust_scroll_offset();
+    }
+
+    /// 최대 인덱스 계산
+    fn get_max_index(&self) -> usize {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+
+        if has_parent {
+            panel.entries.len()
+        } else {
+            panel.entries.len().saturating_sub(1)
+        }
+    }
+
+    /// 페이지 크기 계산 (화면에 표시되는 항목 수)
+    fn get_page_size(&self) -> usize {
+        let panel = self.active_panel_state();
+        let (_, terminal_height) = self.layout.terminal_size();
+        let panel_inner_height = terminal_height.saturating_sub(4);
+        let available_height = panel_inner_height
+            .saturating_sub(2)
+            .saturating_sub(2)
+            .saturating_sub(if panel.current_path.parent().is_some() {
+                1
+            } else {
+                0
+            });
+
+        (available_height as usize).max(1)
+    }
+
     /// 스크롤 오프셋을 현재 선택 위치에 맞게 조정
     fn adjust_scroll_offset(&mut self) {
         let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
         let selected = panel.selected_index;
         let scroll = panel.scroll_offset;
+
+        // ".."이 선택된 경우 스크롤을 0으로
+        if has_parent && selected == 0 {
+            let panel_mut = self.active_panel_state_mut();
+            panel_mut.scroll_offset = 0;
+            return;
+        }
+
+        // selected_index를 entries 인덱스로 변환
+        // (selected_index는 ".." 포함, scroll_offset은 entries 배열 인덱스)
+        let entries_selected = if has_parent {
+            selected.saturating_sub(1)
+        } else {
+            selected
+        };
 
         // 패널 렌더링 가능 높이 계산
         // terminal_height - menu_bar(1) - status_bar(1) - command_bar(1)
@@ -265,21 +329,17 @@ impl App {
         let available_height = panel_inner_height
             .saturating_sub(2) // 테두리
             .saturating_sub(2) // 헤더 + 구분선
-            .saturating_sub(if panel.current_path.parent().is_some() {
-                1
-            } else {
-                0
-            }); // ".." 항목
+            .saturating_sub(if has_parent { 1 } else { 0 }); // ".." 항목
 
         let panel_mut = self.active_panel_state_mut();
 
         // 선택이 화면 위쪽을 벗어나면 스크롤 위로
-        if selected < scroll {
-            panel_mut.scroll_offset = selected;
+        if entries_selected < scroll {
+            panel_mut.scroll_offset = entries_selected;
         }
         // 선택이 화면 아래쪽을 벗어나면 스크롤 아래로
-        else if selected >= scroll + available_height as usize {
-            panel_mut.scroll_offset = selected.saturating_sub(available_height as usize - 1);
+        else if entries_selected >= scroll + available_height as usize {
+            panel_mut.scroll_offset = entries_selected.saturating_sub(available_height as usize - 1);
         }
     }
 

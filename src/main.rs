@@ -102,6 +102,8 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         // 파일 탐색 (Phase 2.3)
         (_, KeyCode::Up) => app.move_selection_up(),
         (_, KeyCode::Down) => app.move_selection_down(),
+        (_, KeyCode::PageUp) => app.move_selection_page_up(),
+        (_, KeyCode::PageDown) => app.move_selection_page_down(),
         (_, KeyCode::Enter) => app.enter_selected(),
         // Esc는 아무것도 안 함 (메뉴가 닫혀있을 때)
         (_, KeyCode::Esc) => {}

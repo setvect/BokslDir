@@ -396,12 +396,16 @@ impl Widget for Panel<'_> {
                 Style::default().fg(Color::Rgb(150, 150, 150))
             };
 
-            let mut parent_spans = vec![Span::raw(" ")];
-            parent_spans.push(Span::styled("[..]", style));
-            parent_spans.push(Span::styled(
-                " <UP>",
-                Style::default().fg(Color::Rgb(100, 100, 100)),
-            ));
+            // 전체 행 하이라이트를 위해 너비만큼 패딩
+            let parent_text = "[..]";
+            let padding_width = (inner.width as usize).saturating_sub(parent_text.len() + 1);
+            let padding = " ".repeat(padding_width);
+
+            let parent_spans = vec![
+                Span::styled(" ", style),
+                Span::styled(parent_text, style),
+                Span::styled(padding, style),
+            ];
 
             let parent_line = Line::from(parent_spans);
             buf.set_line(inner.x, inner.y + y, &parent_line, inner.width);

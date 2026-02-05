@@ -101,6 +101,34 @@ impl PanelState {
         self.refresh(filesystem)
     }
 
+    /// 경로 변경 후 특정 항목에 포커스
+    pub fn change_directory_and_focus(
+        &mut self,
+        path: PathBuf,
+        focus_name: Option<&str>,
+        filesystem: &FileSystem,
+    ) -> Result<()> {
+        self.current_path = path;
+        self.scroll_offset = 0;
+        self.refresh(filesystem)?;
+
+        // 포커스할 항목 찾기
+        if let Some(name) = focus_name {
+            let has_parent = self.current_path.parent().is_some();
+            let offset = if has_parent { 1 } else { 0 }; // ".." 항목 고려
+
+            if let Some(idx) = self.entries.iter().position(|e| e.name == name) {
+                self.selected_index = idx + offset;
+            } else {
+                self.selected_index = 0;
+            }
+        } else {
+            self.selected_index = 0;
+        }
+
+        Ok(())
+    }
+
     /// 선택된 항목 반환
     pub fn selected_entry(&self) -> Option<&FileEntry> {
         self.entries.get(self.selected_index)

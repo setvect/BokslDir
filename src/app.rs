@@ -217,6 +217,142 @@ impl App {
             _ => {}
         }
     }
+
+    // === 파일 탐색 관련 메서드 (Phase 2.3) ===
+
+    /// 선택을 위로 이동
+    pub fn move_selection_up(&mut self) {
+        let panel = self.active_panel_state_mut();
+
+        if panel.selected_index > 0 {
+            panel.selected_index -= 1;
+            self.adjust_scroll_offset();
+        }
+    }
+
+    /// 선택을 아래로 이동
+    pub fn move_selection_down(&mut self) {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+
+        // 최대 인덱스 계산
+        // ".."이 있을 때: 0 (부모) + entries.len() (파일들) = entries.len()
+        // ".."이 없을 때: entries.len() - 1
+        let max_index = if has_parent {
+            panel.entries.len()
+        } else {
+            panel.entries.len().saturating_sub(1)
+        };
+
+        let panel_mut = self.active_panel_state_mut();
+        if panel_mut.selected_index < max_index {
+            panel_mut.selected_index += 1;
+            self.adjust_scroll_offset();
+        }
+    }
+
+    /// 스크롤 오프셋을 현재 선택 위치에 맞게 조정
+    fn adjust_scroll_offset(&mut self) {
+        let panel = self.active_panel_state();
+        let selected = panel.selected_index;
+        let scroll = panel.scroll_offset;
+
+        // 패널 렌더링 가능 높이 계산
+        // terminal_height - menu_bar(1) - status_bar(1) - command_bar(1)
+        // - panel_borders(2) - header(1) - separator(1) - parent(1 if shown)
+        let (_, terminal_height) = self.layout.terminal_size();
+        let panel_inner_height = terminal_height.saturating_sub(4); // 메뉴/상태/커맨드바 제외
+        let available_height = panel_inner_height
+            .saturating_sub(2) // 테두리
+            .saturating_sub(2) // 헤더 + 구분선
+            .saturating_sub(if panel.current_path.parent().is_some() {
+                1
+            } else {
+                0
+            }); // ".." 항목
+
+        let panel_mut = self.active_panel_state_mut();
+
+        // 선택이 화면 위쪽을 벗어나면 스크롤 위로
+        if selected < scroll {
+            panel_mut.scroll_offset = selected;
+        }
+        // 선택이 화면 아래쪽을 벗어나면 스크롤 아래로
+        else if selected >= scroll + available_height as usize {
+            panel_mut.scroll_offset = selected.saturating_sub(available_height as usize - 1);
+        }
+    }
+
+    /// Enter 키 처리: 디렉토리 진입 또는 상위 디렉토리 이동
+    pub fn enter_selected(&mut self) {
+        let panel = self.active_panel_state();
+        let current_path = panel.current_path.clone();
+        let selected_index = panel.selected_index;
+        let has_parent = current_path.parent().is_some();
+
+        // Case 1: ".." 선택 시 상위 디렉토리로 이동
+        if selected_index == 0 && has_parent {
+            if let Some(parent) = current_path.parent() {
+                let parent_path = parent.to_path_buf();
+                // 현재 디렉토리 이름을 기억 (상위 이동 후 포커스용)
+                let current_dir_name = current_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string());
+
+                // filesystem과 panel을 동시에 참조하기 위해 match 사용
+                match self.active_panel() {
+                    ActivePanel::Left => {
+                        let _ = self.left_panel.change_directory_and_focus(
+                            parent_path,
+                            current_dir_name.as_deref(),
+                            &self.filesystem,
+                        );
+                    }
+                    ActivePanel::Right => {
+                        let _ = self.right_panel.change_directory_and_focus(
+                            parent_path,
+                            current_dir_name.as_deref(),
+                            &self.filesystem,
+                        );
+                    }
+                }
+                // 에러 발생 시 무시 (Phase 3에서 에러 다이얼로그 구현 예정)
+            }
+            return;
+        }
+
+        // Case 2: 일반 항목 선택 시
+        let entry_info = {
+            let panel = self.active_panel_state();
+            // show_parent가 true면 entries는 index 1부터 시작
+            let entry_index = if has_parent {
+                selected_index.saturating_sub(1)
+            } else {
+                selected_index
+            };
+            panel
+                .entries
+                .get(entry_index)
+                .map(|e| (e.is_directory(), e.path.clone()))
+        };
+
+        if let Some((is_dir, path)) = entry_info {
+            if is_dir {
+                // 디렉토리면 진입
+                match self.active_panel() {
+                    ActivePanel::Left => {
+                        let _ = self.left_panel.change_directory(path, &self.filesystem);
+                    }
+                    ActivePanel::Right => {
+                        let _ = self.right_panel.change_directory(path, &self.filesystem);
+                    }
+                }
+                // 에러 발생 시 무시
+            }
+            // 파일이면 아무것도 안 함 (Phase 6에서 파일 뷰어 구현 예정)
+        }
+    }
 }
 
 impl Default for App {

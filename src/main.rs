@@ -99,6 +99,10 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         (_, KeyCode::Tab) => app.toggle_panel(),
         // 메뉴 활성화: F9
         (_, KeyCode::F(9)) => app.open_menu(),
+        // 파일 탐색 (Phase 2.3)
+        (_, KeyCode::Up) => app.move_selection_up(),
+        (_, KeyCode::Down) => app.move_selection_down(),
+        (_, KeyCode::Enter) => app.enter_selected(),
         // Esc는 아무것도 안 함 (메뉴가 닫혀있을 때)
         (_, KeyCode::Esc) => {}
         _ => {}

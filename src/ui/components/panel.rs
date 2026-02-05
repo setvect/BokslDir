@@ -200,6 +200,82 @@ impl<'a> Panel<'a> {
             FileType::File => self.file_normal_color,
         }
     }
+
+    /// 경로를 최대 너비에 맞게 축약 (홈 디렉토리 ~로 축약 + 중간 생략)
+    fn truncate_path(&self, path: &str, max_width: usize) -> String {
+        // 1. 홈 디렉토리를 ~로 축약
+        let home_dir = std::env::var("HOME").unwrap_or_default();
+        let path = if !home_dir.is_empty() && path.starts_with(&home_dir) {
+            format!("~{}", &path[home_dir.len()..])
+        } else {
+            path.to_string()
+        };
+
+        let display_width = path.width();
+        if display_width <= max_width {
+            return path;
+        }
+
+        // 2. 중간 생략: 첫 번째 디렉토리 + ... + 마지막 디렉토리들
+        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() <= 2 {
+            // 경로가 짧으면 뒤에서부터 자르기
+            return self.truncate_from_start(&path, max_width);
+        }
+
+        let ellipsis = "/...";
+
+        // 첫 번째 부분 (~ 또는 루트)
+        let first = if path.starts_with('~') {
+            "~".to_string()
+        } else {
+            format!("/{}", parts[0])
+        };
+
+        // 뒤에서부터 가능한 만큼 추가
+        let first_width = first.width() + ellipsis.width();
+        let available_width = max_width.saturating_sub(first_width);
+
+        let mut end_parts: Vec<&str> = Vec::new();
+        let mut current_width = 0;
+
+        for part in parts.iter().rev() {
+            let part_width = part.width() + 1; // +1 for "/"
+            if current_width + part_width > available_width {
+                break;
+            }
+            end_parts.insert(0, part);
+            current_width += part_width;
+        }
+
+        if end_parts.is_empty() {
+            // 마지막 디렉토리도 안 들어가면 그냥 뒤에서 자르기
+            return self.truncate_from_start(&path, max_width);
+        }
+
+        format!("{}{}/{}", first, ellipsis, end_parts.join("/"))
+    }
+
+    /// 경로를 앞에서부터 자르기 (fallback)
+    fn truncate_from_start(&self, path: &str, max_width: usize) -> String {
+        let ellipsis = "...";
+        let ellipsis_width = ellipsis.width();
+        let available_width = max_width.saturating_sub(ellipsis_width);
+
+        let mut result = String::new();
+        let mut current_width = 0;
+
+        for ch in path.chars().rev() {
+            let ch_width = ch.width().unwrap_or(1);
+            if current_width + ch_width > available_width {
+                break;
+            }
+            result.insert(0, ch);
+            current_width += ch_width;
+        }
+
+        format!("{}{}", ellipsis, result)
+    }
 }
 
 impl Widget for Panel<'_> {
@@ -209,12 +285,16 @@ impl Widget for Panel<'_> {
             return;
         }
 
+        // 제목(경로) 최대 너비 계산 (테두리 2 + 양쪽 공백 2 = 4)
+        let title_max_width = (area.width as usize).saturating_sub(4);
+        let display_title = self.truncate_path(self.title, title_max_width);
+
         // 블록 생성 및 렌더링
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(self.border_color()))
             .title(Span::styled(
-                format!(" {} ", self.title),
+                format!(" {} ", display_title),
                 self.title_style(),
             ))
             .style(Style::default().bg(self.bg_color));
@@ -337,7 +417,13 @@ impl Widget for Panel<'_> {
 
         for (i, entry) in self.entries[start..end].iter().enumerate() {
             let entry_index = start + i;
-            let is_selected = entry_index == self.selected_index;
+            // show_parent가 true면 ".."이 index 0을 차지하므로
+            // entries는 index 1부터 시작
+            let is_selected = if self.show_parent {
+                entry_index + 1 == self.selected_index
+            } else {
+                entry_index == self.selected_index
+            };
 
             // 색상 및 배경 결정
             let (fg, bg) = if is_selected {
@@ -353,7 +439,7 @@ impl Widget for Panel<'_> {
             };
 
             // 파일 라인 구성
-            let mut line_spans = vec![Span::raw(" ")];
+            let mut line_spans = vec![Span::styled(" ", style)];
 
             // 아이콘 + 파일명
             let icon = self.file_icon(&entry.file_type);
@@ -367,7 +453,7 @@ impl Widget for Panel<'_> {
 
             // 크기
             if show_size {
-                line_spans.push(Span::raw(" "));
+                line_spans.push(Span::styled(" ", style));
                 let size_str = if entry.is_directory() {
                     "-".to_string()
                 } else {
@@ -377,7 +463,7 @@ impl Widget for Panel<'_> {
             }
 
             // 날짜
-            line_spans.push(Span::raw(" "));
+            line_spans.push(Span::styled(" ", style));
             let date_str = if date_format == "long" {
                 format_date(entry.modified)
             } else {
@@ -397,7 +483,7 @@ impl Widget for Panel<'_> {
 
             // 권한
             if show_permissions {
-                line_spans.push(Span::raw(" "));
+                line_spans.push(Span::styled(" ", style));
                 let perm_str = format_permissions(entry.permissions.as_ref());
                 line_spans.push(Span::styled(format!("{:<11}", perm_str), style));
             }

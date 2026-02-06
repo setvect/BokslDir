@@ -10,8 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
-**현재 상태**: Phase 2 완료 (파일 시스템 통합)
-**다음 단계**: Phase 3 - 파일 작업 (복사/이동/삭제)
+**현재 상태**: Phase 3.1 완료 (파일 선택 시스템)
+**다음 단계**: Phase 3.2 - 파일 복사/이동
 
 ## 개발 명령어
 
@@ -72,7 +72,7 @@ src/
 ### 핵심 구조체
 
 - **App** (`app.rs`): 전체 앱 상태 관리, 패널/메뉴/테마 상태 보유
-- **PanelState** (`models/panel_state.rs`): 패널별 경로, 파일 목록, 선택 인덱스, 스크롤 오프셋
+- **PanelState** (`models/panel_state.rs`): 패널별 경로, 파일 목록, 커서 인덱스, 스크롤 오프셋, 다중 선택(selected_items)
 - **FileEntry** (`models/file_entry.rs`): 파일 메타데이터 (이름, 크기, 날짜, 권한, 타입)
 - **Panel** (`ui/components/panel.rs`): 파일 리스트 렌더링 위젯
 
@@ -92,11 +92,21 @@ src/
 - 상위 이동 시 이전 디렉토리 포커스 유지
 - 경로 표시 축약 (홈 디렉토리 ~, 중간 생략)
 
+### Phase 3.1: 파일 선택 시스템
+- 다중 선택: Space (토글 + 커서 아래로)
+- 전체 선택: `*` 또는 Ctrl+A
+- 선택 반전: `+`
+- 전체 해제: Ctrl+D
+- 선택 하이라이트: 골드색 + `*` 마커
+- 상태바: 선택 개수/크기 표시
+- ".." 항목 선택 불가, 디렉토리 변경 시 선택 초기화
+
 ## 중요한 설계 결정사항
 
 ### 인덱스 체계
 - `selected_index`: ".." 항목 포함 UI 인덱스 (0 = "..", 1 = entries[0])
 - `scroll_offset`: entries 배열 인덱스 (0 = entries[0])
+- `selected_items`: entries 배열 인덱스 기반 HashSet (".." 제외)
 - 변환 시 `has_parent` 여부 확인 필수
 
 ### 반응형 UI 규칙 (src/ui/layout.rs)

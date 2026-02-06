@@ -22,6 +22,8 @@ pub struct StatusBar<'a> {
     total_size: &'a str,
     /// 선택된 항목 수
     selected_count: usize,
+    /// 선택된 항목 총 크기 (포맷된 문자열)
+    selected_size: &'a str,
     /// 레이아웃 모드 표시 (싱글/듀얼)
     layout_mode: &'a str,
     /// 배경색
@@ -37,6 +39,7 @@ impl<'a> Default for StatusBar<'a> {
             dir_count: 0,
             total_size: "0B",
             selected_count: 0,
+            selected_size: "0B",
             layout_mode: "DUAL",
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
@@ -70,6 +73,12 @@ impl<'a> StatusBar<'a> {
     /// 선택된 항목 수 설정
     pub fn selected_count(mut self, count: usize) -> Self {
         self.selected_count = count;
+        self
+    }
+
+    /// 선택된 항목 총 크기 설정
+    pub fn selected_size(mut self, size: &'a str) -> Self {
+        self.selected_size = size;
         self
     }
 
@@ -112,7 +121,10 @@ impl Widget for StatusBar<'_> {
 
         // 선택 정보 (있을 경우)
         let selected_info = if self.selected_count > 0 {
-            format!(" | {} selected", self.selected_count)
+            format!(
+                " | {} selected ({})",
+                self.selected_count, self.selected_size
+            )
         } else {
             String::new()
         };

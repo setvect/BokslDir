@@ -13,6 +13,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Widget},
 };
+use std::collections::HashSet;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// 패널 상태
@@ -31,12 +32,14 @@ pub struct Panel<'a> {
     status: PanelStatus,
     /// 파일 목록
     entries: &'a [FileEntry],
-    /// 선택된 항목 인덱스
+    /// 커서 위치 (selected_index, ".." 포함)
     selected_index: usize,
     /// 스크롤 오프셋
     scroll_offset: usize,
     /// ".." (상위 디렉토리) 표시 여부
     show_parent: bool,
+    /// 다중 선택된 항목 (entries 인덱스 기반)
+    selected_items: &'a HashSet<usize>,
     /// 활성 테두리 색상
     active_border_color: Color,
     /// 비활성 테두리 색상
@@ -45,10 +48,14 @@ pub struct Panel<'a> {
     bg_color: Color,
     /// 파일 일반 색상
     file_normal_color: Color,
-    /// 파일 선택 색상
+    /// 파일 선택(커서) 색상
     file_selected_color: Color,
-    /// 파일 선택 배경색
+    /// 파일 선택(커서) 배경색
     file_selected_bg_color: Color,
+    /// 다중 선택(마킹) 색상
+    file_marked_color: Color,
+    /// 다중 선택 마커 색상
+    file_marked_symbol_color: Color,
     /// 디렉토리 색상
     directory_color: Color,
     /// 실행 파일 색상
@@ -56,6 +63,10 @@ pub struct Panel<'a> {
     /// 심볼릭 링크 색상
     symlink_color: Color,
 }
+
+/// 빈 HashSet을 위한 정적 참조
+static EMPTY_SELECTION: std::sync::LazyLock<HashSet<usize>> =
+    std::sync::LazyLock::new(HashSet::new);
 
 impl<'a> Default for Panel<'a> {
     fn default() -> Self {
@@ -66,12 +77,15 @@ impl<'a> Default for Panel<'a> {
             selected_index: 0,
             scroll_offset: 0,
             show_parent: false,
+            selected_items: &EMPTY_SELECTION,
             active_border_color: Color::Rgb(0, 120, 212),
             inactive_border_color: Color::Rgb(60, 60, 60),
             bg_color: Color::Rgb(30, 30, 30),
             file_normal_color: Color::Rgb(212, 212, 212),
             file_selected_color: Color::Rgb(255, 255, 255),
             file_selected_bg_color: Color::Rgb(0, 120, 212),
+            file_marked_color: Color::Rgb(255, 215, 0), // 골드색
+            file_marked_symbol_color: Color::Rgb(255, 215, 0), // 골드색
             directory_color: Color::Rgb(86, 156, 214),
             executable_color: Color::Rgb(78, 201, 176),
             symlink_color: Color::Rgb(206, 145, 120),
@@ -132,6 +146,12 @@ impl<'a> Panel<'a> {
         self
     }
 
+    /// 다중 선택 항목 설정
+    pub fn selected_items(mut self, items: &'a HashSet<usize>) -> Self {
+        self.selected_items = items;
+        self
+    }
+
     /// 활성 테두리 색상 설정
     pub fn active_border_color(mut self, color: Color) -> Self {
         self.active_border_color = color;
@@ -158,6 +178,8 @@ impl<'a> Panel<'a> {
         self.file_normal_color = theme.file_normal.to_color();
         self.file_selected_color = theme.file_selected.to_color();
         self.file_selected_bg_color = theme.file_selected_bg.to_color();
+        self.file_marked_color = theme.file_marked.to_color();
+        self.file_marked_symbol_color = theme.file_marked_symbol.to_color();
         self.directory_color = theme.directory.to_color();
         self.executable_color = theme.executable.to_color();
         self.symlink_color = theme.symlink.to_color();
@@ -423,17 +445,33 @@ impl Widget for Panel<'_> {
             let entry_index = start + i;
             // show_parent가 true면 ".."이 index 0을 차지하므로
             // entries는 index 1부터 시작
-            let is_selected = if self.show_parent {
+            let is_cursor = if self.show_parent {
                 entry_index + 1 == self.selected_index
             } else {
                 entry_index == self.selected_index
             };
 
-            // 색상 및 배경 결정
-            let (fg, bg) = if is_selected {
-                (self.file_selected_color, Some(self.file_selected_bg_color))
-            } else {
-                (self.file_color(&entry.file_type), None)
+            // 다중 선택 여부 (entries 인덱스 기반)
+            let is_marked = self.selected_items.contains(&entry_index);
+
+            // 스타일 결정: 4가지 조합
+            // - 커서+마킹: 배경 하이라이트 + 골드색 전경
+            // - 커서만: 배경 하이라이트 + 선택 전경색
+            // - 마킹만: 골드색 전경, 배경 없음
+            // - 없음: 파일 타입 색상
+            let (fg, bg, marker) = match (is_cursor, is_marked) {
+                (true, true) => (
+                    self.file_marked_color,
+                    Some(self.file_selected_bg_color),
+                    "*",
+                ),
+                (true, false) => (
+                    self.file_selected_color,
+                    Some(self.file_selected_bg_color),
+                    " ",
+                ),
+                (false, true) => (self.file_marked_color, None, "*"),
+                (false, false) => (self.file_color(&entry.file_type), None, " "),
             };
 
             let style = if let Some(bg_color) = bg {
@@ -442,15 +480,26 @@ impl Widget for Panel<'_> {
                 Style::default().fg(fg)
             };
 
-            // 파일 라인 구성
-            let mut line_spans = vec![Span::styled(" ", style)];
+            // 마커 스타일 (항상 골드색)
+            let marker_style = if is_marked {
+                Style::default()
+                    .fg(self.file_marked_symbol_color)
+                    .bg(bg.unwrap_or(self.bg_color))
+            } else if let Some(bg_color) = bg {
+                Style::default().bg(bg_color)
+            } else {
+                Style::default()
+            };
+
+            // 파일 라인 구성 - 마커가 맨 앞에
+            let mut line_spans = vec![Span::styled(marker, marker_style)];
 
             // 아이콘 + 파일명
             let icon = self.file_icon(&entry.file_type);
-            let display_name = self.truncate_name(&entry.name, name_width.saturating_sub(3)); // 아이콘 너비 고려
+            let display_name = self.truncate_name(&entry.name, name_width.saturating_sub(4)); // 아이콘 너비 + 마커 고려
             let name_str = format!("{} {}", icon, display_name);
             let name_display_width = name_str.width();
-            let name_padding = name_width.saturating_sub(name_display_width);
+            let name_padding = name_width.saturating_sub(name_display_width + 1); // +1 for marker
 
             line_spans.push(Span::styled(name_str, style));
             line_spans.push(Span::styled(" ".repeat(name_padding), style));

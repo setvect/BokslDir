@@ -213,6 +213,11 @@ impl App {
                 let _ = self.theme_manager.switch_theme("high_contrast");
             }
 
+            // 선택 관련 (Phase 3.1)
+            "select_all" => self.select_all(),
+            "invert_selection" => self.invert_selection(),
+            "deselect" => self.deselect_all(),
+
             // TODO: 다른 액션들 추가
             _ => {}
         }
@@ -339,7 +344,8 @@ impl App {
         }
         // 선택이 화면 아래쪽을 벗어나면 스크롤 아래로
         else if entries_selected >= scroll + available_height as usize {
-            panel_mut.scroll_offset = entries_selected.saturating_sub(available_height as usize - 1);
+            panel_mut.scroll_offset =
+                entries_selected.saturating_sub(available_height as usize - 1);
         }
     }
 
@@ -412,6 +418,56 @@ impl App {
             }
             // 파일이면 아무것도 안 함 (Phase 6에서 파일 뷰어 구현 예정)
         }
+    }
+
+    // === 다중 선택 관련 메서드 (Phase 3.1) ===
+
+    /// 현재 항목 선택 토글 + 커서 아래로 이동
+    ///
+    /// Space 키 동작: ".." 항목은 선택 불가
+    pub fn toggle_selection_and_move_down(&mut self) {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+        let selected_index = panel.selected_index;
+
+        // ".." 항목(index 0)이면 선택하지 않음
+        if has_parent && selected_index == 0 {
+            // 그래도 커서는 아래로 이동
+            self.move_selection_down();
+            return;
+        }
+
+        // selected_index를 entries 인덱스로 변환
+        let entry_index = if has_parent {
+            selected_index.saturating_sub(1)
+        } else {
+            selected_index
+        };
+
+        // 선택 토글
+        let panel_mut = self.active_panel_state_mut();
+        panel_mut.toggle_selection(entry_index);
+
+        // 커서 아래로 이동
+        self.move_selection_down();
+    }
+
+    /// 전체 선택 (Ctrl+A)
+    pub fn select_all(&mut self) {
+        let panel_mut = self.active_panel_state_mut();
+        panel_mut.select_all();
+    }
+
+    /// 선택 반전 (*)
+    pub fn invert_selection(&mut self) {
+        let panel_mut = self.active_panel_state_mut();
+        panel_mut.invert_selection();
+    }
+
+    /// 전체 해제 (Ctrl+D)
+    pub fn deselect_all(&mut self) {
+        let panel_mut = self.active_panel_state_mut();
+        panel_mut.deselect_all();
     }
 }
 

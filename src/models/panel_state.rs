@@ -3,6 +3,7 @@
 use crate::models::file_entry::FileEntry;
 use crate::system::filesystem::FileSystem;
 use crate::utils::error::Result;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// 정렬 기준
@@ -34,10 +35,12 @@ pub struct PanelState {
     pub current_path: PathBuf,
     /// 파일 목록
     pub entries: Vec<FileEntry>,
-    /// 선택된 항목 인덱스
+    /// 선택된 항목 인덱스 (커서 위치, ".." 포함)
     pub selected_index: usize,
-    /// 스크롤 오프셋
+    /// 스크롤 오프셋 (entries 배열 인덱스)
     pub scroll_offset: usize,
+    /// 다중 선택된 항목 (entries 배열 인덱스 기반, ".." 제외)
+    pub selected_items: HashSet<usize>,
     /// 정렬 기준
     pub sort_by: SortBy,
     /// 정렬 순서
@@ -56,6 +59,7 @@ impl PanelState {
             entries: Vec::new(),
             selected_index: 0,
             scroll_offset: 0,
+            selected_items: HashSet::new(),
             sort_by: SortBy::Name,
             sort_order: SortOrder::Ascending,
             show_hidden: false,
@@ -85,6 +89,9 @@ impl PanelState {
 
         self.entries = entries;
 
+        // 디렉토리가 변경되면 선택 상태 초기화
+        self.selected_items.clear();
+
         // 선택 인덱스가 범위를 벗어나면 조정
         if self.selected_index >= self.entries.len() && !self.entries.is_empty() {
             self.selected_index = self.entries.len() - 1;
@@ -98,6 +105,7 @@ impl PanelState {
         self.current_path = path;
         self.selected_index = 0;
         self.scroll_offset = 0;
+        self.selected_items.clear();
         self.refresh(filesystem)
     }
 
@@ -110,6 +118,7 @@ impl PanelState {
     ) -> Result<()> {
         self.current_path = path;
         self.scroll_offset = 0;
+        self.selected_items.clear();
         self.refresh(filesystem)?;
 
         // 포커스할 항목 찾기
@@ -148,11 +157,91 @@ impl PanelState {
     pub fn total_size(&self) -> u64 {
         self.entries.iter().map(|e| e.size).sum()
     }
+
+    // === 다중 선택 관련 메서드 (Phase 3.1) ===
+
+    /// 항목 선택 토글
+    ///
+    /// entry_index는 entries 배열의 인덱스 (0부터 시작, ".." 제외)
+    pub fn toggle_selection(&mut self, entry_index: usize) {
+        if entry_index >= self.entries.len() {
+            return;
+        }
+
+        if self.selected_items.contains(&entry_index) {
+            self.selected_items.remove(&entry_index);
+        } else {
+            self.selected_items.insert(entry_index);
+        }
+    }
+
+    /// 전체 선택
+    pub fn select_all(&mut self) {
+        self.selected_items.clear();
+        for i in 0..self.entries.len() {
+            self.selected_items.insert(i);
+        }
+    }
+
+    /// 선택 반전
+    pub fn invert_selection(&mut self) {
+        let mut new_selection = HashSet::new();
+        for i in 0..self.entries.len() {
+            if !self.selected_items.contains(&i) {
+                new_selection.insert(i);
+            }
+        }
+        self.selected_items = new_selection;
+    }
+
+    /// 전체 해제
+    pub fn deselect_all(&mut self) {
+        self.selected_items.clear();
+    }
+
+    /// 선택 여부 확인
+    ///
+    /// entry_index는 entries 배열의 인덱스
+    pub fn is_selected(&self, entry_index: usize) -> bool {
+        self.selected_items.contains(&entry_index)
+    }
+
+    /// 선택된 항목 개수
+    pub fn selected_count(&self) -> usize {
+        self.selected_items.len()
+    }
+
+    /// 선택된 항목들의 FileEntry 목록 반환
+    pub fn selected_entries(&self) -> Vec<&FileEntry> {
+        self.selected_items
+            .iter()
+            .filter_map(|&idx| self.entries.get(idx))
+            .collect()
+    }
+
+    /// 선택된 항목들의 총 크기 (바이트)
+    pub fn selected_size(&self) -> u64 {
+        self.selected_items
+            .iter()
+            .filter_map(|&idx| self.entries.get(idx))
+            .map(|e| e.size)
+            .sum()
+    }
 }
 
 impl Default for PanelState {
     fn default() -> Self {
-        Self::new(PathBuf::from("."))
+        Self {
+            current_path: PathBuf::from("."),
+            entries: Vec::new(),
+            selected_index: 0,
+            scroll_offset: 0,
+            selected_items: HashSet::new(),
+            sort_by: SortBy::Name,
+            sort_order: SortOrder::Ascending,
+            show_hidden: false,
+            filter: None,
+        }
     }
 }
 
@@ -170,6 +259,7 @@ mod tests {
         assert_eq!(state.sort_by, SortBy::Name);
         assert_eq!(state.sort_order, SortOrder::Ascending);
         assert!(!state.show_hidden);
+        assert!(state.selected_items.is_empty());
     }
 
     #[test]
@@ -202,5 +292,93 @@ mod tests {
 
         // 숨김 파일 표시할 때 더 많은 파일이 있어야 함 (보통의 경우)
         assert!(total_count >= visible_count);
+    }
+
+    fn create_test_entry(name: &str) -> FileEntry {
+        use crate::models::file_entry::FileType;
+        use std::time::SystemTime;
+
+        FileEntry::new(
+            name.to_string(),
+            PathBuf::from(format!("/tmp/{}", name)),
+            FileType::File,
+            100,
+            SystemTime::now(),
+            None,
+            false,
+        )
+    }
+
+    #[test]
+    fn test_toggle_selection() {
+        let mut state = PanelState::default();
+        state.entries = vec![
+            create_test_entry("file1.txt"),
+            create_test_entry("file2.txt"),
+            create_test_entry("file3.txt"),
+        ];
+
+        // 선택
+        state.toggle_selection(0);
+        assert!(state.is_selected(0));
+        assert!(!state.is_selected(1));
+        assert_eq!(state.selected_count(), 1);
+
+        // 해제
+        state.toggle_selection(0);
+        assert!(!state.is_selected(0));
+        assert_eq!(state.selected_count(), 0);
+    }
+
+    #[test]
+    fn test_select_all() {
+        let mut state = PanelState::default();
+        state.entries = vec![
+            create_test_entry("file1.txt"),
+            create_test_entry("file2.txt"),
+            create_test_entry("file3.txt"),
+        ];
+
+        state.select_all();
+        assert_eq!(state.selected_count(), 3);
+        assert!(state.is_selected(0));
+        assert!(state.is_selected(1));
+        assert!(state.is_selected(2));
+    }
+
+    #[test]
+    fn test_invert_selection() {
+        let mut state = PanelState::default();
+        state.entries = vec![
+            create_test_entry("file1.txt"),
+            create_test_entry("file2.txt"),
+            create_test_entry("file3.txt"),
+        ];
+
+        // 첫 번째 항목만 선택
+        state.toggle_selection(0);
+        assert_eq!(state.selected_count(), 1);
+
+        // 반전
+        state.invert_selection();
+        assert_eq!(state.selected_count(), 2);
+        assert!(!state.is_selected(0));
+        assert!(state.is_selected(1));
+        assert!(state.is_selected(2));
+    }
+
+    #[test]
+    fn test_deselect_all() {
+        let mut state = PanelState::default();
+        state.entries = vec![
+            create_test_entry("file1.txt"),
+            create_test_entry("file2.txt"),
+        ];
+
+        state.select_all();
+        assert_eq!(state.selected_count(), 2);
+
+        state.deselect_all();
+        assert_eq!(state.selected_count(), 0);
     }
 }

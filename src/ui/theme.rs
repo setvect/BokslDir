@@ -25,6 +25,8 @@ pub struct Theme {
     pub file_normal: ColorDef,
     pub file_selected: ColorDef,
     pub file_selected_bg: ColorDef,
+    pub file_marked: ColorDef,        // 다중 선택된 파일 전경색
+    pub file_marked_symbol: ColorDef, // 마커(*) 색상
     pub directory: ColorDef,
     pub executable: ColorDef,
     pub symlink: ColorDef,
@@ -129,6 +131,8 @@ impl Theme {
             file_normal: "#d4d4d4".into(),
             file_selected: "#ffffff".into(),
             file_selected_bg: "#0078d4".into(),
+            file_marked: "#ffd700".into(),        // 골드색
+            file_marked_symbol: "#ffd700".into(), // 골드색
             directory: "#569cd6".into(),
             executable: "#4ec9b0".into(),
             symlink: "#ce9178".into(),
@@ -165,6 +169,8 @@ impl Theme {
             file_normal: "#1e1e1e".into(),
             file_selected: "#000000".into(),
             file_selected_bg: "#add6ff".into(),
+            file_marked: "#cc8800".into(), // 어두운 골드 (라이트 테마)
+            file_marked_symbol: "#cc8800".into(),
             directory: "#0066cc".into(),
             executable: "#008080".into(),
             symlink: "#a65e2b".into(),
@@ -201,6 +207,8 @@ impl Theme {
             file_normal: "#ffffff".into(),
             file_selected: "#000000".into(),
             file_selected_bg: "#00ff00".into(),
+            file_marked: "#ffff00".into(), // 밝은 노랑 (하이 콘트라스트)
+            file_marked_symbol: "#ffff00".into(),
             directory: "#00ffff".into(),
             executable: "#00ff00".into(),
             symlink: "#ffff00".into(),

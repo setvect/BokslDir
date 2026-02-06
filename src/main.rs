@@ -105,6 +105,12 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         (_, KeyCode::PageUp) => app.move_selection_page_up(),
         (_, KeyCode::PageDown) => app.move_selection_page_down(),
         (_, KeyCode::Enter) => app.enter_selected(),
+        // 다중 선택 (Phase 3.1)
+        (KeyModifiers::NONE, KeyCode::Char(' ')) => app.toggle_selection_and_move_down(),
+        (KeyModifiers::NONE, KeyCode::Char('*')) => app.select_all(), // PRD: * 또는 Ctrl+A
+        (KeyModifiers::CONTROL, KeyCode::Char('a')) => app.select_all(),
+        (KeyModifiers::NONE, KeyCode::Char('+')) => app.invert_selection(), // 선택 반전
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => app.deselect_all(),
         // Esc는 아무것도 안 함 (메뉴가 닫혀있을 때)
         (_, KeyCode::Esc) => {}
         _ => {}
@@ -192,6 +198,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .selected_index(app.left_panel.selected_index)
         .scroll_offset(app.left_panel.scroll_offset)
         .show_parent(show_parent_left)
+        .selected_items(&app.left_panel.selected_items)
         .theme(theme);
     f.render_widget(left_panel, areas.left_panel);
 
@@ -210,6 +217,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
             .selected_index(app.right_panel.selected_index)
             .scroll_offset(app.right_panel.scroll_offset)
             .show_parent(show_parent_right)
+            .selected_items(&app.right_panel.selected_items)
             .theme(theme);
         f.render_widget(right_panel, areas.right_panel);
     }
@@ -219,11 +227,15 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     let file_count = active_panel_state.file_count();
     let dir_count = active_panel_state.dir_count();
     let total_size = format_file_size(active_panel_state.total_size());
+    let selected_count = active_panel_state.selected_count();
+    let selected_size = format_file_size(active_panel_state.selected_size());
 
     let status_bar = StatusBar::new()
         .file_count(file_count)
         .dir_count(dir_count)
         .total_size(&total_size)
+        .selected_count(selected_count)
+        .selected_size(&selected_size)
         .layout_mode(app.layout_mode_str())
         .theme(theme);
     f.render_widget(status_bar, areas.status_bar);

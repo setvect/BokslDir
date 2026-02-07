@@ -679,7 +679,10 @@ impl App {
         pending.dest_dir = dest_path.clone();
 
         // 소스를 평탄화하여 개별 파일 목록 생성
-        let flattened = match self.filesystem.flatten_sources(&pending.sources, &dest_path) {
+        let flattened = match self
+            .filesystem
+            .flatten_sources(&pending.sources, &dest_path)
+        {
             Ok(files) => files
                 .into_iter()
                 .map(|(source, dest, size)| FlattenedFile { source, dest, size })

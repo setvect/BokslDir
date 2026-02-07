@@ -242,8 +242,8 @@ impl FileSystem {
         let mut total_bytes = 0u64;
 
         // 소스 디렉토리 내용 순회
-        for entry in fs::read_dir(src).map_err(|e| BokslDirError::Io(e))? {
-            let entry = entry.map_err(|e| BokslDirError::Io(e))?;
+        for entry in fs::read_dir(src).map_err(BokslDirError::Io)? {
+            let entry = entry.map_err(BokslDirError::Io)?;
             let entry_path = entry.path();
             let file_name = entry.file_name();
             let dest_path = dest.join(&file_name);
@@ -371,8 +371,8 @@ impl FileSystem {
         let mut total_bytes = 0u64;
         let mut total_files = 0usize;
 
-        for entry in fs::read_dir(path).map_err(|e| BokslDirError::Io(e))? {
-            let entry = entry.map_err(|e| BokslDirError::Io(e))?;
+        for entry in fs::read_dir(path).map_err(BokslDirError::Io)? {
+            let entry = entry.map_err(BokslDirError::Io)?;
             let entry_path = entry.path();
 
             if entry_path.is_file() {
@@ -433,9 +433,7 @@ impl FileSystem {
             let entry_path = entry.path();
 
             // 상대 경로 계산
-            let relative = entry_path
-                .strip_prefix(base_source)
-                .unwrap_or(&entry_path);
+            let relative = entry_path.strip_prefix(base_source).unwrap_or(&entry_path);
             let dest_path = dest_base.join(relative);
 
             if entry_path.is_file() {

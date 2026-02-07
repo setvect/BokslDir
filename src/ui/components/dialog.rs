@@ -2,6 +2,8 @@
 //!
 //! 파일 복사/이동 작업에 필요한 다이얼로그 위젯 정의
 
+#![allow(dead_code)]
+
 use crate::models::operation::{ConflictResolution, OperationProgress};
 use crate::ui::Theme;
 use crate::utils::formatter::format_file_size;
@@ -11,7 +13,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, Gauge, Paragraph, Widget, Wrap},
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 다이얼로그 종류
 #[derive(Debug, Clone)]
@@ -247,6 +249,7 @@ impl<'a> Dialog<'a> {
     }
 
     /// 입력 다이얼로그 렌더링
+    #[allow(clippy::too_many_arguments)]
     fn render_input(
         &self,
         buf: &mut Buffer,
@@ -396,8 +399,8 @@ impl<'a> Dialog<'a> {
         &self,
         buf: &mut Buffer,
         area: Rect,
-        source: &PathBuf,
-        dest: &PathBuf,
+        source: &Path,
+        dest: &Path,
         selected_option: usize,
     ) {
         // 테두리
@@ -632,7 +635,7 @@ impl Widget for Dialog<'_> {
 }
 
 /// 경로를 화면 너비에 맞게 축약
-fn truncate_path_display(path: &PathBuf, max_width: usize) -> String {
+fn truncate_path_display(path: &Path, max_width: usize) -> String {
     let path_str = path.to_string_lossy();
     if path_str.len() <= max_width {
         path_str.to_string()

@@ -272,12 +272,8 @@ fn handle_conflict_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: Key
 
 /// 진행률 다이얼로그 키 처리
 fn handle_progress_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: KeyCode) {
-    match code {
-        // Esc로 취소
-        KeyCode::Esc => {
-            app.cancel_operation();
-        }
-        _ => {}
+    if code == KeyCode::Esc {
+        app.cancel_operation();
     }
 }
 

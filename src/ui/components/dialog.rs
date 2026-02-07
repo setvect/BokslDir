@@ -14,6 +14,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Gauge, Paragraph, Widget, Wrap},
 };
 use std::path::{Path, PathBuf};
+use unicode_width::UnicodeWidthStr;
 
 /// 다이얼로그 종류
 #[derive(Debug, Clone)]
@@ -44,6 +45,12 @@ pub enum DialogKind {
     Error { title: String, message: String },
     /// 메시지 다이얼로그 (정보 표시)
     Message { title: String, message: String },
+    /// 삭제 확인 다이얼로그 (Phase 3.3)
+    DeleteConfirm {
+        items: Vec<String>,
+        total_size: String,
+        selected_button: usize, // 0: 휴지통, 1: 영구 삭제, 2: 취소
+    },
 }
 
 impl DialogKind {
@@ -100,6 +107,15 @@ impl DialogKind {
         DialogKind::Message {
             title: title.into(),
             message: message.into(),
+        }
+    }
+
+    /// 새 삭제 확인 다이얼로그 생성
+    pub fn delete_confirm(items: Vec<String>, total_size: impl Into<String>) -> Self {
+        DialogKind::DeleteConfirm {
+            items,
+            total_size: total_size.into(),
+            selected_button: 0,
         }
     }
 }
@@ -209,6 +225,10 @@ impl<'a> Dialog<'a> {
                 let lines = message.lines().count().max(1);
                 (50, (6 + lines as u16).min(15))
             }
+            DialogKind::DeleteConfirm { items, .. } => {
+                let list_lines = items.len().min(10) as u16;
+                (45, (7 + list_lines).min(20))
+            }
         };
 
         let width = width.min(screen.width.saturating_sub(4));
@@ -241,10 +261,18 @@ impl<'a> Dialog<'a> {
         };
 
         let padded_label = format!(" {} ", label);
-        let width = padded_label.chars().count() as u16;
+        let width = padded_label.width() as u16;
         let style = Style::default().fg(fg).bg(bg);
 
         buf.set_string(x, y, &padded_label, style);
+
+        // Wide character(한글 등) continuation cell의 배경색 보정
+        for i in 0..width {
+            if let Some(cell) = buf.cell_mut((x + i, y)) {
+                cell.set_bg(bg);
+            }
+        }
+
         width
     }
 
@@ -529,6 +557,72 @@ impl<'a> Dialog<'a> {
         buf.set_string(inner.x, inner.y + 6, "Press Esc to cancel", hint_style);
     }
 
+    /// 삭제 확인 다이얼로그 렌더링
+    fn render_delete_confirm(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        items: &[String],
+        total_size: &str,
+        selected_button: usize,
+    ) {
+        // 테두리
+        let block = Block::default()
+            .title(" Delete ")
+            .title_style(
+                Style::default()
+                    .fg(Color::Rgb(244, 71, 71))
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(244, 71, 71)))
+            .style(Style::default().bg(self.bg_color));
+        block.render(area, buf);
+
+        let inner = Rect {
+            x: area.x + 2,
+            y: area.y + 1,
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(2),
+        };
+
+        // 헤더 메시지
+        let header = format!("Delete {} item(s)? ({})", items.len(), total_size);
+        let header_style = Style::default()
+            .fg(self.fg_color)
+            .add_modifier(Modifier::BOLD);
+        buf.set_string(inner.x, inner.y, &header, header_style);
+
+        // 파일 목록
+        let item_style = Style::default().fg(Color::Rgb(86, 156, 214));
+        let max_items = (inner.height.saturating_sub(4)) as usize; // 헤더 + 빈줄 + 버튼줄 + 빈줄
+        for (i, item) in items.iter().enumerate() {
+            if i >= max_items {
+                let more = format!("  ... and {} more", items.len() - i);
+                buf.set_string(
+                    inner.x,
+                    inner.y + 2 + i as u16,
+                    &more,
+                    Style::default().fg(Color::Rgb(128, 128, 128)),
+                );
+                break;
+            }
+            let display = truncate_middle(item, inner.width.saturating_sub(4) as usize);
+            let line = format!("  · {}", display);
+            buf.set_string(inner.x, inner.y + 2 + i as u16, &line, item_style);
+        }
+
+        // 버튼 (하단)
+        let button_y = area.y + area.height - 2;
+        let mut x = inner.x;
+
+        let w1 = self.render_button(buf, x, button_y, "휴지통", selected_button == 0);
+        x += w1 + 1;
+        let w2 = self.render_button(buf, x, button_y, "영구 삭제", selected_button == 1);
+        x += w2 + 1;
+        self.render_button(buf, x, button_y, "취소", selected_button == 2);
+    }
+
     /// 에러/메시지 다이얼로그 렌더링
     fn render_message(
         &self,
@@ -629,6 +723,19 @@ impl Widget for Dialog<'_> {
             }
             DialogKind::Message { title, message } => {
                 self.render_message(buf, dialog_area, title, message, false);
+            }
+            DialogKind::DeleteConfirm {
+                items,
+                total_size,
+                selected_button,
+            } => {
+                self.render_delete_confirm(
+                    buf,
+                    dialog_area,
+                    items,
+                    total_size,
+                    *selected_button,
+                );
             }
         }
     }

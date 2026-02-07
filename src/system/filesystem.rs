@@ -3,7 +3,7 @@
 use crate::models::file_entry::{FileEntry, FileType};
 use crate::utils::error::{BokslDirError, Result};
 use std::fs::{self, Metadata};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 파일 시스템 모듈
 pub struct FileSystem;
@@ -392,6 +392,81 @@ impl FileSystem {
     #[allow(clippy::unused_self)]
     pub fn path_exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    // === Phase 3.3: 파일 삭제 메서드 ===
+
+    /// 단일 파일 영구 삭제
+    ///
+    /// 반환값: 삭제된 파일 크기 (바이트)
+    #[allow(clippy::unused_self)]
+    pub fn delete_file(&self, path: &Path) -> Result<u64> {
+        if !path.exists() {
+            return Err(BokslDirError::PathNotFound {
+                path: path.to_path_buf(),
+            });
+        }
+
+        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+
+        fs::remove_file(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                BokslDirError::PermissionDenied {
+                    path: path.to_path_buf(),
+                }
+            } else {
+                BokslDirError::DeleteFailed {
+                    path: path.to_path_buf(),
+                    reason: e.to_string(),
+                }
+            }
+        })?;
+
+        Ok(size)
+    }
+
+    /// 디렉토리 재귀 영구 삭제
+    ///
+    /// 반환값: 삭제된 총 바이트 수
+    pub fn delete_directory(&self, path: &Path) -> Result<u64> {
+        if !path.exists() {
+            return Err(BokslDirError::PathNotFound {
+                path: path.to_path_buf(),
+            });
+        }
+
+        if !path.is_dir() {
+            return Err(BokslDirError::NotADirectory {
+                path: path.to_path_buf(),
+            });
+        }
+
+        // 삭제 전 크기 계산
+        let (total_bytes, _) = self.calculate_total_size(&[path.to_path_buf()])?;
+
+        fs::remove_dir_all(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                BokslDirError::PermissionDenied {
+                    path: path.to_path_buf(),
+                }
+            } else {
+                BokslDirError::DeleteFailed {
+                    path: path.to_path_buf(),
+                    reason: e.to_string(),
+                }
+            }
+        })?;
+
+        Ok(total_bytes)
+    }
+
+    /// 휴지통으로 이동 (trash crate 래퍼)
+    #[allow(clippy::unused_self)]
+    pub fn trash_items(&self, paths: &[PathBuf]) -> Result<()> {
+        trash::delete_all(paths).map_err(|e| BokslDirError::DeleteFailed {
+            path: paths.first().cloned().unwrap_or_default(),
+            reason: e.to_string(),
+        })
     }
 
     /// 소스 목록을 평탄화하여 개별 파일 목록 생성

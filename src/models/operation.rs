@@ -24,6 +24,8 @@ pub enum OperationType {
     Copy,
     /// 이동
     Move,
+    /// 삭제
+    Delete,
 }
 
 impl OperationType {
@@ -32,6 +34,7 @@ impl OperationType {
         match self {
             OperationType::Copy => "Copy",
             OperationType::Move => "Move",
+            OperationType::Delete => "Delete",
         }
     }
 
@@ -40,6 +43,7 @@ impl OperationType {
         match self {
             OperationType::Copy => "복사",
             OperationType::Move => "이동",
+            OperationType::Delete => "삭제",
         }
     }
 }
@@ -210,8 +214,10 @@ mod tests {
     fn test_operation_type_name() {
         assert_eq!(OperationType::Copy.name(), "Copy");
         assert_eq!(OperationType::Move.name(), "Move");
+        assert_eq!(OperationType::Delete.name(), "Delete");
         assert_eq!(OperationType::Copy.name_ko(), "복사");
         assert_eq!(OperationType::Move.name_ko(), "이동");
+        assert_eq!(OperationType::Delete.name_ko(), "삭제");
     }
 
     #[test]

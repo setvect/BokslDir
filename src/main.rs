@@ -92,7 +92,11 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
 
         // 파일 작업 진행 중이면 다음 파일 처리
         if app.is_operation_processing() {
-            app.process_next_file();
+            if app.is_delete_operation() {
+                app.process_next_delete();
+            } else {
+                app.process_next_file();
+            }
         }
 
         if app.should_quit() {
@@ -129,6 +133,8 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         // 파일 복사/이동 (Phase 3.2)
         (_, KeyCode::F(5)) => app.start_copy(),
         (_, KeyCode::F(6)) => app.start_move(),
+        // 파일 삭제 (Phase 3.3)
+        (_, KeyCode::F(8)) => app.start_delete(),
         // Esc는 아무것도 안 함 (메뉴가 닫혀있을 때)
         (_, KeyCode::Esc) => {}
         _ => {}
@@ -158,6 +164,9 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         }
         DialogKind::Error { .. } | DialogKind::Message { .. } => {
             handle_message_dialog_keys(app, modifiers, code);
+        }
+        DialogKind::DeleteConfirm { .. } => {
+            handle_delete_confirm_dialog_keys(app, modifiers, code);
         }
     }
 }
@@ -274,6 +283,34 @@ fn handle_conflict_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: Key
 fn handle_progress_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: KeyCode) {
     if code == KeyCode::Esc {
         app.cancel_operation();
+    }
+}
+
+/// 삭제 확인 다이얼로그 키 처리
+fn handle_delete_confirm_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    match (modifiers, code) {
+        // 버튼 이동 (Tab: 다음, Shift+Tab: 이전)
+        (KeyModifiers::NONE, KeyCode::Tab) => {
+            app.dialog_delete_confirm_next();
+        }
+        (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            app.dialog_delete_confirm_prev();
+        }
+        // 선택
+        (_, KeyCode::Enter) => {
+            if let Some(button) = app.get_delete_confirm_button() {
+                match button {
+                    0 => app.confirm_delete(true),  // 휴지통
+                    1 => app.confirm_delete(false), // 영구 삭제
+                    _ => app.close_dialog(),        // 취소
+                }
+            }
+        }
+        // 취소
+        (_, KeyCode::Esc) => {
+            app.close_dialog();
+        }
+        _ => {}
     }
 }
 

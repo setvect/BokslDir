@@ -234,6 +234,9 @@ impl App {
             "copy" => self.start_copy(),
             "move" => self.start_move(),
 
+            // 파일 삭제 (Phase 3.3)
+            "delete" => self.start_delete(),
+
             _ => {}
         }
     }
@@ -802,6 +805,7 @@ impl App {
         let result = match operation_type {
             OperationType::Copy => self.filesystem.copy_file(&source, &dest_path),
             OperationType::Move => self.filesystem.move_file(&source, &dest_path),
+            OperationType::Delete => unreachable!("Delete uses process_next_delete"),
         };
 
         match result {
@@ -912,6 +916,198 @@ impl App {
                 }
                 self.execute_file_operation();
             }
+        }
+    }
+
+    // === 파일 삭제 관련 메서드 (Phase 3.3) ===
+
+    /// 삭제 시작 (F8)
+    pub fn start_delete(&mut self) {
+        let sources = self.get_operation_sources();
+
+        if sources.is_empty() {
+            self.dialog = Some(DialogKind::message(
+                "Information",
+                "No files selected for deletion.",
+            ));
+            return;
+        }
+
+        // 파일명 목록 생성
+        let items: Vec<String> = sources
+            .iter()
+            .map(|p| {
+                let name = p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                if p.is_dir() {
+                    format!("{}/", name)
+                } else {
+                    name
+                }
+            })
+            .collect();
+
+        // 총 크기 계산
+        let (total_bytes, total_files) = self
+            .filesystem
+            .calculate_total_size(&sources)
+            .unwrap_or((0, 0));
+        let total_size = format!(
+            "{} file(s), {}",
+            total_files,
+            crate::utils::formatter::format_file_size(total_bytes)
+        );
+
+        // 대기 작업 저장
+        let mut pending =
+            PendingOperation::new(OperationType::Delete, sources, PathBuf::new());
+        pending.progress.total_bytes = total_bytes;
+        pending.progress.total_files = total_files;
+        self.pending_operation = Some(pending);
+
+        // 삭제 확인 다이얼로그 표시
+        self.dialog = Some(DialogKind::delete_confirm(items, total_size));
+    }
+
+    /// 삭제 확인 처리
+    pub fn confirm_delete(&mut self, use_trash: bool) {
+        let Some(mut pending) = self.pending_operation.take() else {
+            self.close_dialog();
+            return;
+        };
+
+        if use_trash {
+            // 휴지통으로 이동: 한 번에 처리
+            match self.filesystem.trash_items(&pending.sources) {
+                Ok(()) => {
+                    self.refresh_both_panels();
+                    self.active_panel_state_mut().deselect_all();
+                    self.dialog = Some(DialogKind::message(
+                        "Complete",
+                        format!(
+                            "Moved {} item(s) to trash.",
+                            pending.sources.len()
+                        ),
+                    ));
+                }
+                Err(e) => {
+                    self.refresh_both_panels();
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!("Failed to move to trash: {}", e),
+                    ));
+                }
+            }
+        } else {
+            // 영구 삭제: Progress 다이얼로그 표시 + Processing 시작
+            let total_bytes = pending.progress.total_bytes;
+            let total_files = pending.sources.len();
+            pending.start_processing(total_bytes, total_files);
+            self.dialog = Some(DialogKind::progress(pending.progress.clone()));
+            self.pending_operation = Some(pending);
+        }
+    }
+
+    /// 다음 삭제 항목 처리 (메인 루프에서 호출)
+    pub fn process_next_delete(&mut self) {
+        let Some(mut pending) = self.pending_operation.take() else {
+            self.close_dialog();
+            return;
+        };
+
+        if pending.state != OperationState::Processing {
+            self.pending_operation = Some(pending);
+            return;
+        }
+
+        // 모든 항목 처리 완료
+        if pending.current_index >= pending.sources.len() {
+            self.finish_operation(pending);
+            return;
+        }
+
+        let source = pending.sources[pending.current_index].clone();
+        let file_name = source
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        pending.set_current_file(&file_name);
+        self.dialog = Some(DialogKind::progress(pending.progress.clone()));
+
+        let result = if source.is_dir() {
+            self.filesystem.delete_directory(&source)
+        } else {
+            self.filesystem.delete_file(&source)
+        };
+
+        match result {
+            Ok(bytes) => {
+                let file_count = if source.is_dir() {
+                    // 디렉토리의 경우, 이미 삭제됐으므로 1로 카운트
+                    1
+                } else {
+                    1
+                };
+                pending.files_completed(bytes, file_count);
+            }
+            Err(e) => {
+                pending.add_error(format!("{}: {}", file_name, e));
+                pending.file_skipped();
+            }
+        }
+
+        pending.current_index += 1;
+        self.dialog = Some(DialogKind::progress(pending.progress.clone()));
+        self.pending_operation = Some(pending);
+    }
+
+    /// Delete 작업 여부 확인
+    pub fn is_delete_operation(&self) -> bool {
+        self.pending_operation
+            .as_ref()
+            .is_some_and(|p| p.operation_type == OperationType::Delete)
+    }
+
+    // === DeleteConfirm 다이얼로그 입력 처리 ===
+
+    /// 삭제 확인 다이얼로그: 버튼 이동 (다음)
+    pub fn dialog_delete_confirm_next(&mut self) {
+        if let Some(DialogKind::DeleteConfirm {
+            selected_button, ..
+        }) = &mut self.dialog
+        {
+            *selected_button = (*selected_button + 1) % 3;
+        }
+    }
+
+    /// 삭제 확인 다이얼로그: 버튼 이동 (이전)
+    pub fn dialog_delete_confirm_prev(&mut self) {
+        if let Some(DialogKind::DeleteConfirm {
+            selected_button, ..
+        }) = &mut self.dialog
+        {
+            *selected_button = if *selected_button == 0 {
+                2
+            } else {
+                *selected_button - 1
+            };
+        }
+    }
+
+    /// 삭제 확인 다이얼로그: 선택된 버튼 반환
+    pub fn get_delete_confirm_button(&self) -> Option<usize> {
+        if let Some(DialogKind::DeleteConfirm {
+            selected_button, ..
+        }) = &self.dialog
+        {
+            Some(*selected_button)
+        } else {
+            None
         }
     }
 

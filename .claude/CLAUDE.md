@@ -10,8 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
-**현재 상태**: Phase 3.1 완료 (파일 선택 시스템)
-**다음 단계**: Phase 3.2 - 파일 복사/이동
+**현재 상태**: Phase 3.3 완료 (파일 삭제)
+**다음 단계**: Phase 3.4 - 기타 파일 작업
 
 ## 개발 명령어
 
@@ -100,6 +100,18 @@ src/
 - 선택 하이라이트: 골드색 + `*` 마커
 - 상태바: 선택 개수/크기 표시
 - ".." 항목 선택 불가, 디렉토리 변경 시 선택 초기화
+
+### Phase 3.2: 파일 복사/이동
+- F5 복사, F6 이동: 입력 다이얼로그 → Progress → 완료
+- 충돌 처리 (Overwrite/Skip/OverwriteAll/SkipAll/Cancel)
+- 진행률 표시, ESC 취소
+- 재귀 복사/이동 방지
+
+### Phase 3.3: 파일 삭제
+- F8 삭제: DeleteConfirm 다이얼로그 (휴지통/영구삭제/취소)
+- 휴지통: `trash` crate 사용, 즉시 처리
+- 영구 삭제: Progress 다이얼로그, 파일별 순차 처리
+- 다중 선택 삭제, 재귀 디렉토리 삭제
 
 ## 중요한 설계 결정사항
 

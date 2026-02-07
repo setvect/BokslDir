@@ -93,8 +93,18 @@ impl PanelState {
         self.selected_items.clear();
 
         // 선택 인덱스가 범위를 벗어나면 조정
-        if self.selected_index >= self.entries.len() && !self.entries.is_empty() {
-            self.selected_index = self.entries.len() - 1;
+        // selected_index는 ".." 항목 포함 UI 인덱스
+        // has_parent일 때: 최대 유효 인덱스 = entries.len() (0 = "..", 1..=len = 파일들)
+        // !has_parent일 때: 최대 유효 인덱스 = entries.len() - 1
+        let has_parent = self.current_path.parent().is_some();
+        let max_index = if has_parent {
+            self.entries.len()
+        } else {
+            self.entries.len().saturating_sub(1)
+        };
+
+        if self.selected_index > max_index {
+            self.selected_index = max_index;
         }
 
         Ok(())

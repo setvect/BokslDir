@@ -22,6 +22,30 @@ pub enum BokslDirError {
 
     #[error("Not a directory: {path}")]
     NotADirectory { path: PathBuf },
+
+    // Phase 3.2: 파일 복사/이동 에러
+    #[error("File already exists: {path}")]
+    FileExists { path: PathBuf },
+
+    #[error("Source and destination are the same: {path}")]
+    SameSourceAndDest { path: PathBuf },
+
+    #[error("Copy failed: {src} -> {dest}: {reason}")]
+    CopyFailed {
+        src: PathBuf,
+        dest: PathBuf,
+        reason: String,
+    },
+
+    #[error("Move failed: {src} -> {dest}: {reason}")]
+    MoveFailed {
+        src: PathBuf,
+        dest: PathBuf,
+        reason: String,
+    },
+
+    #[error("Operation cancelled")]
+    OperationCancelled,
 }
 
 pub type Result<T> = std::result::Result<T, BokslDirError>;

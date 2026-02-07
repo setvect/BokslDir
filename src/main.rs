@@ -14,8 +14,8 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::io;
 use ui::{
-    ActivePanel, CommandBar, DropdownMenu, LayoutMode, MenuBar, Panel, PanelStatus, StatusBar,
-    WarningScreen,
+    ActivePanel, CommandBar, Dialog, DialogKind, DropdownMenu, LayoutMode, MenuBar, Panel,
+    PanelStatus, StatusBar, WarningScreen,
 };
 use utils::{error::Result, formatter::format_file_size};
 
@@ -67,10 +67,20 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
             }
         })?;
 
-        // Handle events
-        if event::poll(std::time::Duration::from_millis(100))? {
+        // 파일 작업 진행 중일 때는 짧은 타임아웃으로 이벤트 체크
+        let poll_timeout = if app.is_operation_processing() {
+            std::time::Duration::from_millis(1)
+        } else {
+            std::time::Duration::from_millis(100)
+        };
+
+        // Handle events (작업 중에도 ESC 키 처리 가능)
+        if event::poll(poll_timeout)? {
             if let Event::Key(key) = event::read()? {
-                if app.is_menu_active() {
+                if app.is_dialog_active() {
+                    // 다이얼로그 모드에서의 키 처리
+                    handle_dialog_keys(app, key.modifiers, key.code);
+                } else if app.is_menu_active() {
                     // 메뉴 모드에서의 키 처리
                     handle_menu_keys(app, key.modifiers, key.code);
                 } else {
@@ -78,6 +88,11 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                     handle_normal_keys(app, key.modifiers, key.code);
                 }
             }
+        }
+
+        // 파일 작업 진행 중이면 다음 파일 처리
+        if app.is_operation_processing() {
+            app.process_next_file();
         }
 
         if app.should_quit() {
@@ -111,8 +126,167 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => app.select_all(),
         (KeyModifiers::NONE, KeyCode::Char('+')) => app.invert_selection(), // 선택 반전
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => app.deselect_all(),
+        // 파일 복사/이동 (Phase 3.2)
+        (_, KeyCode::F(5)) => app.start_copy(),
+        (_, KeyCode::F(6)) => app.start_move(),
         // Esc는 아무것도 안 함 (메뉴가 닫혀있을 때)
         (_, KeyCode::Esc) => {}
+        _ => {}
+    }
+}
+
+/// 다이얼로그 모드 키 처리
+fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    // 다이얼로그 종류에 따라 분기
+    let dialog_kind = match &app.dialog {
+        Some(kind) => kind.clone(),
+        None => return,
+    };
+
+    match dialog_kind {
+        DialogKind::Input { value, .. } => {
+            handle_input_dialog_keys(app, modifiers, code, &value);
+        }
+        DialogKind::Confirm { .. } => {
+            handle_confirm_dialog_keys(app, modifiers, code);
+        }
+        DialogKind::Conflict { .. } => {
+            handle_conflict_dialog_keys(app, modifiers, code);
+        }
+        DialogKind::Progress { .. } => {
+            handle_progress_dialog_keys(app, modifiers, code);
+        }
+        DialogKind::Error { .. } | DialogKind::Message { .. } => {
+            handle_message_dialog_keys(app, modifiers, code);
+        }
+    }
+}
+
+/// 입력 다이얼로그 키 처리
+fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode, _value: &str) {
+    match (modifiers, code) {
+        // 확인 (선택된 버튼에 따라 동작)
+        (_, KeyCode::Enter) => {
+            let selected_button = app.get_dialog_input_selected_button().unwrap_or(0);
+            if selected_button == 0 {
+                // OK 버튼
+                if let Some(value) = app.get_dialog_input_value() {
+                    app.confirm_input_dialog(value);
+                }
+            } else {
+                // Cancel 버튼
+                app.close_dialog();
+            }
+        }
+        // 취소
+        (_, KeyCode::Esc) => {
+            app.close_dialog();
+        }
+        // 버튼 전환 (Tab / Shift+Tab)
+        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            app.dialog_input_toggle_button();
+        }
+        // 문자 입력
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            app.dialog_input_char(c);
+        }
+        // 백스페이스
+        (_, KeyCode::Backspace) => {
+            app.dialog_input_backspace();
+        }
+        // Delete
+        (_, KeyCode::Delete) => {
+            app.dialog_input_delete();
+        }
+        // 커서 이동
+        (_, KeyCode::Left) => {
+            app.dialog_input_left();
+        }
+        (_, KeyCode::Right) => {
+            app.dialog_input_right();
+        }
+        (_, KeyCode::Home) => {
+            app.dialog_input_home();
+        }
+        (_, KeyCode::End) => {
+            app.dialog_input_end();
+        }
+        _ => {}
+    }
+}
+
+/// 확인 다이얼로그 키 처리
+fn handle_confirm_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    match (modifiers, code) {
+        // 버튼 이동 (Tab / Shift+Tab)
+        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            app.dialog_confirm_toggle();
+        }
+        // 확인
+        (_, KeyCode::Enter) => {
+            if let Some(selected) = app.get_dialog_selected_button() {
+                if selected == 0 {
+                    // OK
+                    if let Some(value) = app.get_dialog_input_value() {
+                        app.confirm_input_dialog(value);
+                    } else {
+                        app.close_dialog();
+                    }
+                } else {
+                    // Cancel
+                    app.close_dialog();
+                }
+            }
+        }
+        // 취소
+        (_, KeyCode::Esc) => {
+            app.close_dialog();
+        }
+        _ => {}
+    }
+}
+
+/// 충돌 다이얼로그 키 처리
+fn handle_conflict_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    match (modifiers, code) {
+        // 옵션 이동 (Tab: 다음, Shift+Tab: 이전)
+        (KeyModifiers::NONE, KeyCode::Tab) => {
+            app.dialog_conflict_next();
+        }
+        (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            app.dialog_conflict_prev();
+        }
+        // 선택
+        (_, KeyCode::Enter) => {
+            if let Some(resolution) = app.get_dialog_conflict_option() {
+                app.handle_conflict(resolution);
+            }
+        }
+        // 취소
+        (_, KeyCode::Esc) => {
+            app.close_dialog();
+        }
+        _ => {}
+    }
+}
+
+/// 진행률 다이얼로그 키 처리
+fn handle_progress_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: KeyCode) {
+    match code {
+        // Esc로 취소
+        KeyCode::Esc => {
+            app.cancel_operation();
+        }
+        _ => {}
+    }
+}
+
+/// 메시지/에러 다이얼로그 키 처리
+fn handle_message_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: KeyCode) {
+    match code {
+        KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') => {
+            app.close_dialog();
+        }
         _ => {}
     }
 }
@@ -262,5 +436,11 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
             let dropdown = DropdownMenu::new(menu, &app.menu_state).theme(theme);
             f.render_widget(dropdown, dropdown_area);
         }
+    }
+
+    // 다이얼로그 렌더링 (최상위 레이어)
+    if let Some(ref dialog_kind) = app.dialog {
+        let dialog = Dialog::new(dialog_kind).theme(theme);
+        f.render_widget(dialog, f.area());
     }
 }

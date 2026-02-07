@@ -30,3 +30,6 @@ dirs = "6.0"
 
 # Unicode Width Calculation
 unicode-width = "0.1"
+
+[dev-dependencies]
+tempfile = "3.15"

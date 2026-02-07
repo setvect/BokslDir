@@ -160,6 +160,294 @@ impl FileSystem {
     pub fn is_directory(&self, path: &Path) -> bool {
         path.is_dir()
     }
+
+    // === Phase 3.2: 파일 복사/이동 메서드 ===
+
+    /// 파일 복사
+    ///
+    /// 소스 파일을 대상 경로로 복사합니다.
+    /// 반환값: 복사된 바이트 수
+    #[allow(clippy::unused_self)]
+    pub fn copy_file(&self, src: &Path, dest: &Path) -> Result<u64> {
+        // 소스와 대상이 동일한지 확인
+        if src == dest {
+            return Err(BokslDirError::SameSourceAndDest {
+                path: src.to_path_buf(),
+            });
+        }
+
+        // 소스 파일 존재 확인
+        if !src.exists() {
+            return Err(BokslDirError::PathNotFound {
+                path: src.to_path_buf(),
+            });
+        }
+
+        // 복사 실행
+        fs::copy(src, dest).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                BokslDirError::PermissionDenied {
+                    path: dest.to_path_buf(),
+                }
+            } else {
+                BokslDirError::CopyFailed {
+                    src: src.to_path_buf(),
+                    dest: dest.to_path_buf(),
+                    reason: e.to_string(),
+                }
+            }
+        })
+    }
+
+    /// 디렉토리 재귀 복사
+    ///
+    /// 소스 디렉토리를 대상 경로로 재귀적으로 복사합니다.
+    /// 반환값: 복사된 총 바이트 수
+    pub fn copy_directory(&self, src: &Path, dest: &Path) -> Result<u64> {
+        // 소스와 대상이 동일한지 확인
+        if src == dest {
+            return Err(BokslDirError::SameSourceAndDest {
+                path: src.to_path_buf(),
+            });
+        }
+
+        // 소스 디렉토리 존재 확인
+        if !src.exists() {
+            return Err(BokslDirError::PathNotFound {
+                path: src.to_path_buf(),
+            });
+        }
+
+        if !src.is_dir() {
+            return Err(BokslDirError::NotADirectory {
+                path: src.to_path_buf(),
+            });
+        }
+
+        // 대상 디렉토리 생성
+        fs::create_dir_all(dest).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                BokslDirError::PermissionDenied {
+                    path: dest.to_path_buf(),
+                }
+            } else {
+                BokslDirError::CopyFailed {
+                    src: src.to_path_buf(),
+                    dest: dest.to_path_buf(),
+                    reason: e.to_string(),
+                }
+            }
+        })?;
+
+        let mut total_bytes = 0u64;
+
+        // 소스 디렉토리 내용 순회
+        for entry in fs::read_dir(src).map_err(|e| BokslDirError::Io(e))? {
+            let entry = entry.map_err(|e| BokslDirError::Io(e))?;
+            let entry_path = entry.path();
+            let file_name = entry.file_name();
+            let dest_path = dest.join(&file_name);
+
+            if entry_path.is_dir() {
+                // 재귀적으로 서브디렉토리 복사
+                total_bytes += self.copy_directory(&entry_path, &dest_path)?;
+            } else {
+                // 파일 복사
+                total_bytes += self.copy_file(&entry_path, &dest_path)?;
+            }
+        }
+
+        Ok(total_bytes)
+    }
+
+    /// 파일 이동
+    ///
+    /// 소스 파일을 대상 경로로 이동합니다.
+    /// 먼저 rename을 시도하고, 실패하면 복사 후 삭제합니다.
+    /// 반환값: 이동된 바이트 수
+    #[allow(clippy::unused_self)]
+    pub fn move_file(&self, src: &Path, dest: &Path) -> Result<u64> {
+        // 소스와 대상이 동일한지 확인
+        if src == dest {
+            return Err(BokslDirError::SameSourceAndDest {
+                path: src.to_path_buf(),
+            });
+        }
+
+        // 소스 파일 존재 확인
+        if !src.exists() {
+            return Err(BokslDirError::PathNotFound {
+                path: src.to_path_buf(),
+            });
+        }
+
+        // 파일 크기 미리 저장
+        let file_size = src.metadata().map(|m| m.len()).unwrap_or(0);
+
+        // 먼저 rename 시도 (같은 파일시스템 내에서는 빠름)
+        if fs::rename(src, dest).is_ok() {
+            return Ok(file_size);
+        }
+
+        // rename 실패 시 복사 후 삭제
+        self.copy_file(src, dest)?;
+        fs::remove_file(src).map_err(|e| BokslDirError::MoveFailed {
+            src: src.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reason: format!("Failed to remove source after copy: {}", e),
+        })?;
+
+        Ok(file_size)
+    }
+
+    /// 디렉토리 이동
+    ///
+    /// 소스 디렉토리를 대상 경로로 이동합니다.
+    /// 먼저 rename을 시도하고, 실패하면 복사 후 삭제합니다.
+    /// 반환값: 이동된 총 바이트 수
+    pub fn move_directory(&self, src: &Path, dest: &Path) -> Result<u64> {
+        // 소스와 대상이 동일한지 확인
+        if src == dest {
+            return Err(BokslDirError::SameSourceAndDest {
+                path: src.to_path_buf(),
+            });
+        }
+
+        // 소스 디렉토리 존재 확인
+        if !src.exists() {
+            return Err(BokslDirError::PathNotFound {
+                path: src.to_path_buf(),
+            });
+        }
+
+        if !src.is_dir() {
+            return Err(BokslDirError::NotADirectory {
+                path: src.to_path_buf(),
+            });
+        }
+
+        // 전체 크기 미리 계산
+        let (total_bytes, _) = self.calculate_total_size(&[src.to_path_buf()])?;
+
+        // 먼저 rename 시도 (같은 파일시스템 내에서는 빠름)
+        if fs::rename(src, dest).is_ok() {
+            return Ok(total_bytes);
+        }
+
+        // rename 실패 시 복사 후 삭제
+        self.copy_directory(src, dest)?;
+        fs::remove_dir_all(src).map_err(|e| BokslDirError::MoveFailed {
+            src: src.to_path_buf(),
+            dest: dest.to_path_buf(),
+            reason: format!("Failed to remove source after copy: {}", e),
+        })?;
+
+        Ok(total_bytes)
+    }
+
+    /// 경로 목록의 총 크기와 파일 수 계산
+    ///
+    /// 반환값: (총 바이트, 총 파일 수)
+    pub fn calculate_total_size(&self, paths: &[std::path::PathBuf]) -> Result<(u64, usize)> {
+        let mut total_bytes = 0u64;
+        let mut total_files = 0usize;
+
+        for path in paths {
+            if path.is_file() {
+                total_bytes += path.metadata().map(|m| m.len()).unwrap_or(0);
+                total_files += 1;
+            } else if path.is_dir() {
+                let (bytes, files) = self.calculate_directory_size(path)?;
+                total_bytes += bytes;
+                total_files += files;
+            }
+        }
+
+        Ok((total_bytes, total_files))
+    }
+
+    /// 디렉토리의 총 크기와 파일 수 계산 (재귀)
+    fn calculate_directory_size(&self, path: &Path) -> Result<(u64, usize)> {
+        let mut total_bytes = 0u64;
+        let mut total_files = 0usize;
+
+        for entry in fs::read_dir(path).map_err(|e| BokslDirError::Io(e))? {
+            let entry = entry.map_err(|e| BokslDirError::Io(e))?;
+            let entry_path = entry.path();
+
+            if entry_path.is_file() {
+                total_bytes += entry_path.metadata().map(|m| m.len()).unwrap_or(0);
+                total_files += 1;
+            } else if entry_path.is_dir() {
+                let (bytes, files) = self.calculate_directory_size(&entry_path)?;
+                total_bytes += bytes;
+                total_files += files;
+            }
+        }
+
+        Ok((total_bytes, total_files))
+    }
+
+    /// 파일/디렉토리 존재 여부 확인
+    #[allow(clippy::unused_self)]
+    pub fn path_exists(&self, path: &Path) -> bool {
+        path.exists()
+    }
+
+    /// 소스 목록을 평탄화하여 개별 파일 목록 생성
+    ///
+    /// 디렉토리는 재귀적으로 탐색하여 모든 파일을 포함합니다.
+    /// 반환값: Vec<(source_path, dest_path, size)>
+    pub fn flatten_sources(
+        &self,
+        sources: &[std::path::PathBuf],
+        dest_dir: &Path,
+    ) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf, u64)>> {
+        let mut result = Vec::new();
+
+        for source in sources {
+            let file_name = source.file_name().unwrap_or_default();
+            let dest_base = dest_dir.join(file_name);
+
+            if source.is_file() {
+                let size = source.metadata().map(|m| m.len()).unwrap_or(0);
+                result.push((source.clone(), dest_base, size));
+            } else if source.is_dir() {
+                self.flatten_directory(source, source, &dest_base, &mut result)?;
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// 디렉토리를 재귀적으로 평탄화
+    fn flatten_directory(
+        &self,
+        base_source: &Path,
+        current_source: &Path,
+        dest_base: &Path,
+        result: &mut Vec<(std::path::PathBuf, std::path::PathBuf, u64)>,
+    ) -> Result<()> {
+        for entry in fs::read_dir(current_source).map_err(BokslDirError::Io)? {
+            let entry = entry.map_err(BokslDirError::Io)?;
+            let entry_path = entry.path();
+
+            // 상대 경로 계산
+            let relative = entry_path
+                .strip_prefix(base_source)
+                .unwrap_or(&entry_path);
+            let dest_path = dest_base.join(relative);
+
+            if entry_path.is_file() {
+                let size = entry_path.metadata().map(|m| m.len()).unwrap_or(0);
+                result.push((entry_path, dest_path, size));
+            } else if entry_path.is_dir() {
+                self.flatten_directory(base_source, &entry_path, dest_base, result)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for FileSystem {

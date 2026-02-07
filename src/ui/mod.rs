@@ -9,8 +9,8 @@ pub use layout::{ActivePanel, LayoutManager, LayoutMode};
 
 // Re-export components
 pub use components::{
-    create_default_menus, CommandBar, DropdownMenu, Menu, MenuBar, MenuState, Panel, PanelStatus,
-    StatusBar, WarningScreen,
+    create_default_menus, CommandBar, Dialog, DialogKind, DropdownMenu, Menu, MenuBar, MenuState,
+    Panel, PanelStatus, StatusBar, WarningScreen,
 };
 
 // Re-export theme types

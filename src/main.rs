@@ -98,6 +98,9 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
             app.clear_pending_key();
         }
 
+        // 토스트 메시지 만료 체크
+        app.clear_expired_toast();
+
         // 파일 작업 진행 중이면 다음 파일 처리
         if app.is_operation_processing() {
             if app.is_delete_operation() {
@@ -135,6 +138,14 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     // 3) 테이블 조회 → 액션 실행
     if let Some(action) = find_action(modifiers, code) {
         app.execute_action(action);
+    } else if let KeyCode::Char(c) = code {
+        // 4) 한글 입력 감지: 액션 매칭 실패 + 한글 문자인 경우 경고
+        if ('\u{AC00}'..='\u{D7A3}').contains(&c) || ('\u{3131}'..='\u{318E}').contains(&c) {
+            app.show_message(
+                "한글 입력 감지",
+                "한영키를 눌러 영문 모드로 전환하세요.\n단축키는 영문 모드에서만 동작합니다.",
+            );
+        }
     }
 }
 
@@ -470,6 +481,7 @@ fn render_panel(
     is_active: bool,
     theme: &ui::Theme,
     area: Rect,
+    icon_mode: ui::components::panel::IconMode,
 ) {
     let path = panel_state.current_path.to_string_lossy();
     let show_parent = panel_state.current_path.parent().is_some();
@@ -485,6 +497,7 @@ fn render_panel(
         .scroll_offset(panel_state.scroll_offset)
         .show_parent(show_parent)
         .selected_items(&panel_state.selected_items)
+        .icon_mode(icon_mode)
         .theme(theme);
     f.render_widget(panel, area);
 }
@@ -499,6 +512,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
     let selected_size = format_file_size(active_panel_state.selected_size());
 
     let pending_display = app.pending_key_display();
+    let toast_display = app.toast_display().map(|s| s.to_string());
     let status_bar = StatusBar::new()
         .file_count(file_count)
         .dir_count(dir_count)
@@ -507,6 +521,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .selected_size(&selected_size)
         .layout_mode(app.layout_mode_str())
         .pending_key(pending_display.as_deref())
+        .toast(toast_display.as_deref())
         .theme(theme);
     f.render_widget(status_bar, area);
 }
@@ -556,6 +571,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         active_panel == ActivePanel::Left,
         theme,
         areas.left_panel,
+        app.icon_mode,
     );
 
     if app.layout.is_dual_panel() {
@@ -565,6 +581,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
             active_panel == ActivePanel::Right,
             theme,
             areas.right_panel,
+            app.icon_mode,
         );
     }
 

@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 /// 평탄화된 파일 정보 (개별 파일 단위 처리용)
 #[derive(Debug, Clone)]
@@ -78,6 +79,8 @@ pub struct OperationProgress {
     pub bytes_copied: u64,
     /// 전체 바이트 수
     pub total_bytes: u64,
+    /// 작업 시작 시각
+    pub start_time: Instant,
 }
 
 impl OperationProgress {
@@ -90,6 +93,7 @@ impl OperationProgress {
             total_files,
             bytes_copied: 0,
             total_bytes,
+            start_time: Instant::now(),
         }
     }
 
@@ -103,6 +107,67 @@ impl OperationProgress {
             }
         } else {
             ((self.bytes_copied as f64 / self.total_bytes as f64) * 100.0) as u8
+        }
+    }
+
+    /// 전송 속도 (bytes/sec), 0.5초 이후부터 계산
+    pub fn speed(&self) -> f64 {
+        let elapsed = self.start_time.elapsed().as_secs_f64();
+        if elapsed < 0.5 || self.bytes_copied == 0 {
+            0.0
+        } else {
+            self.bytes_copied as f64 / elapsed
+        }
+    }
+
+    /// 예상 남은 시간 (초), speed > 0 일 때만
+    pub fn eta_secs(&self) -> Option<f64> {
+        let speed = self.speed();
+        if speed > 0.0 {
+            let remaining = self.total_bytes.saturating_sub(self.bytes_copied) as f64;
+            Some(remaining / speed)
+        } else {
+            None
+        }
+    }
+
+    /// ETA를 사람이 읽기 쉬운 형식으로 포맷
+    pub fn format_eta(&self) -> String {
+        match self.eta_secs() {
+            Some(secs) => {
+                let total_secs = secs as u64;
+                if total_secs >= 3600 {
+                    let h = total_secs / 3600;
+                    let m = (total_secs % 3600) / 60;
+                    let s = total_secs % 60;
+                    format!("{}:{:02}:{:02}", h, m, s)
+                } else {
+                    let m = total_secs / 60;
+                    let s = total_secs % 60;
+                    format!("{:02}:{:02}", m, s)
+                }
+            }
+            None => "--:--".to_string(),
+        }
+    }
+
+    /// 전송 속도를 읽기 쉬운 형식으로 포맷
+    pub fn format_speed(&self) -> String {
+        let speed = self.speed();
+        if speed <= 0.0 {
+            return "Calculating...".to_string();
+        }
+        let kb = 1024.0;
+        let mb = kb * 1024.0;
+        let gb = mb * 1024.0;
+        if speed >= gb {
+            format!("{:.1} GB/s", speed / gb)
+        } else if speed >= mb {
+            format!("{:.1} MB/s", speed / mb)
+        } else if speed >= kb {
+            format!("{:.1} KB/s", speed / kb)
+        } else {
+            format!("{:.0} B/s", speed)
         }
     }
 }

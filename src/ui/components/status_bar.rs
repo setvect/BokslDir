@@ -28,6 +28,8 @@ pub struct StatusBar<'a> {
     layout_mode: &'a str,
     /// 대기 키 표시 (Phase 4)
     pending_key: Option<&'a str>,
+    /// 토스트 메시지 (한글 IME 등)
+    toast: Option<&'a str>,
     /// 배경색
     bg_color: Color,
     /// 전경색
@@ -44,6 +46,7 @@ impl<'a> Default for StatusBar<'a> {
             selected_size: "0B",
             layout_mode: "DUAL",
             pending_key: None,
+            toast: None,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
         }
@@ -97,6 +100,12 @@ impl<'a> StatusBar<'a> {
         self
     }
 
+    /// 토스트 메시지 설정
+    pub fn toast(mut self, toast: Option<&'a str>) -> Self {
+        self.toast = toast;
+        self
+    }
+
     /// 배경색 설정
     pub fn bg_color(mut self, color: Color) -> Self {
         self.bg_color = color;
@@ -122,18 +131,50 @@ impl Widget for StatusBar<'_> {
         // 배경 채우기
         buf.set_style(area, Style::default().bg(self.bg_color));
 
-        // 왼쪽 정보: 파일/디렉토리 개수, 크기
-        let left_info = format!(
-            " {} files, {} dirs | {}",
-            self.file_count, self.dir_count, self.total_size
-        );
+        let w = area.width as usize;
 
-        // 선택 정보 (있을 경우)
-        let selected_info = if self.selected_count > 0 {
+        // 토스트 메시지가 있으면 토스트만 표시
+        if let Some(toast_msg) = self.toast {
+            let toast_text = format!(" {} ", toast_msg);
+            let toast_style = Style::default()
+                .fg(Color::Rgb(255, 200, 50))
+                .bg(self.bg_color);
+            let line = Line::from(Span::styled(&toast_text, toast_style));
+            Paragraph::new(line).render(area, buf);
+            return;
+        }
+
+        // 왼쪽 정보: 터미널 너비에 따라 3단계
+        let left_info = if w >= 60 {
             format!(
-                " | {} selected ({})",
-                self.selected_count, self.selected_size
+                " {} files, {} dirs | {}",
+                self.file_count, self.dir_count, self.total_size
             )
+        } else if w >= 40 {
+            format!(
+                " {}f {}d | {}",
+                self.file_count, self.dir_count, self.total_size
+            )
+        } else {
+            format!(
+                " {} items | {}",
+                self.file_count + self.dir_count,
+                self.total_size
+            )
+        };
+
+        // 선택 정보 (있을 경우, 너비 적응)
+        let selected_info = if self.selected_count > 0 {
+            if w >= 60 {
+                format!(
+                    " | {} selected ({})",
+                    self.selected_count, self.selected_size
+                )
+            } else if w >= 40 {
+                format!(" | {}sel", self.selected_count)
+            } else {
+                format!(" {}sel", self.selected_count)
+            }
         } else {
             String::new()
         };
@@ -144,15 +185,19 @@ impl Widget for StatusBar<'_> {
             None => String::new(),
         };
 
-        // 오른쪽 정보: 레이아웃 모드
-        let right_info = format!("[{}] ", self.layout_mode);
+        // 오른쪽 정보: 레이아웃 모드 (넓은 화면에서만)
+        let layout_info = if w >= 60 {
+            format!("[{}] ", self.layout_mode)
+        } else {
+            String::new()
+        };
+        let right_total_len = layout_info.len();
 
         // 가용 공간 계산
         let left_len = left_info.len() + selected_info.len() + pending_info.len();
-        let right_len = right_info.len();
-        let padding_len = area
-            .width
-            .saturating_sub(left_len as u16 + right_len as u16) as usize;
+        let padding_len =
+            area.width
+                .saturating_sub(left_len as u16 + right_total_len as u16) as usize;
         let padding = " ".repeat(padding_len);
 
         let spans = vec![
@@ -160,7 +205,7 @@ impl Widget for StatusBar<'_> {
             Span::styled(&selected_info, Style::default().fg(Color::Yellow)),
             Span::styled(&pending_info, Style::default().fg(Color::Cyan)),
             Span::raw(padding),
-            Span::styled(right_info, Style::default().fg(Color::Rgb(100, 100, 100))),
+            Span::styled(layout_info, Style::default().fg(Color::Rgb(100, 100, 100))),
         ];
 
         let line = Line::from(spans);

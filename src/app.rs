@@ -43,6 +43,10 @@ pub struct App {
     pub pending_key: Option<char>,
     /// 대기 키 입력 시각
     pub pending_key_time: Option<Instant>,
+    /// 토스트 메시지 (3초 후 자동 소멸)
+    pub toast_message: Option<(String, Instant)>,
+    /// 아이콘 표시 모드
+    pub icon_mode: crate::ui::components::panel::IconMode,
 }
 
 impl App {
@@ -84,6 +88,8 @@ impl App {
             pending_operation: None,
             pending_key: None,
             pending_key_time: None,
+            toast_message: None,
+            icon_mode: crate::ui::components::panel::IconMode::default(),
         })
     }
 
@@ -252,6 +258,13 @@ impl App {
             }
             Action::ThemeContrast => {
                 let _ = self.theme_manager.switch_theme("high_contrast");
+            }
+            Action::ToggleIconMode => {
+                use crate::ui::components::panel::IconMode;
+                self.icon_mode = match self.icon_mode {
+                    IconMode::Emoji => IconMode::Ascii,
+                    IconMode::Ascii => IconMode::Emoji,
+                };
             }
             // 미구현 액션은 무시
             _ => {}
@@ -454,6 +467,36 @@ impl App {
     /// 대기 키 표시 문자열 (상태바용)
     pub fn pending_key_display(&self) -> Option<String> {
         self.pending_key.map(|k| format!("{}_", k))
+    }
+
+    /// 메시지 다이얼로그 표시
+    pub fn show_message(&mut self, title: &str, message: &str) {
+        self.dialog = Some(DialogKind::message(title, message));
+    }
+
+    /// 토스트 메시지 설정 (3초 후 자동 소멸)
+    pub fn set_toast(&mut self, message: &str) {
+        self.toast_message = Some((message.to_string(), Instant::now()));
+    }
+
+    /// 만료된 토스트 제거
+    pub fn clear_expired_toast(&mut self) {
+        if let Some((_, time)) = &self.toast_message {
+            if time.elapsed().as_secs() >= 3 {
+                self.toast_message = None;
+            }
+        }
+    }
+
+    /// 토스트 메시지 가져오기 (만료 안 된 경우만)
+    pub fn toast_display(&self) -> Option<&str> {
+        self.toast_message.as_ref().and_then(|(msg, time)| {
+            if time.elapsed().as_secs() < 3 {
+                Some(msg.as_str())
+            } else {
+                None
+            }
+        })
     }
 
     /// 도움말 스크롤 아래로
@@ -1400,14 +1443,19 @@ impl App {
                 .calculate_total_size(std::slice::from_ref(&entry.path))
             {
                 Ok((bytes, files)) => format!(
-                    "{} ({})",
+                    "{} ({} bytes, {})",
                     crate::utils::formatter::format_file_size(bytes),
+                    crate::utils::formatter::format_number_with_commas(bytes),
                     crate::utils::formatter::pluralize(files, "file", "files")
                 ),
                 Err(_) => "Unknown".to_string(),
             }
         } else {
-            crate::utils::formatter::format_file_size(entry.size)
+            format!(
+                "{} ({} bytes)",
+                crate::utils::formatter::format_file_size(entry.size),
+                crate::utils::formatter::format_number_with_commas(entry.size)
+            )
         }
     }
 
@@ -1921,6 +1969,8 @@ impl Default for App {
                 pending_operation: None,
                 pending_key: None,
                 pending_key_time: None,
+                toast_message: None,
+                icon_mode: crate::ui::components::panel::IconMode::default(),
             }
         })
     }

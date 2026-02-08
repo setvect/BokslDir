@@ -16,6 +16,16 @@ use ratatui::{
 use std::collections::HashSet;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+/// 아이콘 표시 모드
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IconMode {
+    /// 이모지 아이콘 (기본)
+    #[default]
+    Emoji,
+    /// ASCII 텍스트 아이콘 (터미널 호환)
+    Ascii,
+}
+
 /// 패널 상태
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PanelStatus {
@@ -62,6 +72,8 @@ pub struct Panel<'a> {
     executable_color: Color,
     /// 심볼릭 링크 색상
     symlink_color: Color,
+    /// 아이콘 모드
+    icon_mode: IconMode,
 }
 
 /// 빈 HashSet을 위한 정적 참조
@@ -89,6 +101,7 @@ impl<'a> Default for Panel<'a> {
             directory_color: Color::Rgb(86, 156, 214),
             executable_color: Color::Rgb(78, 201, 176),
             symlink_color: Color::Rgb(206, 145, 120),
+            icon_mode: IconMode::default(),
         }
     }
 }
@@ -152,6 +165,12 @@ impl<'a> Panel<'a> {
         self
     }
 
+    /// 아이콘 모드 설정
+    pub fn icon_mode(mut self, mode: IconMode) -> Self {
+        self.icon_mode = mode;
+        self
+    }
+
     /// 활성 테두리 색상 설정
     pub fn active_border_color(mut self, color: Color) -> Self {
         self.active_border_color = color;
@@ -205,11 +224,19 @@ impl<'a> Panel<'a> {
 
     /// 파일 타입에 따른 아이콘 반환
     fn file_icon(&self, file_type: &FileType) -> &str {
-        match file_type {
-            FileType::Directory => "📁",
-            FileType::File => "📄",
-            FileType::Executable => "🔧",
-            FileType::Symlink => "🔗",
+        match self.icon_mode {
+            IconMode::Emoji => match file_type {
+                FileType::Directory => "📁",
+                FileType::File => "📄",
+                FileType::Executable => "🔧",
+                FileType::Symlink => "🔗",
+            },
+            IconMode::Ascii => match file_type {
+                FileType::Directory => "/",
+                FileType::File => " ",
+                FileType::Executable => "*",
+                FileType::Symlink => "@",
+            },
         }
     }
 

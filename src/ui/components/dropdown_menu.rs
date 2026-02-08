@@ -655,9 +655,8 @@ pub fn create_default_menus() -> Vec<Menu> {
                 ],
             ),
         ]),
-        Menu::new("settings", "설정(S)")
-            .hotkey('s')
-            .items(vec![MenuItem::submenu(
+        Menu::new("settings", "설정(S)").hotkey('s').items(vec![
+            MenuItem::submenu(
                 "theme",
                 "테마",
                 vec![
@@ -665,7 +664,10 @@ pub fn create_default_menus() -> Vec<Menu> {
                     menu_action("theme_light", "Light"),
                     menu_action("theme_contrast", "High Contrast"),
                 ],
-            )]),
+            ),
+            MenuItem::separator(),
+            menu_action("toggle_icons", "아이콘 전환"),
+        ]),
         Menu::new("help", "도움말(H)").hotkey('h').items(vec![
             menu_action("help_keys", "단축키 도움말"),
             menu_action("about", "복슬Dir 정보"),

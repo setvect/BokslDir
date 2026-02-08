@@ -17,6 +17,11 @@ use ratatui::{
 use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
 
+/// 다이얼로그 내부 좌우 패딩 (border 안쪽 여백)
+const DIALOG_H_PADDING: u16 = 2;
+/// 다이얼로그 내부 상단 패딩 (border 아래 여백)
+const DIALOG_V_PADDING: u16 = 1;
+
 /// 다이얼로그 종류
 #[derive(Debug, Clone)]
 pub enum DialogKind {
@@ -301,7 +306,7 @@ impl<'a> Dialog<'a> {
             | DialogKind::RenameInput { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 7u16),
             DialogKind::Confirm { .. } => (40u16.min(sw.saturating_sub(4)).max(25), 8u16),
             DialogKind::Conflict { .. } => (55u16.min(sw.saturating_sub(4)).max(35), 15u16),
-            DialogKind::Progress { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 9u16),
+            DialogKind::Progress { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 11u16),
             DialogKind::Error { message, .. } | DialogKind::Message { message, .. } => {
                 let lines = message.lines().count().max(1);
                 let w = 50u16.min(sw.saturating_sub(4)).max(30);
@@ -397,10 +402,10 @@ impl<'a> Dialog<'a> {
         block.render(area, buf);
 
         let inner = Rect {
-            x: area.x + 2,
-            y: area.y + 1,
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(2),
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(DIALOG_V_PADDING * 2),
         };
 
         // 프롬프트
@@ -511,10 +516,10 @@ impl<'a> Dialog<'a> {
         block.render(area, buf);
 
         let inner = Rect {
-            x: area.x + 2,
-            y: area.y + 1,
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(2),
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(DIALOG_V_PADDING * 2),
         };
 
         // 메시지
@@ -567,10 +572,10 @@ impl<'a> Dialog<'a> {
         block.render(area, buf);
 
         let inner = Rect {
-            x: area.x + 2,
-            y: area.y + 1,
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(2),
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(DIALOG_V_PADDING * 2),
         };
 
         let msg_style = Style::default().fg(self.fg_color);
@@ -630,10 +635,10 @@ impl<'a> Dialog<'a> {
         block.render(area, buf);
 
         let inner = Rect {
-            x: area.x + 2,
-            y: area.y + 1,
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(2),
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(DIALOG_V_PADDING * 2),
         };
 
         // 현재 파일
@@ -674,9 +679,18 @@ impl<'a> Dialog<'a> {
         );
         buf.set_string(inner.x, inner.y + 5, &size_text, file_style);
 
+        // 속도 / ETA
+        let speed_eta = format!(
+            "{}  ETA: {}",
+            progress.format_speed(),
+            progress.format_eta()
+        );
+        let speed_style = Style::default().fg(Color::Rgb(100, 180, 100));
+        buf.set_string(inner.x, inner.y + 6, &speed_eta, speed_style);
+
         // Esc 안내
         let hint_style = Style::default().fg(Color::Rgb(128, 128, 128));
-        buf.set_string(inner.x, inner.y + 6, "Press Esc to cancel", hint_style);
+        buf.set_string(inner.x, inner.y + 8, "Press Esc to cancel", hint_style);
     }
 
     /// 삭제 확인 다이얼로그 렌더링
@@ -702,10 +716,10 @@ impl<'a> Dialog<'a> {
         block.render(area, buf);
 
         let inner = Rect {
-            x: area.x + 2,
-            y: area.y + 1,
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(2),
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(DIALOG_V_PADDING * 2),
         };
 
         // 헤더 메시지
@@ -818,10 +832,10 @@ impl<'a> Dialog<'a> {
         block.render(area, buf);
 
         let inner = Rect {
-            x: area.x + 2,
-            y: area.y + 1,
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(2),
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(DIALOG_V_PADDING * 2),
         };
 
         let label_style = Style::default().fg(Color::Rgb(128, 128, 128));
@@ -874,9 +888,9 @@ impl<'a> Dialog<'a> {
         block.render(area, buf);
 
         let inner = Rect {
-            x: area.x + 2,
-            y: area.y + 1,
-            width: area.width.saturating_sub(4),
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
             height: area.height.saturating_sub(3), // 하단 힌트 공간 확보
         };
 
@@ -904,7 +918,7 @@ impl<'a> Dialog<'a> {
         let max_scroll = all_rows.len().saturating_sub(visible_height);
         let effective_scroll = scroll_offset.min(max_scroll);
 
-        let key_col_width = 14u16;
+        let key_col_width = 16u16;
 
         for (i, row) in all_rows
             .iter()
@@ -920,6 +934,32 @@ impl<'a> Dialog<'a> {
                 // 키바인딩
                 buf.set_string(inner.x + 2, y, row.1, key_style);
                 buf.set_string(inner.x + key_col_width, y, row.2, desc_style);
+            }
+        }
+
+        // 스크롤바 (내용이 화면보다 많을 때만)
+        let total_items = all_rows.len();
+        if total_items > visible_height && visible_height > 0 {
+            let track_height = visible_height;
+            let thumb_height = (track_height * track_height / total_items).max(1);
+            let thumb_pos = if max_scroll == 0 {
+                0
+            } else {
+                effective_scroll * (track_height.saturating_sub(thumb_height)) / max_scroll
+            };
+
+            let scrollbar_x = area.x + area.width - 2;
+            let track_style = Style::default().fg(Color::Rgb(60, 60, 60));
+            let thumb_style = Style::default().fg(Color::Rgb(150, 150, 150));
+
+            for i in 0..track_height {
+                let sy = inner.y + i as u16;
+                let (symbol, style) = if i >= thumb_pos && i < thumb_pos + thumb_height {
+                    ("┃", thumb_style)
+                } else {
+                    ("│", track_style)
+                };
+                buf.set_string(scrollbar_x, sy, symbol, style);
             }
         }
 
@@ -965,10 +1005,10 @@ impl<'a> Dialog<'a> {
         block.render(area, buf);
 
         let inner = Rect {
-            x: area.x + 2,
-            y: area.y + 1,
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(4),
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(DIALOG_V_PADDING + 3),
         };
 
         // 메시지

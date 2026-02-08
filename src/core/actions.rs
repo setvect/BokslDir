@@ -49,6 +49,8 @@ pub enum Action {
     SortByExt,
     SortAscending,
     SortDescending,
+    // Settings
+    ToggleIconMode,
     // About
     About,
 }
@@ -94,7 +96,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         id: "move_up",
         label: "Move up",
         category: ActionCategory::Navigation,
-        shortcut_display: Some("j/k"),
+        shortcut_display: Some("j / k"),
         command_bar: Some(CommandBarEntry {
             key: "j/k",
             label: "Up/Dn",
@@ -114,7 +116,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         id: "go_parent",
         label: "Parent dir",
         category: ActionCategory::Navigation,
-        shortcut_display: Some("h/l"),
+        shortcut_display: Some("h / l"),
         command_bar: Some(CommandBarEntry {
             key: "h/l",
             label: "Nav",
@@ -134,7 +136,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         id: "go_top",
         label: "Top",
         category: ActionCategory::Navigation,
-        shortcut_display: Some("gg/G"),
+        shortcut_display: Some("gg / G"),
         command_bar: Some(CommandBarEntry {
             key: "gg/G",
             label: "Top/Bot",
@@ -154,7 +156,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         id: "page_up",
         label: "Half page up",
         category: ActionCategory::Navigation,
-        shortcut_display: Some("Ctrl+U/D"),
+        shortcut_display: Some("^U / ^D"),
         command_bar: Some(CommandBarEntry {
             key: "^U/D",
             label: "Page",
@@ -296,7 +298,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         id: "select_all",
         label: "Select all",
         category: ActionCategory::Selection,
-        shortcut_display: Some("Ctrl+A"),
+        shortcut_display: Some("^A"),
         command_bar: Some(CommandBarEntry {
             key: "^A",
             label: "SelAll",
@@ -333,7 +335,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         id: "refresh",
         label: "Refresh",
         category: ActionCategory::System,
-        shortcut_display: Some("Ctrl+R"),
+        shortcut_display: Some("^R"),
         command_bar: Some(CommandBarEntry {
             key: "^R",
             label: "Refresh",
@@ -381,6 +383,15 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         action: Action::ThemeContrast,
         id: "theme_contrast",
         label: "High Contrast",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
+    // Settings (메뉴 전용)
+    ActionDef {
+        action: Action::ToggleIconMode,
+        id: "toggle_icons",
+        label: "Toggle icons",
         category: ActionCategory::System,
         shortcut_display: None,
         command_bar: None,

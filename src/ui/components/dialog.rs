@@ -290,35 +290,47 @@ impl<'a> Dialog<'a> {
         self
     }
 
-    /// 다이얼로그 영역 계산 (화면 중앙)
+    /// 다이얼로그 영역 계산 (화면 중앙, 반응형)
     fn calculate_area(&self, screen: Rect) -> Rect {
+        let sw = screen.width;
+        let sh = screen.height;
+
         let (width, height) = match self.kind {
-            DialogKind::Input { .. } => (50, 7),
-            DialogKind::Confirm { .. } => (40, 8),
-            DialogKind::Conflict { .. } => (55, 15),
-            DialogKind::Progress { .. } => (50, 9),
+            DialogKind::Input { .. }
+            | DialogKind::MkdirInput { .. }
+            | DialogKind::RenameInput { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 7u16),
+            DialogKind::Confirm { .. } => (40u16.min(sw.saturating_sub(4)).max(25), 8u16),
+            DialogKind::Conflict { .. } => (55u16.min(sw.saturating_sub(4)).max(35), 15u16),
+            DialogKind::Progress { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 9u16),
             DialogKind::Error { message, .. } | DialogKind::Message { message, .. } => {
                 let lines = message.lines().count().max(1);
-                (50, (6 + lines as u16).min(15))
+                let w = 50u16.min(sw.saturating_sub(4)).max(30);
+                let h = (6 + lines as u16).min(sh.saturating_sub(4)).max(6);
+                (w, h)
             }
             DialogKind::DeleteConfirm { items, .. } => {
                 let list_lines = items.len().min(10) as u16;
-                (45, (7 + list_lines).min(20))
+                let w = 45u16.min(sw.saturating_sub(4)).max(30);
+                let h = (7 + list_lines).min(sh.saturating_sub(4)).max(8);
+                (w, h)
             }
-            DialogKind::Help { .. } => (60, 22),
-            DialogKind::MkdirInput { .. } => (50, 7),
-            DialogKind::RenameInput { .. } => (50, 7),
+            DialogKind::Help { .. } => {
+                let w = 60u16.min(sw.saturating_sub(4)).max(40);
+                let h = sh.saturating_sub(6).max(15);
+                (w, h)
+            }
             DialogKind::Properties { children_info, .. } => {
-                let base = if children_info.is_some() { 12 } else { 11 };
-                (50, base)
+                let base = if children_info.is_some() { 12u16 } else { 11 };
+                let w = 80u16.min(sw.saturating_sub(8)).max(40);
+                (w, base)
             }
         };
 
-        let width = width.min(screen.width.saturating_sub(4));
-        let height = height.min(screen.height.saturating_sub(4));
+        let width = width.min(sw.saturating_sub(4));
+        let height = height.min(sh.saturating_sub(4));
 
-        let x = screen.x + (screen.width.saturating_sub(width)) / 2;
-        let y = screen.y + (screen.height.saturating_sub(height)) / 2;
+        let x = screen.x + (sw.saturating_sub(width)) / 2;
+        let y = screen.y + (sh.saturating_sub(height)) / 2;
 
         Rect {
             x,
@@ -697,7 +709,11 @@ impl<'a> Dialog<'a> {
         };
 
         // 헤더 메시지
-        let header = format!("Delete {} item(s)? ({})", items.len(), total_size);
+        let header = format!(
+            "Delete {}? ({})",
+            crate::utils::formatter::pluralize(items.len(), "item", "items"),
+            total_size
+        );
         let header_style = Style::default()
             .fg(self.fg_color)
             .add_modifier(Modifier::BOLD);
@@ -726,11 +742,11 @@ impl<'a> Dialog<'a> {
         let button_y = area.y + area.height - 2;
         let mut x = inner.x;
 
-        let w1 = self.render_button(buf, x, button_y, "휴지통", selected_button == 0);
+        let w1 = self.render_button(buf, x, button_y, "Trash", selected_button == 0);
         x += w1 + 1;
-        let w2 = self.render_button(buf, x, button_y, "영구 삭제", selected_button == 1);
+        let w2 = self.render_button(buf, x, button_y, "Delete", selected_button == 1);
         x += w2 + 1;
-        self.render_button(buf, x, button_y, "취소", selected_button == 2);
+        self.render_button(buf, x, button_y, "Cancel", selected_button == 2);
     }
 
     /// 텍스트 필드 렌더링 헬퍼 (cursor_pos는 바이트 인덱스)

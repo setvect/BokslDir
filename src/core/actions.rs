@@ -324,7 +324,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         shortcut_display: Some("?"),
         command_bar: Some(CommandBarEntry {
             key: "?",
-            label: "Help",
+            label: "Keys",
             priority: 20,
         }),
     },

@@ -313,22 +313,25 @@ struct ColumnLayout {
 
 impl Panel<'_> {
     /// 패널 너비 기반 컬럼 표시 여부/크기 결정
-    fn calculate_column_layout(width: usize) -> ColumnLayout {
+    fn calculate_column_layout(width: usize, has_scrollbar: bool) -> ColumnLayout {
+        let scrollbar_width = if has_scrollbar { 1 } else { 0 };
+
         let (show_permissions, show_size, date_format) = match width {
-            w if w >= 60 => (true, true, "long"),
-            w if w >= 40 => (false, true, "short"),
+            w if w >= 70 => (true, true, "long"),
+            w if w >= 45 => (false, true, "short"),
             _ => (false, false, "short"),
         };
 
         let perm_width = if show_permissions { 12 } else { 0 };
-        let date_width = if date_format == "long" { 12 } else { 6 };
+        let date_width = if date_format == "long" { 17 } else { 12 };
         let size_width = if show_size { 10 } else { 0 };
         let margins = 6;
         let name_width = width
             .saturating_sub(perm_width)
             .saturating_sub(size_width)
             .saturating_sub(date_width)
-            .saturating_sub(margins);
+            .saturating_sub(margins)
+            .saturating_sub(scrollbar_width);
 
         ColumnLayout {
             show_permissions,
@@ -360,11 +363,7 @@ impl Panel<'_> {
 
         header_spans.push(Span::raw(" "));
         header_spans.push(Span::styled(
-            format!(
-                "{:<width$}",
-                "Modified",
-                width = if layout.date_format == "long" { 12 } else { 8 }
-            ),
+            format!("{:<width$}", "Modified", width = layout.date_width),
             header_style,
         ));
 
@@ -484,17 +483,14 @@ impl Panel<'_> {
             line_spans.push(Span::styled(format!("{:>9}", size_str), style));
         }
 
-        // 날짜
+        // 날짜 (format_date()는 항상 "YYYY-MM-DD HH:MM" 16자 반환)
         line_spans.push(Span::styled(" ", style));
+        let full_date = format_date(entry.modified);
         let date_str = if layout.date_format == "long" {
-            format_date(entry.modified)
+            full_date
         } else {
-            let full_date = format_date(entry.modified);
-            if full_date.contains(':') {
-                full_date
-            } else {
-                full_date.split('-').skip(1).collect::<Vec<_>>().join("-")
-            }
+            // short: "MM-DD HH:MM" (11자)
+            full_date.get(5..).unwrap_or(&full_date).to_string()
         };
         line_spans.push(Span::styled(
             format!("{:<width$}", date_str, width = layout.date_width),
@@ -516,7 +512,7 @@ impl Panel<'_> {
     /// 빈 패널 메시지 렌더링
     fn render_empty_state(inner: Rect, buf: &mut Buffer, y: u16) {
         let empty_text = Line::from(vec![Span::styled(
-            " <empty>",
+            " (No files)",
             Style::default().fg(Color::Rgb(100, 100, 100)),
         )]);
         buf.set_line(inner.x, inner.y + y, &empty_text, inner.width);
@@ -548,7 +544,13 @@ impl Widget for Panel<'_> {
             return;
         }
 
-        let layout = Self::calculate_column_layout(inner.width as usize);
+        // 스크롤바 필요 여부 계산 (헤더 2줄 + ".." 1줄 차감)
+        let header_lines: usize = 2;
+        let parent_line: usize = if self.show_parent { 1 } else { 0 };
+        let file_area_height = (inner.height as usize).saturating_sub(header_lines + parent_line);
+        let has_scrollbar = self.entries.len() > file_area_height;
+
+        let layout = Self::calculate_column_layout(inner.width as usize, has_scrollbar);
         let mut y: u16 = 0;
 
         Self::render_header(&layout, inner, buf, &mut y);
@@ -572,29 +574,94 @@ impl Widget for Panel<'_> {
         if self.entries.is_empty() && !self.show_parent && y < inner.height {
             Self::render_empty_state(inner, buf, y);
         }
+
+        // 스크롤바 렌더링
+        if has_scrollbar {
+            let total_items = self.entries.len();
+            let track_height = file_area_height;
+            if track_height > 0 && total_items > 0 {
+                let thumb_height = (track_height * track_height / total_items).max(1);
+                let max_scroll = total_items.saturating_sub(file_area_height);
+                let thumb_pos = if max_scroll == 0 {
+                    0
+                } else {
+                    self.scroll_offset * (track_height.saturating_sub(thumb_height)) / max_scroll
+                };
+
+                let scrollbar_x = inner.x + inner.width - 1;
+                let track_start_y = inner.y + (header_lines + parent_line) as u16;
+
+                let track_style = Style::default().fg(Color::Rgb(60, 60, 60));
+                let thumb_style = Style::default().fg(Color::Rgb(150, 150, 150));
+
+                for i in 0..track_height {
+                    let sy = track_start_y + i as u16;
+                    if sy < inner.y + inner.height {
+                        let (symbol, style) = if i >= thumb_pos && i < thumb_pos + thumb_height {
+                            ("┃", thumb_style)
+                        } else {
+                            ("│", track_style)
+                        };
+                        buf.set_string(scrollbar_x, sy, symbol, style);
+                    }
+                }
+            }
+        }
     }
 }
 
 impl Panel<'_> {
-    /// 파일명을 최대 너비로 잘라냄
+    /// 파일명을 최대 너비로 잘라냄 (확장자 보존)
+    ///
+    /// 중간 생략 방식: "very_long_fi...ated.txt" (확장자 유지)
+    /// 확장자 없거나 숨김파일(.bashrc)은 끝에서 자름
     fn truncate_name(&self, name: &str, max_width: usize) -> String {
         let display_width = name.width();
         if display_width <= max_width {
             return name.to_string();
         }
 
-        // "..." 포함하여 잘라내기
+        let ellipsis = "...";
+        let ellipsis_width = 3;
+
+        // 확장자 분리: 마지막 '.' 기준 (숨김파일 제외)
+        let (stem, ext) = match name.rfind('.') {
+            Some(dot_pos) if dot_pos > 0 => (&name[..dot_pos], &name[dot_pos..]),
+            _ => (name, ""),
+        };
+
+        let ext_width = ext.width();
+
+        // 확장자 + "..." 만으로 max_width 초과 시 끝에서 자르기 방식
+        if ellipsis_width + ext_width >= max_width || ext.is_empty() {
+            let mut truncated = String::new();
+            let mut current_width = 0;
+            for ch in name.chars() {
+                let ch_width = ch.width().unwrap_or(1);
+                if current_width + ch_width + ellipsis_width > max_width {
+                    truncated.push_str(ellipsis);
+                    break;
+                }
+                truncated.push(ch);
+                current_width += ch_width;
+            }
+            return truncated;
+        }
+
+        // 중간 생략: stem 앞부분 + "..." + 확장자
+        let available_stem_width = max_width - ellipsis_width - ext_width;
         let mut truncated = String::new();
         let mut current_width = 0;
-        for ch in name.chars() {
+        for ch in stem.chars() {
             let ch_width = ch.width().unwrap_or(1);
-            if current_width + ch_width + 3 > max_width {
-                truncated.push_str("...");
+            if current_width + ch_width > available_stem_width {
                 break;
             }
             truncated.push(ch);
             current_width += ch_width;
         }
+        truncated.push_str(ellipsis);
+        truncated.push_str(ext);
         truncated
     }
 }
@@ -636,10 +703,20 @@ mod tests {
         // 짧은 이름은 그대로 유지
         assert_eq!(panel.truncate_name("test.txt", 20), "test.txt");
 
-        // 긴 이름은 잘림
+        // 긴 이름은 중간 생략 + 확장자 보존
         let long_name = "very_long_filename_that_should_be_truncated.txt";
         let truncated = panel.truncate_name(long_name, 20);
+        assert!(truncated.contains("..."));
+        assert!(truncated.ends_with(".txt")); // 확장자 보존
+
+        // 확장자 없는 파일은 끝에서 자름
+        let no_ext = "very_long_filename_without_extension";
+        let truncated = panel.truncate_name(no_ext, 15);
         assert!(truncated.ends_with("..."));
-        assert!(truncated.len() <= 23); // 20 + "..."
+
+        // 숨김 파일(.bashrc)은 끝에서 자름
+        let hidden = ".very_long_hidden_config_file";
+        let truncated = panel.truncate_name(hidden, 15);
+        assert!(truncated.ends_with("..."));
     }
 }

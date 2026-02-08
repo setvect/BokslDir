@@ -408,8 +408,8 @@ impl App {
             .calculate_total_size(&sources)
             .unwrap_or((0, 0));
         let total_size = format!(
-            "{} file(s), {}",
-            total_files,
+            "{}, {}",
+            crate::utils::formatter::pluralize(total_files, "file", "files"),
             crate::utils::formatter::format_file_size(total_bytes)
         );
 
@@ -1021,9 +1021,9 @@ impl App {
             self.dialog = Some(DialogKind::message(
                 "Complete",
                 format!(
-                    "{} completed: {} file(s)",
+                    "{} completed: {}",
                     pending.operation_type.name(),
-                    pending.completed_count
+                    crate::utils::formatter::pluralize(pending.completed_count, "file", "files")
                 ),
             ));
         } else {
@@ -1140,8 +1140,8 @@ impl App {
             .calculate_total_size(&sources)
             .unwrap_or((0, 0));
         let total_size = format!(
-            "{} file(s), {}",
-            total_files,
+            "{}, {}",
+            crate::utils::formatter::pluralize(total_files, "file", "files"),
             crate::utils::formatter::format_file_size(total_bytes)
         );
 
@@ -1170,7 +1170,14 @@ impl App {
                     self.active_panel_state_mut().deselect_all();
                     self.dialog = Some(DialogKind::message(
                         "Complete",
-                        format!("Moved {} item(s) to trash.", pending.sources.len()),
+                        format!(
+                            "Moved {} to trash.",
+                            crate::utils::formatter::pluralize(
+                                pending.sources.len(),
+                                "item",
+                                "items"
+                            )
+                        ),
                     ));
                 }
                 Err(e) => {
@@ -1393,9 +1400,9 @@ impl App {
                 .calculate_total_size(std::slice::from_ref(&entry.path))
             {
                 Ok((bytes, files)) => format!(
-                    "{} ({} file(s))",
+                    "{} ({})",
                     crate::utils::formatter::format_file_size(bytes),
-                    files
+                    crate::utils::formatter::pluralize(files, "file", "files")
                 ),
                 Err(_) => "Unknown".to_string(),
             }
@@ -1413,7 +1420,11 @@ impl App {
             Ok(entries) => {
                 let dirs = entries.iter().filter(|e| e.is_directory()).count();
                 let files = entries.len() - dirs;
-                Some(format!("{} file(s), {} dir(s)", files, dirs))
+                Some(format!(
+                    "{}, {}",
+                    crate::utils::formatter::pluralize(files, "file", "files"),
+                    crate::utils::formatter::pluralize(dirs, "dir", "dirs")
+                ))
             }
             Err(_) => None,
         }
@@ -1444,7 +1455,7 @@ impl App {
             };
 
             let size_str = self.format_size_display(&entry);
-            let modified_str = crate::utils::formatter::format_date(entry.modified);
+            let modified_str = crate::utils::formatter::format_date_full(entry.modified);
             let permissions_str =
                 crate::utils::formatter::format_permissions(entry.permissions.as_ref());
             let children_info = self.format_children_info(&entry);

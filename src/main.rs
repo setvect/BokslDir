@@ -70,6 +70,8 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
         // 파일 작업 진행 중일 때는 짧은 타임아웃으로 이벤트 체크
         let poll_timeout = if app.is_operation_processing() {
             std::time::Duration::from_millis(1)
+        } else if app.pending_key.is_some() {
+            std::time::Duration::from_millis(50)
         } else {
             std::time::Duration::from_millis(100)
         };
@@ -90,6 +92,11 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
             }
         }
 
+        // pending 키 타임아웃 체크
+        if app.pending_key.is_some() && app.is_pending_key_expired() {
+            app.clear_pending_key();
+        }
+
         // 파일 작업 진행 중이면 다음 파일 처리
         if app.is_operation_processing() {
             if app.is_delete_operation() {
@@ -107,39 +114,61 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
     Ok(())
 }
 
-/// 일반 모드 키 처리
+/// 일반 모드 키 처리 (Phase 4: Vim 스타일)
 fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    // 1) pending 키 시퀀스 처리
+    if let Some(pending) = app.pending_key {
+        app.clear_pending_key();
+        if let ('g', KeyCode::Char('g')) = (pending, &code) {
+            app.go_to_top();
+            return;
+        }
+    }
+
+    // 2) 일반 키 처리
     match (modifiers, code) {
-        // 종료: q, Esc, F10, Ctrl+C
-        (_, KeyCode::Char('q')) => app.quit(),
-        (_, KeyCode::F(10)) => app.quit(),
+        // 종료
+        (KeyModifiers::NONE, KeyCode::Char('q')) => app.quit(),
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
-        // 패널 전환: Tab
+        // 패널/메뉴
         (_, KeyCode::Tab) => app.toggle_panel(),
-        // 메뉴 활성화: F9
         (_, KeyCode::F(9)) => app.open_menu(),
-        // 파일 탐색 (Phase 2.3)
-        (_, KeyCode::Up) => app.move_selection_up(),
-        (_, KeyCode::Down) => app.move_selection_down(),
-        (_, KeyCode::PageUp) => app.move_selection_page_up(),
-        (_, KeyCode::PageDown) => app.move_selection_page_down(),
-        (KeyModifiers::NONE, KeyCode::Enter) => app.enter_selected(),
-        // 다중 선택 (Phase 3.1)
+        // 탐색: Vim + 화살표
+        (KeyModifiers::NONE, KeyCode::Char('j')) | (_, KeyCode::Down) => app.move_selection_down(),
+        (KeyModifiers::NONE, KeyCode::Char('k')) | (_, KeyCode::Up) => app.move_selection_up(),
+        (KeyModifiers::NONE, KeyCode::Char('h')) | (_, KeyCode::Left) => app.go_to_parent(),
+        (KeyModifiers::NONE, KeyCode::Char('l')) | (KeyModifiers::NONE, KeyCode::Enter) => {
+            app.enter_selected()
+        }
+        // gg 시퀀스 / G / Home / End
+        (KeyModifiers::NONE, KeyCode::Char('g')) => app.set_pending_key('g'),
+        (_, KeyCode::Char('G')) => app.go_to_bottom(),
+        (_, KeyCode::Home) => app.go_to_top(),
+        (_, KeyCode::End) => app.go_to_bottom(),
+        // 페이지: Ctrl+U/D + PageUp/Down
+        (KeyModifiers::CONTROL, KeyCode::Char('u')) | (_, KeyCode::PageUp) => {
+            app.move_selection_page_up()
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) | (_, KeyCode::PageDown) => {
+            app.move_selection_page_down()
+        }
+        // 파일 조작 (Vim only)
+        (KeyModifiers::NONE, KeyCode::Char('y')) => app.start_copy(),
+        (KeyModifiers::NONE, KeyCode::Char('x')) => app.start_move(),
+        (KeyModifiers::NONE, KeyCode::Char('d')) => app.start_delete(),
+        (_, KeyCode::Char('D')) => app.start_permanent_delete(),
+        (KeyModifiers::NONE, KeyCode::Char('a')) => app.start_mkdir(),
+        (KeyModifiers::NONE, KeyCode::Char('r')) => app.start_rename(),
+        (KeyModifiers::NONE, KeyCode::Char('i')) => app.show_properties(),
+        // 선택
         (KeyModifiers::NONE, KeyCode::Char(' ')) => app.toggle_selection_and_move_down(),
-        (KeyModifiers::NONE, KeyCode::Char('*')) => app.select_all(), // PRD: * 또는 Ctrl+A
+        (KeyModifiers::NONE, KeyCode::Char('v')) => app.invert_selection(),
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => app.select_all(),
-        (KeyModifiers::NONE, KeyCode::Char('+')) => app.invert_selection(), // 선택 반전
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) => app.deselect_all(),
-        // 파일 복사/이동 (Phase 3.2)
-        (_, KeyCode::F(5)) => app.start_copy(),
-        (_, KeyCode::F(6)) => app.start_move(),
-        // 파일 삭제 (Phase 3.3)
-        (_, KeyCode::F(8)) => app.start_delete(),
-        // Phase 3.4: 기타 파일 작업
-        (_, KeyCode::F(7)) => app.start_mkdir(),
-        (_, KeyCode::F(2)) => app.start_rename(),
-        (KeyModifiers::ALT, KeyCode::Enter) => app.show_properties(),
-        // Esc는 아무것도 안 함 (메뉴가 닫혀있을 때)
+        (KeyModifiers::NONE, KeyCode::Char('u')) => app.deselect_all(),
+        // 시스템
+        (KeyModifiers::NONE, KeyCode::Char('?')) => app.show_help(),
+        (KeyModifiers::CONTROL, KeyCode::Char('r')) => app.refresh_current(),
+        // Esc는 아무것도 안 함
         (_, KeyCode::Esc) => {}
         _ => {}
     }
@@ -181,6 +210,9 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         }
         DialogKind::Properties { .. } => {
             handle_message_dialog_keys(app, modifiers, code);
+        }
+        DialogKind::Help { .. } => {
+            handle_help_dialog_keys(app, modifiers, code);
         }
     }
 }
@@ -398,6 +430,22 @@ fn handle_message_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: Key
     }
 }
 
+/// 도움말 다이얼로그 키 처리
+fn handle_help_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: KeyCode) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+            app.close_dialog();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.dialog_help_scroll_down();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.dialog_help_scroll_up();
+        }
+        _ => {}
+    }
+}
+
 /// 메뉴 모드 키 처리
 fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     match (modifiers, code) {
@@ -511,6 +559,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     let selected_count = active_panel_state.selected_count();
     let selected_size = format_file_size(active_panel_state.selected_size());
 
+    let pending_display = app.pending_key_display();
     let status_bar = StatusBar::new()
         .file_count(file_count)
         .dir_count(dir_count)
@@ -518,6 +567,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .selected_count(selected_count)
         .selected_size(&selected_size)
         .layout_mode(app.layout_mode_str())
+        .pending_key(pending_display.as_deref())
         .theme(theme);
     f.render_widget(status_bar, areas.status_bar);
 

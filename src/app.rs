@@ -12,6 +12,7 @@ use crate::ui::{
 use crate::utils::error::Result;
 use std::env;
 use std::path::PathBuf;
+use std::time::Instant;
 
 /// 앱 상태
 pub struct App {
@@ -36,6 +37,11 @@ pub struct App {
     pub dialog: Option<DialogKind>,
     /// 대기 중인 파일 작업
     pub pending_operation: Option<PendingOperation>,
+    // Phase 4: Vim 스타일 키 시퀀스
+    /// 대기 중인 키 (예: 'g' for 'gg')
+    pub pending_key: Option<char>,
+    /// 대기 키 입력 시각
+    pub pending_key_time: Option<Instant>,
 }
 
 impl App {
@@ -75,6 +81,8 @@ impl App {
             theme_manager: ThemeManager::new(),
             dialog: None,
             pending_operation: None,
+            pending_key: None,
+            pending_key_time: None,
         })
     }
 
@@ -241,6 +249,11 @@ impl App {
             "new_dir" => self.start_mkdir(),
             "rename" => self.start_rename(),
             "file_info" => self.show_properties(),
+            "perm_delete" => self.start_permanent_delete(),
+
+            // 시스템
+            "refresh" => self.refresh_current(),
+            "help_keys" => self.show_help(),
 
             _ => {}
         }
@@ -296,6 +309,159 @@ impl App {
         let panel = self.active_panel_state_mut();
         panel.selected_index = (panel.selected_index + page_size).min(max_index);
         self.adjust_scroll_offset();
+    }
+
+    /// 맨 위로 이동 (Home / gg)
+    pub fn go_to_top(&mut self) {
+        let panel = self.active_panel_state_mut();
+        panel.selected_index = 0;
+        self.adjust_scroll_offset();
+    }
+
+    /// 맨 아래로 이동 (End / G)
+    pub fn go_to_bottom(&mut self) {
+        let max_index = self.get_max_index();
+        let panel = self.active_panel_state_mut();
+        panel.selected_index = max_index;
+        self.adjust_scroll_offset();
+    }
+
+    /// 상위 디렉토리로 이동 (h / Left)
+    pub fn go_to_parent(&mut self) {
+        let panel = self.active_panel_state();
+        let current_path = panel.current_path.clone();
+
+        if let Some(parent) = current_path.parent() {
+            let parent_path = parent.to_path_buf();
+            let current_dir_name = current_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string());
+
+            match self.active_panel() {
+                ActivePanel::Left => {
+                    let _ = self.left_panel.change_directory_and_focus(
+                        parent_path,
+                        current_dir_name.as_deref(),
+                        &self.filesystem,
+                    );
+                }
+                ActivePanel::Right => {
+                    let _ = self.right_panel.change_directory_and_focus(
+                        parent_path,
+                        current_dir_name.as_deref(),
+                        &self.filesystem,
+                    );
+                }
+            }
+        }
+    }
+
+    /// 현재 패널 새로고침 (Ctrl+R)
+    pub fn refresh_current(&mut self) {
+        match self.active_panel() {
+            ActivePanel::Left => {
+                let _ = self.left_panel.refresh(&self.filesystem);
+            }
+            ActivePanel::Right => {
+                let _ = self.right_panel.refresh(&self.filesystem);
+            }
+        }
+    }
+
+    /// 영구 삭제 시작 (D)
+    pub fn start_permanent_delete(&mut self) {
+        let sources = self.get_operation_sources();
+
+        if sources.is_empty() {
+            self.dialog = Some(DialogKind::message(
+                "Information",
+                "No files selected for deletion.",
+            ));
+            return;
+        }
+
+        let items: Vec<String> = sources
+            .iter()
+            .map(|p| {
+                let name = p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                if p.is_dir() {
+                    format!("{}/", name)
+                } else {
+                    name
+                }
+            })
+            .collect();
+
+        let (total_bytes, total_files) = self
+            .filesystem
+            .calculate_total_size(&sources)
+            .unwrap_or((0, 0));
+        let total_size = format!(
+            "{} file(s), {}",
+            total_files,
+            crate::utils::formatter::format_file_size(total_bytes)
+        );
+
+        let mut pending = PendingOperation::new(OperationType::Delete, sources, PathBuf::new());
+        pending.progress.total_bytes = total_bytes;
+        pending.progress.total_files = total_files;
+        self.pending_operation = Some(pending);
+
+        // 영구 삭제 기본 선택 (selected_button: 1)
+        self.dialog = Some(DialogKind::DeleteConfirm {
+            items,
+            total_size,
+            selected_button: 1,
+        });
+    }
+
+    /// 도움말 표시 (?)
+    pub fn show_help(&mut self) {
+        self.dialog = Some(DialogKind::help());
+    }
+
+    // === pending_key 시스템 (Phase 4) ===
+
+    /// 대기 키 설정
+    pub fn set_pending_key(&mut self, key: char) {
+        self.pending_key = Some(key);
+        self.pending_key_time = Some(Instant::now());
+    }
+
+    /// 대기 키 초기화
+    pub fn clear_pending_key(&mut self) {
+        self.pending_key = None;
+        self.pending_key_time = None;
+    }
+
+    /// 대기 키 만료 여부 (500ms)
+    pub fn is_pending_key_expired(&self) -> bool {
+        self.pending_key_time
+            .is_some_and(|t| t.elapsed().as_millis() > 500)
+    }
+
+    /// 대기 키 표시 문자열 (상태바용)
+    pub fn pending_key_display(&self) -> Option<String> {
+        self.pending_key.map(|k| format!("{}_", k))
+    }
+
+    /// 도움말 스크롤 아래로
+    pub fn dialog_help_scroll_down(&mut self) {
+        if let Some(DialogKind::Help { scroll_offset }) = &mut self.dialog {
+            *scroll_offset += 1;
+        }
+    }
+
+    /// 도움말 스크롤 위로
+    pub fn dialog_help_scroll_up(&mut self) {
+        if let Some(DialogKind::Help { scroll_offset }) = &mut self.dialog {
+            *scroll_offset = scroll_offset.saturating_sub(1);
+        }
     }
 
     /// 최대 인덱스 계산
@@ -607,12 +773,12 @@ impl App {
         }
     }
 
-    /// 복사 시작 (F5)
+    /// 복사 시작 (y)
     pub fn start_copy(&mut self) {
         self.start_file_operation(OperationType::Copy);
     }
 
-    /// 이동 시작 (F6)
+    /// 이동 시작 (x)
     pub fn start_move(&mut self) {
         self.start_file_operation(OperationType::Move);
     }
@@ -926,7 +1092,7 @@ impl App {
 
     // === 파일 삭제 관련 메서드 (Phase 3.3) ===
 
-    /// 삭제 시작 (F8)
+    /// 삭제 시작 (d)
     pub fn start_delete(&mut self) {
         let sources = self.get_operation_sources();
 
@@ -1114,7 +1280,7 @@ impl App {
 
     // === Phase 3.4: 기타 파일 작업 ===
 
-    /// 새 디렉토리 생성 시작 (F7)
+    /// 새 디렉토리 생성 시작 (a)
     pub fn start_mkdir(&mut self) {
         let parent_path = self.active_panel_state().current_path.clone();
         self.dialog = Some(DialogKind::mkdir_input(parent_path));
@@ -1151,7 +1317,7 @@ impl App {
         }
     }
 
-    /// 이름 변경 시작 (F2)
+    /// 이름 변경 시작 (r)
     pub fn start_rename(&mut self) {
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
@@ -1721,6 +1887,8 @@ impl Default for App {
                 theme_manager: ThemeManager::new(),
                 dialog: None,
                 pending_operation: None,
+                pending_key: None,
+                pending_key_time: None,
             }
         })
     }

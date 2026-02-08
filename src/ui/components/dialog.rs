@@ -66,6 +66,8 @@ pub enum DialogKind {
         selected_button: usize, // 0: OK, 1: Cancel
         original_path: PathBuf,
     },
+    /// 단축키 도움말 다이얼로그 (Phase 4)
+    Help { scroll_offset: usize },
     /// 파일 속성 다이얼로그
     Properties {
         name: String,
@@ -164,6 +166,11 @@ impl DialogKind {
             selected_button: 0,
             original_path,
         }
+    }
+
+    /// 단축키 도움말 다이얼로그
+    pub fn help() -> Self {
+        DialogKind::Help { scroll_offset: 0 }
     }
 
     /// 파일 속성 다이얼로그
@@ -297,6 +304,7 @@ impl<'a> Dialog<'a> {
                 let list_lines = items.len().min(10) as u16;
                 (45, (7 + list_lines).min(20))
             }
+            DialogKind::Help { .. } => (60, 22),
             DialogKind::MkdirInput { .. } => (50, 7),
             DialogKind::RenameInput { .. } => (50, 7),
             DialogKind::Properties { children_info, .. } => {
@@ -833,6 +841,120 @@ impl<'a> Dialog<'a> {
         self.render_button(buf, button_x, button_y, "OK", true);
     }
 
+    /// 도움말 다이얼로그 렌더링
+    fn render_help(&self, buf: &mut Buffer, area: Rect, scroll_offset: usize) {
+        // 테두리
+        let block = Block::default()
+            .title(" Keyboard Shortcuts ")
+            .title_style(
+                Style::default()
+                    .fg(self.title_color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        block.render(area, buf);
+
+        let inner = Rect {
+            x: area.x + 2,
+            y: area.y + 1,
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(3), // 하단 힌트 공간 확보
+        };
+
+        let header_style = Style::default()
+            .fg(self.title_color)
+            .add_modifier(Modifier::BOLD);
+        let key_style = Style::default().fg(Color::Rgb(86, 156, 214));
+        let desc_style = Style::default().fg(self.fg_color);
+
+        // 도움말 내용 (카테고리별)
+        let lines: Vec<(&str, Vec<(&str, &str)>)> = vec![
+            (
+                "Navigation",
+                vec![
+                    ("j/k", "Move down/up"),
+                    ("h/l", "Parent dir / Enter dir"),
+                    ("gg/G", "Top / Bottom"),
+                    ("Ctrl+U/D", "Half page up/down"),
+                    ("Tab", "Switch panel"),
+                ],
+            ),
+            (
+                "File Operations",
+                vec![
+                    ("y", "Copy"),
+                    ("x", "Move"),
+                    ("d", "Delete (trash)"),
+                    ("D", "Permanent delete"),
+                    ("a", "New directory"),
+                    ("r", "Rename"),
+                    ("i", "File properties"),
+                ],
+            ),
+            (
+                "Selection",
+                vec![
+                    ("Space", "Toggle select"),
+                    ("v", "Invert selection"),
+                    ("Ctrl+A", "Select all"),
+                    ("u", "Deselect all"),
+                ],
+            ),
+            (
+                "System",
+                vec![
+                    ("?", "This help"),
+                    ("Ctrl+R", "Refresh"),
+                    ("F9", "Menu"),
+                    ("q/F10", "Quit"),
+                ],
+            ),
+        ];
+
+        // 전체 행 리스트 생성
+        let mut all_rows: Vec<(bool, &str, &str)> = Vec::new(); // (is_header, col1, col2)
+        for (category, items) in &lines {
+            all_rows.push((true, category, ""));
+            for (key, desc) in items {
+                all_rows.push((false, key, desc));
+            }
+            all_rows.push((false, "", "")); // 빈 줄
+        }
+
+        // 스크롤 적용
+        let visible_height = inner.height as usize;
+        let max_scroll = all_rows.len().saturating_sub(visible_height);
+        let effective_scroll = scroll_offset.min(max_scroll);
+
+        let key_col_width = 14u16;
+
+        for (i, row) in all_rows
+            .iter()
+            .skip(effective_scroll)
+            .take(visible_height)
+            .enumerate()
+        {
+            let y = inner.y + i as u16;
+            if row.0 {
+                // 카테고리 헤더
+                buf.set_string(inner.x, y, row.1, header_style);
+            } else if !row.1.is_empty() {
+                // 키바인딩
+                buf.set_string(inner.x + 2, y, row.1, key_style);
+                buf.set_string(inner.x + key_col_width, y, row.2, desc_style);
+            }
+        }
+
+        // 하단 힌트
+        let hint = "Esc/?:Close  j/k:Scroll";
+        let hint_style = Style::default().fg(Color::Rgb(128, 128, 128));
+        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint_y = area.y + area.height - 2;
+        buf.set_string(hint_x, hint_y, hint, hint_style);
+    }
+
     /// 에러/메시지 다이얼로그 렌더링
     fn render_message(
         &self,
@@ -972,6 +1094,9 @@ impl Widget for Dialog<'_> {
                     *cursor_pos,
                     *selected_button,
                 );
+            }
+            DialogKind::Help { scroll_offset } => {
+                self.render_help(buf, dialog_area, *scroll_offset);
             }
             DialogKind::Properties {
                 name,

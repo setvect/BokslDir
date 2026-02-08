@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 // Command bar component - 하단 커맨드 바 컴포넌트
 //
-// F1~F12 단축키 표시
+// Vim 스타일 단축키 표시 (화면 너비에 따라 우선순위 기반 동적 표시)
 
 use crate::ui::Theme;
 use ratatui::{
@@ -15,9 +15,9 @@ use ratatui::{
 /// 커맨드 항목
 #[derive(Debug, Clone)]
 pub struct CommandItem {
-    /// 단축키 (F1, F2, ...)
+    /// 단축키
     pub key: String,
-    /// 레이블 (Help, Menu, ...)
+    /// 레이블
     pub label: String,
     /// 활성화 여부
     pub enabled: bool,
@@ -32,15 +32,15 @@ impl CommandItem {
         }
     }
 
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
-        self
+    /// 렌더링 시 필요한 너비 계산 ("key:label" + 구분자 1)
+    fn display_width(&self) -> usize {
+        self.key.len() + 1 + self.label.len()
     }
 }
 
 /// 커맨드 바 컴포넌트
 pub struct CommandBar {
-    /// 커맨드 항목들
+    /// 커맨드 항목들 (우선순위 순서)
     commands: Vec<CommandItem>,
     /// 배경색
     bg_color: Color,
@@ -69,42 +69,39 @@ impl CommandBar {
         Self::default()
     }
 
-    /// 기본 커맨드 목록
+    /// 기본 커맨드 목록 (우선순위 순서 - 앞쪽이 높은 우선순위)
     fn default_commands() -> Vec<CommandItem> {
         vec![
-            CommandItem::new("F1", "Help"),
-            CommandItem::new("F2", "Menu"),
-            CommandItem::new("F3", "View"),
-            CommandItem::new("F4", "Edit"),
-            CommandItem::new("F5", "Copy"),
-            CommandItem::new("F6", "Move"),
-            CommandItem::new("F7", "Dir"),
-            CommandItem::new("F8", "Del"),
-            CommandItem::new("F10", "Quit"),
+            // 우선순위 1: 핵심 파일 조작
+            CommandItem::new("y", "Copy"),
+            CommandItem::new("x", "Move"),
+            CommandItem::new("d", "Del"),
+            CommandItem::new("a", "MkDir"),
+            CommandItem::new("r", "Ren"),
+            CommandItem::new("i", "Info"),
+            // 우선순위 2: 시스템
+            CommandItem::new("?", "Help"),
+            CommandItem::new("q", "Quit"),
+            // 우선순위 3: 선택
+            CommandItem::new("Sp", "Sel"),
+            CommandItem::new("v", "InvSel"),
+            CommandItem::new("^A", "SelAll"),
+            CommandItem::new("u", "Desel"),
+            // 우선순위 4: 추가 파일 조작
+            CommandItem::new("D", "PermDel"),
+            CommandItem::new("^R", "Refresh"),
+            // 우선순위 5: 탐색
+            CommandItem::new("j/k", "Up/Dn"),
+            CommandItem::new("h/l", "Nav"),
+            CommandItem::new("gg/G", "Top/Bot"),
+            CommandItem::new("^U/D", "Page"),
+            CommandItem::new("Tab", "Panel"),
         ]
     }
 
     /// 커맨드 목록 설정
     pub fn commands(mut self, commands: Vec<CommandItem>) -> Self {
         self.commands = commands;
-        self
-    }
-
-    /// 배경색 설정
-    pub fn bg_color(mut self, color: Color) -> Self {
-        self.bg_color = color;
-        self
-    }
-
-    /// 키 전경색 설정
-    pub fn key_fg_color(mut self, color: Color) -> Self {
-        self.key_fg_color = color;
-        self
-    }
-
-    /// 레이블 전경색 설정
-    pub fn label_fg_color(mut self, color: Color) -> Self {
-        self.label_fg_color = color;
         self
     }
 
@@ -122,11 +119,44 @@ impl Widget for CommandBar {
         // 배경 채우기
         buf.set_style(area, Style::default().bg(self.bg_color));
 
-        // 커맨드 항목들을 스팬으로 변환
+        let available_width = area.width as usize;
+        if available_width < 3 {
+            return;
+        }
+
+        // 우선순위 순서로 항목을 채워넣기 (화면 너비에 맞게)
+        let padding = 1; // 왼쪽 패딩
+        let separator = 2; // 항목 간 구분자 " | "
+        let mut used_width = padding;
+        let mut visible_count = 0;
+
+        for cmd in &self.commands {
+            let item_width = cmd.display_width();
+            let needed = if visible_count == 0 {
+                item_width
+            } else {
+                separator + item_width
+            };
+
+            if used_width + needed > available_width {
+                break;
+            }
+
+            used_width += needed;
+            visible_count += 1;
+        }
+
+        // 스팬 생성
         let mut spans = Vec::new();
         spans.push(Span::raw(" ")); // 왼쪽 패딩
 
-        for (i, cmd) in self.commands.iter().enumerate() {
+        let sep_style = Style::default().fg(Color::Rgb(80, 80, 80));
+
+        for (i, cmd) in self.commands.iter().take(visible_count).enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(" | ", sep_style));
+            }
+
             let (key_style, label_style) = if cmd.enabled {
                 (
                     Style::default()
@@ -144,11 +174,6 @@ impl Widget for CommandBar {
             spans.push(Span::styled(&cmd.key, key_style));
             spans.push(Span::styled(":", label_style));
             spans.push(Span::styled(&cmd.label, label_style));
-
-            // 마지막 항목이 아니면 구분자 추가
-            if i < self.commands.len() - 1 {
-                spans.push(Span::raw(" "));
-            }
         }
 
         let line = Line::from(spans);
@@ -163,15 +188,30 @@ mod tests {
 
     #[test]
     fn test_command_item_creation() {
-        let item = CommandItem::new("F1", "Help");
-        assert_eq!(item.key, "F1");
-        assert_eq!(item.label, "Help");
+        let item = CommandItem::new("y", "Copy");
+        assert_eq!(item.key, "y");
+        assert_eq!(item.label, "Copy");
         assert!(item.enabled);
     }
 
     #[test]
     fn test_command_bar_default() {
         let bar = CommandBar::default();
-        assert_eq!(bar.commands.len(), 9);
+        assert_eq!(bar.commands.len(), 19);
+    }
+
+    #[test]
+    fn test_display_width() {
+        let item = CommandItem::new("y", "Copy");
+        assert_eq!(item.display_width(), 6); // "y:Copy"
+    }
+
+    #[test]
+    fn test_width_based_visibility() {
+        let bar = CommandBar::default();
+        // 첫 번째 항목 "y:Copy" = 6자, 패딩 1 = 7자 필요
+        // 매우 좁은 화면에서는 일부만 표시됨
+        let first_item_width = bar.commands[0].display_width();
+        assert_eq!(first_item_width, 6);
     }
 }

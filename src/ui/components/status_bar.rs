@@ -26,6 +26,8 @@ pub struct StatusBar<'a> {
     selected_size: &'a str,
     /// 레이아웃 모드 표시 (싱글/듀얼)
     layout_mode: &'a str,
+    /// 대기 키 표시 (Phase 4)
+    pending_key: Option<&'a str>,
     /// 배경색
     bg_color: Color,
     /// 전경색
@@ -41,6 +43,7 @@ impl<'a> Default for StatusBar<'a> {
             selected_count: 0,
             selected_size: "0B",
             layout_mode: "DUAL",
+            pending_key: None,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
         }
@@ -88,6 +91,12 @@ impl<'a> StatusBar<'a> {
         self
     }
 
+    /// 대기 키 표시 설정
+    pub fn pending_key(mut self, key: Option<&'a str>) -> Self {
+        self.pending_key = key;
+        self
+    }
+
     /// 배경색 설정
     pub fn bg_color(mut self, color: Color) -> Self {
         self.bg_color = color;
@@ -129,11 +138,17 @@ impl Widget for StatusBar<'_> {
             String::new()
         };
 
+        // 대기 키 표시
+        let pending_info = match self.pending_key {
+            Some(key) => format!(" [{}]", key),
+            None => String::new(),
+        };
+
         // 오른쪽 정보: 레이아웃 모드
         let right_info = format!("[{}] ", self.layout_mode);
 
         // 가용 공간 계산
-        let left_len = left_info.len() + selected_info.len();
+        let left_len = left_info.len() + selected_info.len() + pending_info.len();
         let right_len = right_info.len();
         let padding_len = area
             .width
@@ -143,6 +158,7 @@ impl Widget for StatusBar<'_> {
         let spans = vec![
             Span::styled(&left_info, Style::default().fg(self.fg_color)),
             Span::styled(&selected_info, Style::default().fg(Color::Yellow)),
+            Span::styled(&pending_info, Style::default().fg(Color::Cyan)),
             Span::raw(padding),
             Span::styled(right_info, Style::default().fg(Color::Rgb(100, 100, 100))),
         ];

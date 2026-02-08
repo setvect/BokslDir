@@ -606,37 +606,25 @@ impl Widget for DropdownMenu<'_> {
 pub fn create_default_menus() -> Vec<Menu> {
     vec![
         Menu::new("file", "파일(F)").hotkey('f').items(vec![
-            MenuItem::action("new_file", "새 파일").shortcut("Ctrl+N"),
-            MenuItem::action("new_dir", "새 폴더").shortcut("F7"),
+            MenuItem::action("new_dir", "새 폴더").shortcut("a"),
             MenuItem::separator(),
-            MenuItem::action("open", "열기").shortcut("Enter"),
-            MenuItem::submenu(
-                "open_with",
-                "연결 프로그램",
-                vec![
-                    MenuItem::action("open_default", "기본 프로그램"),
-                    MenuItem::action("open_vscode", "VS Code"),
-                    MenuItem::action("open_vim", "vim"),
-                    MenuItem::separator(),
-                    MenuItem::action("open_choose", "선택..."),
-                ],
-            ),
+            MenuItem::action("rename", "이름 변경").shortcut("r"),
+            MenuItem::action("delete", "삭제").shortcut("d"),
+            MenuItem::action("perm_delete", "영구 삭제").shortcut("D"),
             MenuItem::separator(),
-            MenuItem::action("rename", "이름 변경").shortcut("F2"),
-            MenuItem::action("delete", "삭제").shortcut("F8"),
-            MenuItem::separator(),
-            MenuItem::action("quit", "종료").shortcut("F10"),
+            MenuItem::action("quit", "종료").shortcut("q"),
         ]),
         Menu::new("edit", "편집(E)").hotkey('e').items(vec![
-            MenuItem::action("copy", "복사").shortcut("F5"),
-            MenuItem::action("move", "이동").shortcut("F6"),
+            MenuItem::action("copy", "복사").shortcut("y"),
+            MenuItem::action("move", "이동").shortcut("x"),
             MenuItem::separator(),
             MenuItem::action("select_all", "전체 선택").shortcut("Ctrl+A"),
-            MenuItem::action("invert_selection", "선택 반전").shortcut("*"),
-            MenuItem::action("deselect", "선택 해제").shortcut("Ctrl+D"),
+            MenuItem::action("invert_selection", "선택 반전").shortcut("v"),
+            MenuItem::action("deselect", "선택 해제").shortcut("u"),
         ]),
         Menu::new("view", "보기(V)").hotkey('v').items(vec![
             MenuItem::action("refresh", "새로고침").shortcut("Ctrl+R"),
+            MenuItem::action("file_info", "파일 정보").shortcut("i"),
             MenuItem::separator(),
             MenuItem::submenu(
                 "sort_by",
@@ -656,20 +644,10 @@ pub fn create_default_menus() -> Vec<Menu> {
                     MenuItem::action("sort_desc", "내림차순"),
                 ],
             ),
-            MenuItem::separator(),
-            MenuItem::action("show_hidden", "숨김 파일 표시").shortcut("Ctrl+H"),
-            MenuItem::action("file_info", "파일 정보").shortcut("Ctrl+I"),
         ]),
-        Menu::new("tools", "도구(T)").hotkey('t').items(vec![
-            MenuItem::action("terminal", "터미널 열기").shortcut("Ctrl+O"),
-            MenuItem::action("run_cmd", "명령어 실행").shortcut("Ctrl+E"),
-            MenuItem::separator(),
-            MenuItem::action("search", "파일 검색").shortcut("Ctrl+F"),
-            MenuItem::action("compare", "파일 비교"),
-            MenuItem::action("disk_usage", "디스크 사용량"),
-        ]),
-        Menu::new("settings", "설정(S)").hotkey('s').items(vec![
-            MenuItem::submenu(
+        Menu::new("settings", "설정(S)")
+            .hotkey('s')
+            .items(vec![MenuItem::submenu(
                 "theme",
                 "테마",
                 vec![
@@ -677,25 +655,9 @@ pub fn create_default_menus() -> Vec<Menu> {
                     MenuItem::action("theme_light", "Light"),
                     MenuItem::action("theme_contrast", "High Contrast"),
                 ],
-            ),
-            MenuItem::submenu(
-                "panel_ratio",
-                "패널 비율",
-                vec![
-                    MenuItem::action("ratio_50_50", "50:50"),
-                    MenuItem::action("ratio_70_30", "70:30"),
-                    MenuItem::action("ratio_30_70", "30:70"),
-                ],
-            ),
-            MenuItem::separator(),
-            MenuItem::action("keybindings", "단축키 설정"),
-            MenuItem::action("file_assoc", "파일 연결 설정"),
-            MenuItem::action("preferences", "환경 설정...").shortcut("F12"),
-        ]),
+            )]),
         Menu::new("help", "도움말(H)").hotkey('h').items(vec![
-            MenuItem::action("help_keys", "단축키 도움말").shortcut("F1"),
-            MenuItem::action("manual", "사용 설명서"),
-            MenuItem::separator(),
+            MenuItem::action("help_keys", "단축키 도움말").shortcut("?"),
             MenuItem::action("about", "복슬Dir 정보"),
         ]),
     ]
@@ -742,7 +704,7 @@ mod tests {
     #[test]
     fn test_default_menus() {
         let menus = create_default_menus();
-        assert_eq!(menus.len(), 6);
+        assert_eq!(menus.len(), 5);
         assert_eq!(menus[0].title, "파일(F)");
     }
 }

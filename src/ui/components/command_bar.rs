@@ -3,6 +3,7 @@
 //
 // Vim 스타일 단축키 표시 (화면 너비에 따라 우선순위 기반 동적 표시)
 
+use crate::core::actions::generate_command_bar_items;
 use crate::ui::Theme;
 use ratatui::{
     buffer::Buffer,
@@ -69,34 +70,9 @@ impl CommandBar {
         Self::default()
     }
 
-    /// 기본 커맨드 목록 (우선순위 순서 - 앞쪽이 높은 우선순위)
+    /// 기본 커맨드 목록 (액션 레지스트리에서 생성)
     fn default_commands() -> Vec<CommandItem> {
-        vec![
-            // 우선순위 1: 핵심 파일 조작
-            CommandItem::new("y", "Copy"),
-            CommandItem::new("x", "Move"),
-            CommandItem::new("d", "Del"),
-            CommandItem::new("a", "MkDir"),
-            CommandItem::new("r", "Ren"),
-            CommandItem::new("i", "Info"),
-            // 우선순위 2: 시스템
-            CommandItem::new("?", "Help"),
-            CommandItem::new("q", "Quit"),
-            // 우선순위 3: 선택
-            CommandItem::new("Sp", "Sel"),
-            CommandItem::new("v", "InvSel"),
-            CommandItem::new("^A", "SelAll"),
-            CommandItem::new("u", "Desel"),
-            // 우선순위 4: 추가 파일 조작
-            CommandItem::new("D", "PermDel"),
-            CommandItem::new("^R", "Refresh"),
-            // 우선순위 5: 탐색
-            CommandItem::new("j/k", "Up/Dn"),
-            CommandItem::new("h/l", "Nav"),
-            CommandItem::new("gg/G", "Top/Bot"),
-            CommandItem::new("^U/D", "Page"),
-            CommandItem::new("Tab", "Panel"),
-        ]
+        generate_command_bar_items()
     }
 
     /// 커맨드 목록 설정

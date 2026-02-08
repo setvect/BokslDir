@@ -3,6 +3,7 @@
 //
 // 2단계 드롭다운 메뉴 시스템
 
+use crate::core::actions::get_shortcut_display;
 use crate::ui::Theme;
 use ratatui::{
     buffer::Buffer,
@@ -602,46 +603,55 @@ impl Widget for DropdownMenu<'_> {
     }
 }
 
+/// 메뉴 항목 생성 헬퍼 (레지스트리에서 단축키 자동 조회)
+fn menu_action(id: &str, label: &str) -> MenuItem {
+    let mut item = MenuItem::action(id, label);
+    if let Some(shortcut) = get_shortcut_display(id) {
+        item = item.shortcut(shortcut);
+    }
+    item
+}
+
 /// 기본 메뉴 생성
 pub fn create_default_menus() -> Vec<Menu> {
     vec![
         Menu::new("file", "파일(F)").hotkey('f').items(vec![
-            MenuItem::action("new_dir", "새 폴더").shortcut("a"),
+            menu_action("new_dir", "새 폴더"),
             MenuItem::separator(),
-            MenuItem::action("rename", "이름 변경").shortcut("r"),
-            MenuItem::action("delete", "삭제").shortcut("d"),
-            MenuItem::action("perm_delete", "영구 삭제").shortcut("D"),
+            menu_action("rename", "이름 변경"),
+            menu_action("delete", "삭제"),
+            menu_action("perm_delete", "영구 삭제"),
             MenuItem::separator(),
-            MenuItem::action("quit", "종료").shortcut("q"),
+            menu_action("quit", "종료"),
         ]),
         Menu::new("edit", "편집(E)").hotkey('e').items(vec![
-            MenuItem::action("copy", "복사").shortcut("y"),
-            MenuItem::action("move", "이동").shortcut("x"),
+            menu_action("copy", "복사"),
+            menu_action("move", "이동"),
             MenuItem::separator(),
-            MenuItem::action("select_all", "전체 선택").shortcut("Ctrl+A"),
-            MenuItem::action("invert_selection", "선택 반전").shortcut("v"),
-            MenuItem::action("deselect", "선택 해제").shortcut("u"),
+            menu_action("select_all", "전체 선택"),
+            menu_action("invert_selection", "선택 반전"),
+            menu_action("deselect", "선택 해제"),
         ]),
         Menu::new("view", "보기(V)").hotkey('v').items(vec![
-            MenuItem::action("refresh", "새로고침").shortcut("Ctrl+R"),
-            MenuItem::action("file_info", "파일 정보").shortcut("i"),
+            menu_action("refresh", "새로고침"),
+            menu_action("file_info", "파일 정보"),
             MenuItem::separator(),
             MenuItem::submenu(
                 "sort_by",
                 "정렬 기준",
                 vec![
-                    MenuItem::action("sort_name", "이름"),
-                    MenuItem::action("sort_size", "크기"),
-                    MenuItem::action("sort_date", "수정 날짜"),
-                    MenuItem::action("sort_ext", "확장자"),
+                    menu_action("sort_name", "이름"),
+                    menu_action("sort_size", "크기"),
+                    menu_action("sort_date", "수정 날짜"),
+                    menu_action("sort_ext", "확장자"),
                 ],
             ),
             MenuItem::submenu(
                 "sort_order",
                 "정렬 순서",
                 vec![
-                    MenuItem::action("sort_asc", "오름차순"),
-                    MenuItem::action("sort_desc", "내림차순"),
+                    menu_action("sort_asc", "오름차순"),
+                    menu_action("sort_desc", "내림차순"),
                 ],
             ),
         ]),
@@ -651,14 +661,14 @@ pub fn create_default_menus() -> Vec<Menu> {
                 "theme",
                 "테마",
                 vec![
-                    MenuItem::action("theme_dark", "Dark (기본)"),
-                    MenuItem::action("theme_light", "Light"),
-                    MenuItem::action("theme_contrast", "High Contrast"),
+                    menu_action("theme_dark", "Dark (기본)"),
+                    menu_action("theme_light", "Light"),
+                    menu_action("theme_contrast", "High Contrast"),
                 ],
             )]),
         Menu::new("help", "도움말(H)").hotkey('h').items(vec![
-            MenuItem::action("help_keys", "단축키 도움말").shortcut("?"),
-            MenuItem::action("about", "복슬Dir 정보"),
+            menu_action("help_keys", "단축키 도움말"),
+            menu_action("about", "복슬Dir 정보"),
         ]),
     ]
 }

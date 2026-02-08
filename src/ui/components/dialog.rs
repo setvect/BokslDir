@@ -4,6 +4,7 @@
 
 #![allow(dead_code)]
 
+use crate::core::actions::generate_help_entries;
 use crate::models::operation::{ConflictResolution, OperationProgress};
 use crate::ui::Theme;
 use crate::utils::formatter::format_file_size;
@@ -869,49 +870,8 @@ impl<'a> Dialog<'a> {
         let key_style = Style::default().fg(Color::Rgb(86, 156, 214));
         let desc_style = Style::default().fg(self.fg_color);
 
-        // 도움말 내용 (카테고리별)
-        let lines: Vec<(&str, Vec<(&str, &str)>)> = vec![
-            (
-                "Navigation",
-                vec![
-                    ("j/k", "Move down/up"),
-                    ("h/l", "Parent dir / Enter dir"),
-                    ("gg/G", "Top / Bottom"),
-                    ("Ctrl+U/D", "Half page up/down"),
-                    ("Tab", "Switch panel"),
-                ],
-            ),
-            (
-                "File Operations",
-                vec![
-                    ("y", "Copy"),
-                    ("x", "Move"),
-                    ("d", "Delete (trash)"),
-                    ("D", "Permanent delete"),
-                    ("a", "New directory"),
-                    ("r", "Rename"),
-                    ("i", "File properties"),
-                ],
-            ),
-            (
-                "Selection",
-                vec![
-                    ("Space", "Toggle select"),
-                    ("v", "Invert selection"),
-                    ("Ctrl+A", "Select all"),
-                    ("u", "Deselect all"),
-                ],
-            ),
-            (
-                "System",
-                vec![
-                    ("?", "This help"),
-                    ("Ctrl+R", "Refresh"),
-                    ("F9", "Menu"),
-                    ("q/F10", "Quit"),
-                ],
-            ),
-        ];
+        // 도움말 내용 (액션 레지스트리에서 생성)
+        let lines = generate_help_entries();
 
         // 전체 행 리스트 생성
         let mut all_rows: Vec<(bool, &str, &str)> = Vec::new(); // (is_header, col1, col2)

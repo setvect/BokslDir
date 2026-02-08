@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
-**현재 상태**: Phase 4 완료 (Vim 스타일 단축키)
+**현재 상태**: Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
 **다음 단계**: Phase 5 - 파일 정렬 및 필터링
 
 ## 개발 명령어
@@ -41,6 +41,8 @@ cargo test <test_name>   # 단일 테스트 실행
 src/
 ├── app.rs              # 앱 상태 및 비즈니스 로직 (App 구조체)
 ├── main.rs             # 이벤트 루프, 키 핸들링
+├── core/               # Core Layer
+│   └── actions.rs      # 액션 시스템 (Action enum, 키바인딩 레지스트리)
 ├── ui/                 # UI Layer
 │   ├── layout.rs       # 반응형 레이아웃 (LayoutManager)
 │   ├── theme.rs        # 색상 테마 (ThemeManager)
@@ -50,7 +52,7 @@ src/
 │       ├── menu_bar.rs     # 상단 메뉴바
 │       ├── dropdown_menu.rs # 드롭다운 메뉴
 │       ├── status_bar.rs   # 하단 상태바
-│       └── command_bar.rs  # F키 단축키 바
+│       └── command_bar.rs  # 단축키 바
 ├── models/             # 데이터 모델
 │   ├── file_entry.rs   # 파일 정보 (FileEntry, FileType)
 │   └── panel_state.rs  # 패널 상태 (PanelState)
@@ -64,10 +66,20 @@ src/
 ### 주요 데이터 흐름
 
 ```
-키 입력 → main.rs (handle_normal_keys/handle_menu_keys)
-       → App 메서드 호출 → 상태 업데이트
+키 입력 → main.rs (handle_normal_keys)
+       → core/actions.rs (find_action) → Action enum
+       → app.rs (execute_action) → 상태 업데이트
        → renderer.rs → 화면 렌더링
 ```
+
+### 액션 시스템 (Single Source of Truth)
+
+`src/core/actions.rs`가 모든 액션/단축키의 단일 진실 원천:
+- **Action enum**: 모든 가능한 액션 열거
+- **ACTION_DEFS**: 액션별 메타데이터 (id, label, category, shortcut, command_bar)
+- **key_bindings()**: 키 → 액션 매핑
+- **소비자**: main.rs, app.rs, command_bar.rs, dialog.rs, dropdown_menu.rs 모두 레지스트리 참조
+- **새 기능 추가 시**: `actions.rs`에만 등록하면 모든 소비자에 자동 반영
 
 ### 핵심 구조체
 
@@ -156,11 +168,13 @@ src/
 **새로운 기능을 구현할 때, 해당 기능이 단축키로 접근 가능하다고 판단되면 반드시 단축키를 할당해야 한다.**
 
 - Vim 스타일 니모닉 키를 우선 할당 (예: `e` = edit, `o` = open)
-- 위 매핑표에 새 단축키를 추가하고, PRD Phase 4의 키바인딩 매핑표도 함께 업데이트
+- **`src/core/actions.rs`에만 등록하면 모든 소비자에 자동 반영**:
+  1. `Action` enum에 새 variant 추가
+  2. `ACTION_DEFS`에 메타데이터 추가 (id, label, shortcut_display, command_bar)
+  3. `key_bindings()`에 키 매핑 추가
+  4. `app.rs`의 `execute_action()`에 매치 암 추가
 - 기존 키와 충돌하지 않는지 반드시 확인
-- `main.rs`의 `handle_normal_keys()` 함수에 키 핸들러 추가
-- 도움말 팝업 (`?`) 내용에도 새 단축키 반영
-- 커맨드 바 `command_bar.rs`의 `default_commands()`에도 반영
+- 위 매핑표도 함께 업데이트
 
 ## 중요한 설계 결정사항
 

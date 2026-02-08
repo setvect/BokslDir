@@ -6,6 +6,7 @@ mod ui;
 mod utils;
 
 use app::App;
+use core::actions::{find_action, Action};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
@@ -114,63 +115,26 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
     Ok(())
 }
 
-/// 일반 모드 키 처리 (Phase 4: Vim 스타일)
+/// 일반 모드 키 처리 (액션 레지스트리 기반)
 fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
-    // 1) pending 키 시퀀스 처리
+    // 1) pending 키 시퀀스 처리 (gg 전용)
     if let Some(pending) = app.pending_key {
         app.clear_pending_key();
         if let ('g', KeyCode::Char('g')) = (pending, &code) {
-            app.go_to_top();
+            app.execute_action(Action::GoToTop);
             return;
         }
     }
 
-    // 2) 일반 키 처리
-    match (modifiers, code) {
-        // 종료
-        (KeyModifiers::NONE, KeyCode::Char('q')) => app.quit(),
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
-        // 패널/메뉴
-        (_, KeyCode::Tab) => app.toggle_panel(),
-        (_, KeyCode::F(9)) => app.open_menu(),
-        // 탐색: Vim + 화살표
-        (KeyModifiers::NONE, KeyCode::Char('j')) | (_, KeyCode::Down) => app.move_selection_down(),
-        (KeyModifiers::NONE, KeyCode::Char('k')) | (_, KeyCode::Up) => app.move_selection_up(),
-        (KeyModifiers::NONE, KeyCode::Char('h')) | (_, KeyCode::Left) => app.go_to_parent(),
-        (KeyModifiers::NONE, KeyCode::Char('l')) | (KeyModifiers::NONE, KeyCode::Enter) => {
-            app.enter_selected()
-        }
-        // gg 시퀀스 / G / Home / End
-        (KeyModifiers::NONE, KeyCode::Char('g')) => app.set_pending_key('g'),
-        (_, KeyCode::Char('G')) => app.go_to_bottom(),
-        (_, KeyCode::Home) => app.go_to_top(),
-        (_, KeyCode::End) => app.go_to_bottom(),
-        // 페이지: Ctrl+U/D + PageUp/Down
-        (KeyModifiers::CONTROL, KeyCode::Char('u')) | (_, KeyCode::PageUp) => {
-            app.move_selection_page_up()
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) | (_, KeyCode::PageDown) => {
-            app.move_selection_page_down()
-        }
-        // 파일 조작 (Vim only)
-        (KeyModifiers::NONE, KeyCode::Char('y')) => app.start_copy(),
-        (KeyModifiers::NONE, KeyCode::Char('x')) => app.start_move(),
-        (KeyModifiers::NONE, KeyCode::Char('d')) => app.start_delete(),
-        (_, KeyCode::Char('D')) => app.start_permanent_delete(),
-        (KeyModifiers::NONE, KeyCode::Char('a')) => app.start_mkdir(),
-        (KeyModifiers::NONE, KeyCode::Char('r')) => app.start_rename(),
-        (KeyModifiers::NONE, KeyCode::Char('i')) => app.show_properties(),
-        // 선택
-        (KeyModifiers::NONE, KeyCode::Char(' ')) => app.toggle_selection_and_move_down(),
-        (KeyModifiers::NONE, KeyCode::Char('v')) => app.invert_selection(),
-        (KeyModifiers::CONTROL, KeyCode::Char('a')) => app.select_all(),
-        (KeyModifiers::NONE, KeyCode::Char('u')) => app.deselect_all(),
-        // 시스템
-        (KeyModifiers::NONE, KeyCode::Char('?')) => app.show_help(),
-        (KeyModifiers::CONTROL, KeyCode::Char('r')) => app.refresh_current(),
-        // Esc는 아무것도 안 함
-        (_, KeyCode::Esc) => {}
-        _ => {}
+    // 2) 'g' 시작 시 시퀀스 모드 진입
+    if modifiers == KeyModifiers::NONE && code == KeyCode::Char('g') {
+        app.set_pending_key('g');
+        return;
+    }
+
+    // 3) 테이블 조회 → 액션 실행
+    if let Some(action) = find_action(modifiers, code) {
+        app.execute_action(action);
     }
 }
 

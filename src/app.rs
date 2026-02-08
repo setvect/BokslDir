@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::core::actions::Action;
 use crate::models::operation::{
     ConflictResolution, FlattenedFile, OperationState, OperationType, PendingOperation,
 };
@@ -216,46 +217,51 @@ impl App {
         }
     }
 
-    /// 메뉴 액션 실행
-    pub fn execute_menu_action(&mut self, action_id: &str) {
-        match action_id {
-            // 종료
-            "quit" => self.quit(),
-
-            // 테마 전환
-            "theme_dark" => {
+    /// 액션 실행 (단일 진실 원천)
+    pub fn execute_action(&mut self, action: Action) {
+        match action {
+            Action::Quit => self.quit(),
+            Action::TogglePanel => self.toggle_panel(),
+            Action::MoveDown => self.move_selection_down(),
+            Action::MoveUp => self.move_selection_up(),
+            Action::GoToParent => self.go_to_parent(),
+            Action::EnterSelected => self.enter_selected(),
+            Action::GoToTop => self.go_to_top(),
+            Action::GoToBottom => self.go_to_bottom(),
+            Action::PageUp => self.move_selection_page_up(),
+            Action::PageDown => self.move_selection_page_down(),
+            Action::Copy => self.start_copy(),
+            Action::Move => self.start_move(),
+            Action::Delete => self.start_delete(),
+            Action::PermanentDelete => self.start_permanent_delete(),
+            Action::MakeDirectory => self.start_mkdir(),
+            Action::Rename => self.start_rename(),
+            Action::ShowProperties => self.show_properties(),
+            Action::ToggleSelection => self.toggle_selection_and_move_down(),
+            Action::InvertSelection => self.invert_selection(),
+            Action::SelectAll => self.select_all(),
+            Action::DeselectAll => self.deselect_all(),
+            Action::ShowHelp => self.show_help(),
+            Action::Refresh => self.refresh_current(),
+            Action::OpenMenu => self.open_menu(),
+            Action::ThemeDark => {
                 let _ = self.theme_manager.switch_theme("dark");
             }
-            "theme_light" => {
+            Action::ThemeLight => {
                 let _ = self.theme_manager.switch_theme("light");
             }
-            "theme_contrast" => {
+            Action::ThemeContrast => {
                 let _ = self.theme_manager.switch_theme("high_contrast");
             }
-
-            // 선택 관련 (Phase 3.1)
-            "select_all" => self.select_all(),
-            "invert_selection" => self.invert_selection(),
-            "deselect" => self.deselect_all(),
-
-            // 파일 복사/이동 (Phase 3.2)
-            "copy" => self.start_copy(),
-            "move" => self.start_move(),
-
-            // 파일 삭제 (Phase 3.3)
-            "delete" => self.start_delete(),
-
-            // Phase 3.4: 기타 파일 작업
-            "new_dir" => self.start_mkdir(),
-            "rename" => self.start_rename(),
-            "file_info" => self.show_properties(),
-            "perm_delete" => self.start_permanent_delete(),
-
-            // 시스템
-            "refresh" => self.refresh_current(),
-            "help_keys" => self.show_help(),
-
+            // 미구현 액션은 무시
             _ => {}
+        }
+    }
+
+    /// 메뉴 액션 실행 (action_id → Action 변환 후 위임)
+    pub fn execute_menu_action(&mut self, action_id: &str) {
+        if let Some(action) = Action::from_id(action_id) {
+            self.execute_action(action);
         }
     }
 

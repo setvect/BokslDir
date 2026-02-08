@@ -51,6 +51,31 @@ pub enum DialogKind {
         total_size: String,
         selected_button: usize, // 0: 휴지통, 1: 영구 삭제, 2: 취소
     },
+    // Phase 3.4: 기타 파일 작업
+    /// 새 디렉토리 생성 입력 다이얼로그
+    MkdirInput {
+        value: String,
+        cursor_pos: usize,
+        selected_button: usize, // 0: OK, 1: Cancel
+        parent_path: PathBuf,
+    },
+    /// 이름 변경 입력 다이얼로그
+    RenameInput {
+        value: String,
+        cursor_pos: usize,
+        selected_button: usize, // 0: OK, 1: Cancel
+        original_path: PathBuf,
+    },
+    /// 파일 속성 다이얼로그
+    Properties {
+        name: String,
+        path: String,
+        file_type: String,
+        size: String,
+        modified: String,
+        permissions: String,
+        children_info: Option<String>, // 디렉토리인 경우 하위 항목 수
+    },
 }
 
 impl DialogKind {
@@ -116,6 +141,49 @@ impl DialogKind {
             items,
             total_size: total_size.into(),
             selected_button: 0,
+        }
+    }
+
+    /// 새 디렉토리 생성 입력 다이얼로그
+    pub fn mkdir_input(parent_path: PathBuf) -> Self {
+        DialogKind::MkdirInput {
+            value: String::new(),
+            cursor_pos: 0,
+            selected_button: 0,
+            parent_path,
+        }
+    }
+
+    /// 이름 변경 입력 다이얼로그
+    pub fn rename_input(original_path: PathBuf, current_name: impl Into<String>) -> Self {
+        let name: String = current_name.into();
+        let cursor_pos = name.len();
+        DialogKind::RenameInput {
+            value: name,
+            cursor_pos,
+            selected_button: 0,
+            original_path,
+        }
+    }
+
+    /// 파일 속성 다이얼로그
+    pub fn properties(
+        name: impl Into<String>,
+        path: impl Into<String>,
+        file_type: impl Into<String>,
+        size: impl Into<String>,
+        modified: impl Into<String>,
+        permissions: impl Into<String>,
+        children_info: Option<String>,
+    ) -> Self {
+        DialogKind::Properties {
+            name: name.into(),
+            path: path.into(),
+            file_type: file_type.into(),
+            size: size.into(),
+            modified: modified.into(),
+            permissions: permissions.into(),
+            children_info,
         }
     }
 }
@@ -229,6 +297,12 @@ impl<'a> Dialog<'a> {
                 let list_lines = items.len().min(10) as u16;
                 (45, (7 + list_lines).min(20))
             }
+            DialogKind::MkdirInput { .. } => (50, 7),
+            DialogKind::RenameInput { .. } => (50, 7),
+            DialogKind::Properties { children_info, .. } => {
+                let base = if children_info.is_some() { 12 } else { 11 };
+                (50, base)
+            }
         };
 
         let width = width.min(screen.width.saturating_sub(4));
@@ -321,29 +395,56 @@ impl<'a> Dialog<'a> {
             }
         }
 
-        // 입력값 표시
-        let display_value = if value.len() > input_width as usize - 2 {
-            let start = value.len() - (input_width as usize - 2);
-            &value[start..]
+        // 입력값 표시 (unicode-width 기반)
+        // cursor_pos는 바이트 인덱스, 화면 표시는 display width 기반
+        let max_display = input_width as usize - 2;
+        let value_display_width = UnicodeWidthStr::width(value);
+
+        // 스크롤 처리: 커서가 보이도록 표시 시작점 결정
+        let (display_value, cursor_display_col) = if value_display_width <= max_display {
+            // 전체 표시 가능
+            let cursor_col: usize = value[..cursor_pos]
+                .chars()
+                .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+                .sum();
+            (value, cursor_col)
         } else {
-            value
+            // 스크롤 필요: 커서 위치를 기준으로 표시 범위 계산
+            let cursor_col_from_start: usize = value[..cursor_pos]
+                .chars()
+                .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+                .sum();
+
+            if cursor_col_from_start < max_display {
+                // 커서가 앞쪽이면 앞에서부터 표시
+                (value, cursor_col_from_start)
+            } else {
+                // 커서가 화면 밖이면 커서가 오른쪽 끝에 오도록 스크롤
+                let mut start_byte = 0;
+                let mut width_sum = 0;
+                // 뒤에서부터 max_display만큼의 너비를 찾음
+                let target_start_width = cursor_col_from_start.saturating_sub(max_display - 1);
+                for (i, c) in value.char_indices() {
+                    let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                    if width_sum >= target_start_width {
+                        start_byte = i;
+                        break;
+                    }
+                    width_sum += cw;
+                }
+                let display = &value[start_byte..];
+                let cursor_col = cursor_col_from_start - width_sum;
+                (display, cursor_col)
+            }
         };
         let value_style = Style::default().fg(self.fg_color).bg(self.input_bg);
         buf.set_string(inner.x + 1, input_y, display_value, value_style);
 
-        // 커서 표시 (반전 스타일 또는 블록 커서)
-        let display_cursor_pos = if value.len() > input_width as usize - 2 {
-            // 스크롤된 경우 커서 위치 조정
-            let start = value.len() - (input_width as usize - 2);
-            cursor_pos.saturating_sub(start)
-        } else {
-            cursor_pos
-        };
-        let cursor_x = inner.x + 1 + display_cursor_pos as u16;
+        // 커서 표시
+        let cursor_x = inner.x + 1 + cursor_display_col as u16;
         if cursor_x < inner.x + input_width - 1 {
             if let Some(cell) = buf.cell_mut((cursor_x, input_y)) {
-                // 커서 위치에 문자가 있으면 반전, 없으면 블록 커서 표시
-                if display_cursor_pos < display_value.len() {
+                if cursor_pos < value.len() {
                     // 문자가 있는 위치: 반전 스타일
                     cell.set_style(Style::default().fg(self.input_bg).bg(self.fg_color));
                 } else {
@@ -623,6 +724,115 @@ impl<'a> Dialog<'a> {
         self.render_button(buf, x, button_y, "취소", selected_button == 2);
     }
 
+    /// 텍스트 필드 렌더링 헬퍼 (cursor_pos는 바이트 인덱스)
+    fn render_text_field(
+        &self,
+        buf: &mut Buffer,
+        x: u16,
+        y: u16,
+        width: u16,
+        value: &str,
+        cursor_pos: Option<usize>,
+    ) {
+        // 입력 필드 배경
+        for fx in x..x + width {
+            if let Some(cell) = buf.cell_mut((fx, y)) {
+                cell.set_bg(self.input_bg);
+            }
+        }
+
+        // 입력값 표시
+        let value_style = Style::default().fg(self.fg_color).bg(self.input_bg);
+        buf.set_string(x + 1, y, value, value_style);
+
+        // 커서 표시
+        if let Some(cpos) = cursor_pos {
+            let cursor_col: usize = value[..cpos]
+                .chars()
+                .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+                .sum();
+            let cursor_x = x + 1 + cursor_col as u16;
+            if cursor_x < x + width - 1 {
+                if let Some(cell) = buf.cell_mut((cursor_x, y)) {
+                    if cpos < value.len() {
+                        cell.set_style(Style::default().fg(self.input_bg).bg(self.fg_color));
+                    } else {
+                        cell.set_char('▏');
+                        cell.set_style(Style::default().fg(self.fg_color).bg(self.input_bg));
+                    }
+                }
+            }
+        }
+    }
+
+    /// 파일 속성 다이얼로그 렌더링
+    #[allow(clippy::too_many_arguments)]
+    fn render_properties(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        name: &str,
+        path: &str,
+        file_type: &str,
+        size: &str,
+        modified: &str,
+        permissions: &str,
+        children_info: &Option<String>,
+    ) {
+        // 테두리
+        let block = Block::default()
+            .title(" Properties ")
+            .title_style(
+                Style::default()
+                    .fg(self.title_color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        block.render(area, buf);
+
+        let inner = Rect {
+            x: area.x + 2,
+            y: area.y + 1,
+            width: area.width.saturating_sub(4),
+            height: area.height.saturating_sub(2),
+        };
+
+        let label_style = Style::default().fg(Color::Rgb(128, 128, 128));
+        let value_style = Style::default().fg(self.fg_color);
+
+        let mut y = inner.y;
+        let label_width = 12u16;
+
+        let rows: Vec<(&str, &str)> = vec![
+            ("Name:", name),
+            ("Path:", path),
+            ("Type:", file_type),
+            ("Size:", size),
+            ("Modified:", modified),
+            ("Permissions:", permissions),
+        ];
+
+        for (label, value) in &rows {
+            buf.set_string(inner.x, y, label, label_style);
+            let truncated =
+                truncate_middle(value, inner.width.saturating_sub(label_width) as usize);
+            buf.set_string(inner.x + label_width, y, &truncated, value_style);
+            y += 1;
+        }
+
+        if let Some(ref info) = children_info {
+            buf.set_string(inner.x, y, "Contents:", label_style);
+            buf.set_string(inner.x + label_width, y, info, value_style);
+        }
+
+        // OK 버튼
+        let button_y = area.y + area.height - 2;
+        let button_x = area.x + (area.width - 6) / 2;
+        self.render_button(buf, button_x, button_y, "OK", true);
+    }
+
     /// 에러/메시지 다이얼로그 렌더링
     fn render_message(
         &self,
@@ -729,12 +939,59 @@ impl Widget for Dialog<'_> {
                 total_size,
                 selected_button,
             } => {
-                self.render_delete_confirm(
+                self.render_delete_confirm(buf, dialog_area, items, total_size, *selected_button);
+            }
+            DialogKind::MkdirInput {
+                value,
+                cursor_pos,
+                selected_button,
+                ..
+            } => {
+                self.render_input(
                     buf,
                     dialog_area,
-                    items,
-                    total_size,
+                    "New Directory",
+                    "Directory name:",
+                    value,
+                    *cursor_pos,
                     *selected_button,
+                );
+            }
+            DialogKind::RenameInput {
+                value,
+                cursor_pos,
+                selected_button,
+                ..
+            } => {
+                self.render_input(
+                    buf,
+                    dialog_area,
+                    "Rename",
+                    "New name:",
+                    value,
+                    *cursor_pos,
+                    *selected_button,
+                );
+            }
+            DialogKind::Properties {
+                name,
+                path,
+                file_type,
+                size,
+                modified,
+                permissions,
+                children_info,
+            } => {
+                self.render_properties(
+                    buf,
+                    dialog_area,
+                    name,
+                    path,
+                    file_type,
+                    size,
+                    modified,
+                    permissions,
+                    children_info,
                 );
             }
         }

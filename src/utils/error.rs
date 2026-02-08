@@ -47,6 +47,13 @@ pub enum BokslDirError {
     #[error("Delete failed: {path}: {reason}")]
     DeleteFailed { path: PathBuf, reason: String },
 
+    #[error("Rename failed: {src} -> {dest}: {reason}")]
+    RenameFailed {
+        src: PathBuf,
+        dest: PathBuf,
+        reason: String,
+    },
+
     #[error("Operation cancelled")]
     OperationCancelled,
 }

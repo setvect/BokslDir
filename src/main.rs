@@ -123,7 +123,7 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         (_, KeyCode::Down) => app.move_selection_down(),
         (_, KeyCode::PageUp) => app.move_selection_page_up(),
         (_, KeyCode::PageDown) => app.move_selection_page_down(),
-        (_, KeyCode::Enter) => app.enter_selected(),
+        (KeyModifiers::NONE, KeyCode::Enter) => app.enter_selected(),
         // 다중 선택 (Phase 3.1)
         (KeyModifiers::NONE, KeyCode::Char(' ')) => app.toggle_selection_and_move_down(),
         (KeyModifiers::NONE, KeyCode::Char('*')) => app.select_all(), // PRD: * 또는 Ctrl+A
@@ -135,6 +135,10 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         (_, KeyCode::F(6)) => app.start_move(),
         // 파일 삭제 (Phase 3.3)
         (_, KeyCode::F(8)) => app.start_delete(),
+        // Phase 3.4: 기타 파일 작업
+        (_, KeyCode::F(7)) => app.start_mkdir(),
+        (_, KeyCode::F(2)) => app.start_rename(),
+        (KeyModifiers::ALT, KeyCode::Enter) => app.show_properties(),
         // Esc는 아무것도 안 함 (메뉴가 닫혀있을 때)
         (_, KeyCode::Esc) => {}
         _ => {}
@@ -167,6 +171,16 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         }
         DialogKind::DeleteConfirm { .. } => {
             handle_delete_confirm_dialog_keys(app, modifiers, code);
+        }
+        // Phase 3.4
+        DialogKind::MkdirInput { .. } => {
+            handle_mkdir_input_dialog_keys(app, modifiers, code);
+        }
+        DialogKind::RenameInput { .. } => {
+            handle_rename_input_dialog_keys(app, modifiers, code);
+        }
+        DialogKind::Properties { .. } => {
+            handle_message_dialog_keys(app, modifiers, code);
         }
     }
 }
@@ -310,6 +324,66 @@ fn handle_delete_confirm_dialog_keys(app: &mut App, modifiers: KeyModifiers, cod
         (_, KeyCode::Esc) => {
             app.close_dialog();
         }
+        _ => {}
+    }
+}
+
+/// 새 디렉토리 입력 다이얼로그 키 처리
+fn handle_mkdir_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    match (modifiers, code) {
+        (_, KeyCode::Enter) => {
+            let selected_button = app.get_mkdir_selected_button().unwrap_or(0);
+            if selected_button == 0 {
+                if let Some((value, parent_path)) = app.get_mkdir_input_value() {
+                    app.confirm_mkdir(value, parent_path);
+                }
+            } else {
+                app.close_dialog();
+            }
+        }
+        (_, KeyCode::Esc) => app.close_dialog(),
+        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            app.dialog_mkdir_toggle_button();
+        }
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            app.dialog_mkdir_input_char(c);
+        }
+        (_, KeyCode::Backspace) => app.dialog_mkdir_input_backspace(),
+        (_, KeyCode::Delete) => app.dialog_mkdir_input_delete(),
+        (_, KeyCode::Left) => app.dialog_mkdir_input_left(),
+        (_, KeyCode::Right) => app.dialog_mkdir_input_right(),
+        (_, KeyCode::Home) => app.dialog_mkdir_input_home(),
+        (_, KeyCode::End) => app.dialog_mkdir_input_end(),
+        _ => {}
+    }
+}
+
+/// 이름 변경 입력 다이얼로그 키 처리
+fn handle_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    match (modifiers, code) {
+        (_, KeyCode::Enter) => {
+            let selected_button = app.get_rename_selected_button().unwrap_or(0);
+            if selected_button == 0 {
+                if let Some((value, original_path)) = app.get_rename_input_value() {
+                    app.confirm_rename(value, original_path);
+                }
+            } else {
+                app.close_dialog();
+            }
+        }
+        (_, KeyCode::Esc) => app.close_dialog(),
+        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            app.dialog_rename_toggle_button();
+        }
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            app.dialog_rename_input_char(c);
+        }
+        (_, KeyCode::Backspace) => app.dialog_rename_input_backspace(),
+        (_, KeyCode::Delete) => app.dialog_rename_input_delete(),
+        (_, KeyCode::Left) => app.dialog_rename_input_left(),
+        (_, KeyCode::Right) => app.dialog_rename_input_right(),
+        (_, KeyCode::Home) => app.dialog_rename_input_home(),
+        (_, KeyCode::End) => app.dialog_rename_input_end(),
         _ => {}
     }
 }

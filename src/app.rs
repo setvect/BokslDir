@@ -237,6 +237,11 @@ impl App {
             // 파일 삭제 (Phase 3.3)
             "delete" => self.start_delete(),
 
+            // Phase 3.4: 기타 파일 작업
+            "new_dir" => self.start_mkdir(),
+            "rename" => self.start_rename(),
+            "file_info" => self.show_properties(),
+
             _ => {}
         }
     }
@@ -962,8 +967,7 @@ impl App {
         );
 
         // 대기 작업 저장
-        let mut pending =
-            PendingOperation::new(OperationType::Delete, sources, PathBuf::new());
+        let mut pending = PendingOperation::new(OperationType::Delete, sources, PathBuf::new());
         pending.progress.total_bytes = total_bytes;
         pending.progress.total_files = total_files;
         self.pending_operation = Some(pending);
@@ -987,10 +991,7 @@ impl App {
                     self.active_panel_state_mut().deselect_all();
                     self.dialog = Some(DialogKind::message(
                         "Complete",
-                        format!(
-                            "Moved {} item(s) to trash.",
-                            pending.sources.len()
-                        ),
+                        format!("Moved {} item(s) to trash.", pending.sources.len()),
                     ));
                 }
                 Err(e) => {
@@ -1111,6 +1112,403 @@ impl App {
         }
     }
 
+    // === Phase 3.4: 기타 파일 작업 ===
+
+    /// 새 디렉토리 생성 시작 (F7)
+    pub fn start_mkdir(&mut self) {
+        let parent_path = self.active_panel_state().current_path.clone();
+        self.dialog = Some(DialogKind::mkdir_input(parent_path));
+    }
+
+    /// 새 디렉토리 생성 확인
+    pub fn confirm_mkdir(&mut self, dir_name: String, parent_path: PathBuf) {
+        let dir_name = dir_name.trim().to_string();
+
+        if dir_name.is_empty() {
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                "Directory name cannot be empty.",
+            ));
+            return;
+        }
+
+        let new_path = parent_path.join(&dir_name);
+
+        match self.filesystem.create_directory(&new_path) {
+            Ok(()) => {
+                self.refresh_both_panels();
+                self.dialog = Some(DialogKind::message(
+                    "Complete",
+                    format!("Directory '{}' created.", dir_name),
+                ));
+            }
+            Err(e) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    format!("Failed to create directory: {}", e),
+                ));
+            }
+        }
+    }
+
+    /// 이름 변경 시작 (F2)
+    pub fn start_rename(&mut self) {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+        let selected_index = panel.selected_index;
+
+        // ".." 선택 시 무시
+        if has_parent && selected_index == 0 {
+            return;
+        }
+
+        // 커서 위치의 항목 이름 변경
+        let entry_index = if has_parent {
+            selected_index.saturating_sub(1)
+        } else {
+            selected_index
+        };
+
+        if let Some(entry) = panel.entries.get(entry_index) {
+            let original_path = entry.path.clone();
+            let current_name = entry.name.clone();
+            self.dialog = Some(DialogKind::rename_input(original_path, current_name));
+        }
+    }
+
+    /// 이름 변경 확인
+    pub fn confirm_rename(&mut self, new_name: String, original_path: PathBuf) {
+        let new_name = new_name.trim().to_string();
+
+        if new_name.is_empty() {
+            self.dialog = Some(DialogKind::error("Error", "Name cannot be empty."));
+            return;
+        }
+
+        let new_path = original_path
+            .parent()
+            .map(|p| p.join(&new_name))
+            .unwrap_or_else(|| PathBuf::from(&new_name));
+
+        match self.filesystem.rename_path(&original_path, &new_path) {
+            Ok(()) => {
+                self.refresh_both_panels();
+                self.dialog = None;
+            }
+            Err(e) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    format!("Failed to rename: {}", e),
+                ));
+            }
+        }
+    }
+
+    /// 파일 속성 보기 (Alt+Enter)
+    pub fn show_properties(&mut self) {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+        let selected_index = panel.selected_index;
+
+        // ".." 선택 시 무시
+        if has_parent && selected_index == 0 {
+            return;
+        }
+
+        let entry_index = if has_parent {
+            selected_index.saturating_sub(1)
+        } else {
+            selected_index
+        };
+
+        if let Some(entry) = panel.entries.get(entry_index).cloned() {
+            let file_type_str = match entry.file_type {
+                crate::models::file_entry::FileType::Directory => "Directory",
+                crate::models::file_entry::FileType::File => "File",
+                crate::models::file_entry::FileType::Symlink => "Symbolic Link",
+                crate::models::file_entry::FileType::Executable => "Executable",
+            };
+
+            let size_str = if entry.is_directory() {
+                match self
+                    .filesystem
+                    .calculate_total_size(std::slice::from_ref(&entry.path))
+                {
+                    Ok((bytes, files)) => format!(
+                        "{} ({} file(s))",
+                        crate::utils::formatter::format_file_size(bytes),
+                        files
+                    ),
+                    Err(_) => "Unknown".to_string(),
+                }
+            } else {
+                crate::utils::formatter::format_file_size(entry.size)
+            };
+
+            let modified_str = crate::utils::formatter::format_date(entry.modified);
+            let permissions_str =
+                crate::utils::formatter::format_permissions(entry.permissions.as_ref());
+
+            let children_info = if entry.is_directory() {
+                match self.filesystem.read_directory(&entry.path) {
+                    Ok(entries) => {
+                        let dirs = entries.iter().filter(|e| e.is_directory()).count();
+                        let files = entries.len() - dirs;
+                        Some(format!("{} file(s), {} dir(s)", files, dirs))
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
+            self.dialog = Some(DialogKind::properties(
+                &entry.name,
+                entry.path.to_string_lossy(),
+                file_type_str,
+                &size_str,
+                &modified_str,
+                &permissions_str,
+                children_info,
+            ));
+        }
+    }
+
+    // === MkdirInput 다이얼로그 입력 처리 ===
+
+    pub fn dialog_mkdir_input_char(&mut self, c: char) {
+        if let Some(DialogKind::MkdirInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            value.insert(*cursor_pos, c);
+            *cursor_pos += c.len_utf8();
+        }
+    }
+
+    pub fn dialog_mkdir_input_backspace(&mut self) {
+        if let Some(DialogKind::MkdirInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                // 이전 문자의 바이트 시작 위치 찾기
+                let prev_char_boundary = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                value.remove(prev_char_boundary);
+                *cursor_pos = prev_char_boundary;
+            }
+        }
+    }
+
+    pub fn dialog_mkdir_input_delete(&mut self) {
+        if let Some(DialogKind::MkdirInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos < value.len() {
+                value.remove(*cursor_pos);
+            }
+        }
+    }
+
+    pub fn dialog_mkdir_input_left(&mut self) {
+        if let Some(DialogKind::MkdirInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                *cursor_pos = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+            }
+        }
+    }
+
+    pub fn dialog_mkdir_input_right(&mut self) {
+        if let Some(DialogKind::MkdirInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos < value.len() {
+                *cursor_pos = value[*cursor_pos..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| *cursor_pos + i)
+                    .unwrap_or(value.len());
+            }
+        }
+    }
+
+    pub fn dialog_mkdir_input_home(&mut self) {
+        if let Some(DialogKind::MkdirInput { cursor_pos, .. }) = &mut self.dialog {
+            *cursor_pos = 0;
+        }
+    }
+
+    pub fn dialog_mkdir_input_end(&mut self) {
+        if let Some(DialogKind::MkdirInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            *cursor_pos = value.len();
+        }
+    }
+
+    pub fn dialog_mkdir_toggle_button(&mut self) {
+        if let Some(DialogKind::MkdirInput {
+            selected_button, ..
+        }) = &mut self.dialog
+        {
+            *selected_button = if *selected_button == 0 { 1 } else { 0 };
+        }
+    }
+
+    pub fn get_mkdir_input_value(&self) -> Option<(String, PathBuf)> {
+        if let Some(DialogKind::MkdirInput {
+            value, parent_path, ..
+        }) = &self.dialog
+        {
+            Some((value.clone(), parent_path.clone()))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_mkdir_selected_button(&self) -> Option<usize> {
+        if let Some(DialogKind::MkdirInput {
+            selected_button, ..
+        }) = &self.dialog
+        {
+            Some(*selected_button)
+        } else {
+            None
+        }
+    }
+
+    // === RenameInput 다이얼로그 입력 처리 ===
+
+    pub fn dialog_rename_input_char(&mut self, c: char) {
+        if let Some(DialogKind::RenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            value.insert(*cursor_pos, c);
+            *cursor_pos += c.len_utf8();
+        }
+    }
+
+    pub fn dialog_rename_input_backspace(&mut self) {
+        if let Some(DialogKind::RenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                let prev_char_boundary = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                value.remove(prev_char_boundary);
+                *cursor_pos = prev_char_boundary;
+            }
+        }
+    }
+
+    pub fn dialog_rename_input_delete(&mut self) {
+        if let Some(DialogKind::RenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos < value.len() {
+                value.remove(*cursor_pos);
+            }
+        }
+    }
+
+    pub fn dialog_rename_input_left(&mut self) {
+        if let Some(DialogKind::RenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                *cursor_pos = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+            }
+        }
+    }
+
+    pub fn dialog_rename_input_right(&mut self) {
+        if let Some(DialogKind::RenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos < value.len() {
+                *cursor_pos = value[*cursor_pos..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| *cursor_pos + i)
+                    .unwrap_or(value.len());
+            }
+        }
+    }
+
+    pub fn dialog_rename_input_home(&mut self) {
+        if let Some(DialogKind::RenameInput { cursor_pos, .. }) = &mut self.dialog {
+            *cursor_pos = 0;
+        }
+    }
+
+    pub fn dialog_rename_input_end(&mut self) {
+        if let Some(DialogKind::RenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            *cursor_pos = value.len();
+        }
+    }
+
+    pub fn dialog_rename_toggle_button(&mut self) {
+        if let Some(DialogKind::RenameInput {
+            selected_button, ..
+        }) = &mut self.dialog
+        {
+            *selected_button = if *selected_button == 0 { 1 } else { 0 };
+        }
+    }
+
+    pub fn get_rename_input_value(&self) -> Option<(String, PathBuf)> {
+        if let Some(DialogKind::RenameInput {
+            value,
+            original_path,
+            ..
+        }) = &self.dialog
+        {
+            Some((value.clone(), original_path.clone()))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_rename_selected_button(&self) -> Option<usize> {
+        if let Some(DialogKind::RenameInput {
+            selected_button, ..
+        }) = &self.dialog
+        {
+            Some(*selected_button)
+        } else {
+            None
+        }
+    }
+
     /// 양쪽 패널 새로고침
     pub fn refresh_both_panels(&mut self) {
         let _ = self.left_panel.refresh(&self.filesystem);
@@ -1126,7 +1524,7 @@ impl App {
         }) = &mut self.dialog
         {
             value.insert(*cursor_pos, c);
-            *cursor_pos += 1;
+            *cursor_pos += c.len_utf8();
         }
     }
 
@@ -1137,8 +1535,13 @@ impl App {
         }) = &mut self.dialog
         {
             if *cursor_pos > 0 {
-                value.remove(*cursor_pos - 1);
-                *cursor_pos -= 1;
+                let prev = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                value.remove(prev);
+                *cursor_pos = prev;
             }
         }
     }
@@ -1157,8 +1560,17 @@ impl App {
 
     /// 입력 다이얼로그: 커서 왼쪽
     pub fn dialog_input_left(&mut self) {
-        if let Some(DialogKind::Input { cursor_pos, .. }) = &mut self.dialog {
-            *cursor_pos = cursor_pos.saturating_sub(1);
+        if let Some(DialogKind::Input {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                *cursor_pos = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+            }
         }
     }
 
@@ -1169,7 +1581,11 @@ impl App {
         }) = &mut self.dialog
         {
             if *cursor_pos < value.len() {
-                *cursor_pos += 1;
+                *cursor_pos = value[*cursor_pos..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| *cursor_pos + i)
+                    .unwrap_or(value.len());
             }
         }
     }

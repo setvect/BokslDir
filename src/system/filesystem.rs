@@ -469,6 +469,58 @@ impl FileSystem {
         })
     }
 
+    // === Phase 3.4: 디렉토리 생성, 이름 변경 ===
+
+    /// 새 디렉토리 생성
+    #[allow(clippy::unused_self)]
+    pub fn create_directory(&self, path: &Path) -> Result<()> {
+        if path.exists() {
+            return Err(BokslDirError::FileExists {
+                path: path.to_path_buf(),
+            });
+        }
+
+        fs::create_dir(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                BokslDirError::PermissionDenied {
+                    path: path.to_path_buf(),
+                }
+            } else {
+                BokslDirError::Io(e)
+            }
+        })
+    }
+
+    /// 파일/디렉토리 이름 변경
+    #[allow(clippy::unused_self)]
+    pub fn rename_path(&self, src: &Path, dest: &Path) -> Result<()> {
+        if !src.exists() {
+            return Err(BokslDirError::PathNotFound {
+                path: src.to_path_buf(),
+            });
+        }
+
+        if dest.exists() {
+            return Err(BokslDirError::FileExists {
+                path: dest.to_path_buf(),
+            });
+        }
+
+        fs::rename(src, dest).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                BokslDirError::PermissionDenied {
+                    path: src.to_path_buf(),
+                }
+            } else {
+                BokslDirError::RenameFailed {
+                    src: src.to_path_buf(),
+                    dest: dest.to_path_buf(),
+                    reason: e.to_string(),
+                }
+            }
+        })
+    }
+
     /// 소스 목록을 평탄화하여 개별 파일 목록 생성
     ///
     /// 디렉토리는 재귀적으로 탐색하여 모든 파일을 포함합니다.
@@ -577,6 +629,58 @@ mod tests {
 
         let visible_path = PathBuf::from("visible.txt");
         assert!(!fs.is_hidden(&visible_path));
+    }
+
+    #[test]
+    fn test_create_directory() {
+        let fs_instance = FileSystem::new();
+        let temp_dir = std::env::temp_dir().join("boksldir_test_mkdir");
+        let _ = fs::remove_dir_all(&temp_dir);
+        let _ = fs::create_dir_all(&temp_dir);
+
+        let new_dir = temp_dir.join("new_folder");
+        assert!(fs_instance.create_directory(&new_dir).is_ok());
+        assert!(new_dir.is_dir());
+
+        // 이미 존재하면 에러
+        let result = fs_instance.create_directory(&new_dir);
+        assert!(result.is_err());
+        match result {
+            Err(BokslDirError::FileExists { .. }) => {}
+            _ => panic!("Expected FileExists error"),
+        }
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_rename_path() {
+        let fs_instance = FileSystem::new();
+        let temp_dir = std::env::temp_dir().join("boksldir_test_rename");
+        let _ = fs::remove_dir_all(&temp_dir);
+        let _ = fs::create_dir_all(&temp_dir);
+
+        // 파일 이름 변경
+        let src = temp_dir.join("old.txt");
+        let dest = temp_dir.join("new.txt");
+        let mut file = File::create(&src).unwrap();
+        writeln!(file, "test").unwrap();
+
+        assert!(fs_instance.rename_path(&src, &dest).is_ok());
+        assert!(!src.exists());
+        assert!(dest.exists());
+
+        // 이미 존재하는 대상
+        let src2 = temp_dir.join("another.txt");
+        let _ = File::create(&src2).unwrap();
+        let result = fs_instance.rename_path(&src2, &dest);
+        assert!(result.is_err());
+        match result {
+            Err(BokslDirError::FileExists { .. }) => {}
+            _ => panic!("Expected FileExists error"),
+        }
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

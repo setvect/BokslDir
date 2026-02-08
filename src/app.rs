@@ -544,6 +544,46 @@ impl App {
         }
     }
 
+    /// ".." 선택 시 상위 디렉토리로 이동 + 포커스 복원
+    fn navigate_to_parent(&mut self, current_path: &std::path::Path) {
+        if let Some(parent) = current_path.parent() {
+            let parent_path = parent.to_path_buf();
+            let current_dir_name = current_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string());
+
+            match self.active_panel() {
+                ActivePanel::Left => {
+                    let _ = self.left_panel.change_directory_and_focus(
+                        parent_path,
+                        current_dir_name.as_deref(),
+                        &self.filesystem,
+                    );
+                }
+                ActivePanel::Right => {
+                    let _ = self.right_panel.change_directory_and_focus(
+                        parent_path,
+                        current_dir_name.as_deref(),
+                        &self.filesystem,
+                    );
+                }
+            }
+        }
+    }
+
+    /// 디렉토리 항목 진입
+    fn enter_directory(&mut self, path: PathBuf) {
+        match self.active_panel() {
+            ActivePanel::Left => {
+                let _ = self.left_panel.change_directory(path, &self.filesystem);
+            }
+            ActivePanel::Right => {
+                let _ = self.right_panel.change_directory(path, &self.filesystem);
+            }
+        }
+    }
+
     /// Enter 키 처리: 디렉토리 진입 또는 상위 디렉토리 이동
     pub fn enter_selected(&mut self) {
         let panel = self.active_panel_state();
@@ -551,42 +591,13 @@ impl App {
         let selected_index = panel.selected_index;
         let has_parent = current_path.parent().is_some();
 
-        // Case 1: ".." 선택 시 상위 디렉토리로 이동
         if selected_index == 0 && has_parent {
-            if let Some(parent) = current_path.parent() {
-                let parent_path = parent.to_path_buf();
-                // 현재 디렉토리 이름을 기억 (상위 이동 후 포커스용)
-                let current_dir_name = current_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|s| s.to_string());
-
-                // filesystem과 panel을 동시에 참조하기 위해 match 사용
-                match self.active_panel() {
-                    ActivePanel::Left => {
-                        let _ = self.left_panel.change_directory_and_focus(
-                            parent_path,
-                            current_dir_name.as_deref(),
-                            &self.filesystem,
-                        );
-                    }
-                    ActivePanel::Right => {
-                        let _ = self.right_panel.change_directory_and_focus(
-                            parent_path,
-                            current_dir_name.as_deref(),
-                            &self.filesystem,
-                        );
-                    }
-                }
-                // 에러 발생 시 무시 (Phase 3에서 에러 다이얼로그 구현 예정)
-            }
+            self.navigate_to_parent(&current_path);
             return;
         }
 
-        // Case 2: 일반 항목 선택 시
         let entry_info = {
             let panel = self.active_panel_state();
-            // show_parent가 true면 entries는 index 1부터 시작
             let entry_index = if has_parent {
                 selected_index.saturating_sub(1)
             } else {
@@ -598,20 +609,8 @@ impl App {
                 .map(|e| (e.is_directory(), e.path.clone()))
         };
 
-        if let Some((is_dir, path)) = entry_info {
-            if is_dir {
-                // 디렉토리면 진입
-                match self.active_panel() {
-                    ActivePanel::Left => {
-                        let _ = self.left_panel.change_directory(path, &self.filesystem);
-                    }
-                    ActivePanel::Right => {
-                        let _ = self.right_panel.change_directory(path, &self.filesystem);
-                    }
-                }
-                // 에러 발생 시 무시
-            }
-            // 파일이면 아무것도 안 함 (Phase 6에서 파일 뷰어 구현 예정)
+        if let Some((true, path)) = entry_info {
+            self.enter_directory(path);
         }
     }
 
@@ -815,54 +814,39 @@ impl App {
         self.dialog = Some(DialogKind::input(title, prompt, dest_path));
     }
 
-    /// 입력 다이얼로그에서 확인 처리
-    pub fn confirm_input_dialog(&mut self, dest_path_str: String) {
-        let Some(mut pending) = self.pending_operation.take() else {
-            self.close_dialog();
-            return;
-        };
-
-        let dest_path = PathBuf::from(&dest_path_str);
-
-        // 대상 경로가 디렉토리인지 확인
+    /// 대상 경로 검증 (존재/디렉토리/재귀 검사). 실패 시 에러 메시지 반환.
+    fn validate_operation_destination(
+        sources: &[PathBuf],
+        operation_type: OperationType,
+        dest_path: &std::path::Path,
+        dest_path_str: &str,
+    ) -> std::result::Result<(), String> {
         if !dest_path.exists() {
-            self.dialog = Some(DialogKind::error(
-                "Error",
-                format!("Destination path does not exist:\n{}", dest_path_str),
+            return Err(format!(
+                "Destination path does not exist:\n{}",
+                dest_path_str
             ));
-            // pending 복원
-            self.pending_operation = Some(pending);
-            return;
         }
-
         if !dest_path.is_dir() {
-            self.dialog = Some(DialogKind::error(
-                "Error",
-                format!("Destination is not a directory:\n{}", dest_path_str),
+            return Err(format!(
+                "Destination is not a directory:\n{}",
+                dest_path_str
             ));
-            // pending 복원
-            self.pending_operation = Some(pending);
-            return;
         }
-
-        // 재귀 복사/이동 방지: 디렉토리를 자기 자신 내부로 복사/이동하려는지 미리 확인
-        if let Some(error_msg) =
-            Self::check_recursive_operation(&pending.sources, pending.operation_type, &dest_path)
+        if let Some(error_msg) = Self::check_recursive_operation(sources, operation_type, dest_path)
         {
-            self.dialog = Some(DialogKind::error("Error", error_msg));
-            // pending 복원
-            self.pending_operation = Some(pending);
-            return;
+            return Err(error_msg);
         }
+        Ok(())
+    }
 
-        // 대상 경로 업데이트
-        pending.dest_dir = dest_path.clone();
-
-        // 소스를 평탄화하여 개별 파일 목록 생성
-        let flattened = match self
-            .filesystem
-            .flatten_sources(&pending.sources, &dest_path)
-        {
+    /// 소스 평탄화 + 크기 계산 + processing 시작
+    fn prepare_and_start_operation(
+        &mut self,
+        pending: &mut PendingOperation,
+        dest_path: &std::path::Path,
+    ) {
+        let flattened = match self.filesystem.flatten_sources(&pending.sources, dest_path) {
             Ok(files) => files
                 .into_iter()
                 .map(|(source, dest, size)| FlattenedFile { source, dest, size })
@@ -872,23 +856,40 @@ impl App {
                     "Error",
                     format!("Failed to scan files: {}", e),
                 ));
-                self.pending_operation = Some(pending);
                 return;
             }
         };
 
-        // 전체 크기 및 파일 수 계산
         let total_bytes: u64 = flattened.iter().map(|f| f.size).sum();
         let total_files = flattened.len();
 
-        // 평탄화된 파일 목록 설정
         pending.set_flattened_files(flattened);
-
-        // 처리 시작
         pending.start_processing(total_bytes, total_files);
-
-        // Progress 다이얼로그 표시
         self.dialog = Some(DialogKind::progress(pending.progress.clone()));
+    }
+
+    /// 입력 다이얼로그에서 확인 처리
+    pub fn confirm_input_dialog(&mut self, dest_path_str: String) {
+        let Some(mut pending) = self.pending_operation.take() else {
+            self.close_dialog();
+            return;
+        };
+
+        let dest_path = PathBuf::from(&dest_path_str);
+
+        if let Err(error_msg) = Self::validate_operation_destination(
+            &pending.sources,
+            pending.operation_type,
+            &dest_path,
+            &dest_path_str,
+        ) {
+            self.dialog = Some(DialogKind::error("Error", error_msg));
+            self.pending_operation = Some(pending);
+            return;
+        }
+
+        pending.dest_dir = dest_path.clone();
+        self.prepare_and_start_operation(&mut pending, &dest_path);
         self.pending_operation = Some(pending);
     }
 
@@ -899,30 +900,14 @@ impl App {
             .is_some_and(|p| p.state == OperationState::Processing)
     }
 
-    /// 다음 파일 처리 (메인 루프에서 호출)
-    ///
-    /// 한 번에 하나의 파일만 처리하고 반환하여 UI 업데이트 가능
-    pub fn process_next_file(&mut self) {
-        let Some(mut pending) = self.pending_operation.take() else {
-            self.close_dialog();
-            return;
-        };
-
-        // 처리 중 상태가 아니면 반환
-        if pending.state != OperationState::Processing {
-            self.pending_operation = Some(pending);
-            return;
-        }
-
-        // 모든 파일 처리 완료 확인
-        if pending.is_all_processed() {
-            self.finish_operation(pending);
-            return;
-        }
-
-        let operation_type = pending.operation_type;
-
-        // 충돌 해결 방법 확인
+    /// 대상 파일 존재 시 충돌 해결 방법에 따라 처리.
+    /// true 반환 시 파일 복사/이동 진행, false 반환 시 건너뛰기 또는 대기.
+    fn resolve_conflict(
+        &mut self,
+        pending: &mut PendingOperation,
+        source: &std::path::Path,
+        dest_path: &std::path::Path,
+    ) -> bool {
         let skip_all = pending
             .conflict_resolution
             .is_some_and(|r| r == ConflictResolution::SkipAll);
@@ -930,58 +915,39 @@ impl App {
             .conflict_resolution
             .is_some_and(|r| r == ConflictResolution::OverwriteAll);
 
-        // 현재 파일 처리 (flattened_files 사용)
-        let file_entry = pending.flattened_files[pending.current_index].clone();
-        let source = file_entry.source;
-        let dest_path = file_entry.dest;
-
-        let file_name = source
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        // 진행 상태 업데이트
-        pending.set_current_file(&file_name);
-        self.dialog = Some(DialogKind::progress(pending.progress.clone()));
-
-        // 소스와 대상이 동일한지 확인
-        if source == dest_path {
-            pending.add_error(format!("Source and destination are the same: {:?}", source));
+        if skip_all {
             pending.file_skipped();
             pending.current_index += 1;
-            self.pending_operation = Some(pending);
-            return;
+            return false;
         }
-
-        // 대상 파일이 이미 존재하는지 확인
-        if dest_path.exists() {
-            if skip_all {
-                pending.file_skipped();
-                pending.current_index += 1;
-                self.pending_operation = Some(pending);
-                return;
-            }
-            if !overwrite_all {
-                // 충돌 다이얼로그 표시
-                pending.state = OperationState::WaitingConflict;
-                self.dialog = Some(DialogKind::conflict(source, dest_path));
-                self.pending_operation = Some(pending);
-                return;
-            }
-            // overwrite_all이면 대상을 먼저 삭제
-            let _ = std::fs::remove_file(&dest_path);
+        if !overwrite_all {
+            pending.state = OperationState::WaitingConflict;
+            self.dialog = Some(DialogKind::conflict(
+                source.to_path_buf(),
+                dest_path.to_path_buf(),
+            ));
+            return false;
         }
+        // overwrite_all이면 대상을 먼저 삭제
+        let _ = std::fs::remove_file(dest_path);
+        true
+    }
 
-        // 대상 디렉토리 생성 (필요시)
+    /// 단일 파일 복사/이동 실행 + 결과 기록
+    fn execute_single_file_operation(
+        &self,
+        pending: &mut PendingOperation,
+        source: &std::path::Path,
+        dest_path: &std::path::Path,
+        file_name: &str,
+    ) {
         if let Some(parent) = dest_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
 
-        // 파일 복사 또는 이동
-        let result = match operation_type {
-            OperationType::Copy => self.filesystem.copy_file(&source, &dest_path),
-            OperationType::Move => self.filesystem.move_file(&source, &dest_path),
+        let result = match pending.operation_type {
+            OperationType::Copy => self.filesystem.copy_file(source, dest_path),
+            OperationType::Move => self.filesystem.move_file(source, dest_path),
             OperationType::Delete => unreachable!("Delete uses process_next_delete"),
         };
 
@@ -994,8 +960,53 @@ impl App {
         }
 
         pending.current_index += 1;
+    }
 
-        // 진행 상태 업데이트
+    /// 다음 파일 처리 (메인 루프에서 호출)
+    pub fn process_next_file(&mut self) {
+        let Some(mut pending) = self.pending_operation.take() else {
+            self.close_dialog();
+            return;
+        };
+
+        if pending.state != OperationState::Processing {
+            self.pending_operation = Some(pending);
+            return;
+        }
+
+        if pending.is_all_processed() {
+            self.finish_operation(pending);
+            return;
+        }
+
+        let file_entry = pending.flattened_files[pending.current_index].clone();
+        let source = file_entry.source;
+        let dest_path = file_entry.dest;
+
+        let file_name = source
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        pending.set_current_file(&file_name);
+        self.dialog = Some(DialogKind::progress(pending.progress.clone()));
+
+        if source == dest_path {
+            pending.add_error(format!("Source and destination are the same: {:?}", source));
+            pending.file_skipped();
+            pending.current_index += 1;
+            self.pending_operation = Some(pending);
+            return;
+        }
+
+        if dest_path.exists() && !self.resolve_conflict(&mut pending, &source, &dest_path) {
+            self.pending_operation = Some(pending);
+            return;
+        }
+
+        self.execute_single_file_operation(&mut pending, &source, &dest_path, &file_name);
+
         self.dialog = Some(DialogKind::progress(pending.progress.clone()));
         self.pending_operation = Some(pending);
     }
@@ -1037,11 +1048,30 @@ impl App {
         }
     }
 
+    /// 대상 파일/디렉토리 삭제 (Overwrite/OverwriteAll 공용)
+    fn remove_existing_dest(&self) {
+        if let Some(DialogKind::Conflict { dest_path, .. }) = &self.dialog {
+            let dest = dest_path.clone();
+            if dest.is_dir() {
+                let _ = std::fs::remove_dir_all(&dest);
+            } else {
+                let _ = std::fs::remove_file(&dest);
+            }
+        }
+    }
+
+    /// 현재 파일 건너뛰기 + 인덱스 증가 (Skip/SkipAll 공용)
+    fn skip_current_file(&mut self) {
+        if let Some(pending) = self.pending_operation.as_mut() {
+            pending.file_skipped();
+            pending.current_index += 1;
+        }
+    }
+
     /// 충돌 해결 처리
     pub fn handle_conflict(&mut self, resolution: ConflictResolution) {
         match resolution {
             ConflictResolution::Cancel => {
-                // 작업 취소 - 현재까지 결과 표시
                 if let Some(pending) = self.pending_operation.take() {
                     self.finish_operation(pending);
                 } else {
@@ -1049,46 +1079,23 @@ impl App {
                 }
             }
             ConflictResolution::Overwrite => {
-                // 현재 파일만 덮어쓰기: 대상 파일을 먼저 삭제
-                if let Some(DialogKind::Conflict { dest_path, .. }) = &self.dialog {
-                    let dest = dest_path.clone();
-                    if dest.is_dir() {
-                        let _ = std::fs::remove_dir_all(&dest);
-                    } else {
-                        let _ = std::fs::remove_file(&dest);
-                    }
-                }
-                // 처리 상태로 전환하여 다음 프레임에 계속 진행
+                self.remove_existing_dest();
                 self.execute_file_operation();
             }
             ConflictResolution::Skip => {
-                // 현재 파일만 건너뛰고 계속 진행
-                if let Some(pending) = self.pending_operation.as_mut() {
-                    pending.file_skipped();
-                    pending.current_index += 1;
-                }
+                self.skip_current_file();
                 self.execute_file_operation();
             }
             ConflictResolution::OverwriteAll => {
-                // 현재 파일 덮어쓰기 + 이후 모든 충돌도 덮어쓰기
-                if let Some(DialogKind::Conflict { dest_path, .. }) = &self.dialog {
-                    let dest = dest_path.clone();
-                    if dest.is_dir() {
-                        let _ = std::fs::remove_dir_all(&dest);
-                    } else {
-                        let _ = std::fs::remove_file(&dest);
-                    }
-                }
+                self.remove_existing_dest();
                 if let Some(pending) = self.pending_operation.as_mut() {
                     pending.conflict_resolution = Some(ConflictResolution::OverwriteAll);
                 }
                 self.execute_file_operation();
             }
             ConflictResolution::SkipAll => {
-                // 현재 파일 건너뛰기 + 이후 모든 충돌도 건너뛰기
+                self.skip_current_file();
                 if let Some(pending) = self.pending_operation.as_mut() {
-                    pending.file_skipped();
-                    pending.current_index += 1;
                     pending.conflict_resolution = Some(ConflictResolution::SkipAll);
                 }
                 self.execute_file_operation();
@@ -1184,6 +1191,30 @@ impl App {
         }
     }
 
+    /// 파일/디렉토리 삭제 실행 + 결과 기록
+    fn execute_single_delete(
+        &self,
+        pending: &mut PendingOperation,
+        source: &std::path::Path,
+        file_name: &str,
+    ) {
+        let result = if source.is_dir() {
+            self.filesystem.delete_directory(source)
+        } else {
+            self.filesystem.delete_file(source)
+        };
+
+        match result {
+            Ok(bytes) => pending.files_completed(bytes, 1),
+            Err(e) => {
+                pending.add_error(format!("{}: {}", file_name, e));
+                pending.file_skipped();
+            }
+        }
+
+        pending.current_index += 1;
+    }
+
     /// 다음 삭제 항목 처리 (메인 루프에서 호출)
     pub fn process_next_delete(&mut self) {
         let Some(mut pending) = self.pending_operation.take() else {
@@ -1196,7 +1227,6 @@ impl App {
             return;
         }
 
-        // 모든 항목 처리 완료
         if pending.current_index >= pending.sources.len() {
             self.finish_operation(pending);
             return;
@@ -1212,29 +1242,8 @@ impl App {
         pending.set_current_file(&file_name);
         self.dialog = Some(DialogKind::progress(pending.progress.clone()));
 
-        let result = if source.is_dir() {
-            self.filesystem.delete_directory(&source)
-        } else {
-            self.filesystem.delete_file(&source)
-        };
+        self.execute_single_delete(&mut pending, &source, &file_name);
 
-        match result {
-            Ok(bytes) => {
-                let file_count = if source.is_dir() {
-                    // 디렉토리의 경우, 이미 삭제됐으므로 1로 카운트
-                    1
-                } else {
-                    1
-                };
-                pending.files_completed(bytes, file_count);
-            }
-            Err(e) => {
-                pending.add_error(format!("{}: {}", file_name, e));
-                pending.file_skipped();
-            }
-        }
-
-        pending.current_index += 1;
         self.dialog = Some(DialogKind::progress(pending.progress.clone()));
         self.pending_operation = Some(pending);
     }
@@ -1376,13 +1385,46 @@ impl App {
         }
     }
 
+    /// 디렉토리/파일 크기 문자열 생성
+    fn format_size_display(&self, entry: &crate::models::file_entry::FileEntry) -> String {
+        if entry.is_directory() {
+            match self
+                .filesystem
+                .calculate_total_size(std::slice::from_ref(&entry.path))
+            {
+                Ok((bytes, files)) => format!(
+                    "{} ({} file(s))",
+                    crate::utils::formatter::format_file_size(bytes),
+                    files
+                ),
+                Err(_) => "Unknown".to_string(),
+            }
+        } else {
+            crate::utils::formatter::format_file_size(entry.size)
+        }
+    }
+
+    /// 하위 항목 개수 문자열 생성
+    fn format_children_info(&self, entry: &crate::models::file_entry::FileEntry) -> Option<String> {
+        if !entry.is_directory() {
+            return None;
+        }
+        match self.filesystem.read_directory(&entry.path) {
+            Ok(entries) => {
+                let dirs = entries.iter().filter(|e| e.is_directory()).count();
+                let files = entries.len() - dirs;
+                Some(format!("{} file(s), {} dir(s)", files, dirs))
+            }
+            Err(_) => None,
+        }
+    }
+
     /// 파일 속성 보기 (Alt+Enter)
     pub fn show_properties(&mut self) {
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
         let selected_index = panel.selected_index;
 
-        // ".." 선택 시 무시
         if has_parent && selected_index == 0 {
             return;
         }
@@ -1401,38 +1443,11 @@ impl App {
                 crate::models::file_entry::FileType::Executable => "Executable",
             };
 
-            let size_str = if entry.is_directory() {
-                match self
-                    .filesystem
-                    .calculate_total_size(std::slice::from_ref(&entry.path))
-                {
-                    Ok((bytes, files)) => format!(
-                        "{} ({} file(s))",
-                        crate::utils::formatter::format_file_size(bytes),
-                        files
-                    ),
-                    Err(_) => "Unknown".to_string(),
-                }
-            } else {
-                crate::utils::formatter::format_file_size(entry.size)
-            };
-
+            let size_str = self.format_size_display(&entry);
             let modified_str = crate::utils::formatter::format_date(entry.modified);
             let permissions_str =
                 crate::utils::formatter::format_permissions(entry.permissions.as_ref());
-
-            let children_info = if entry.is_directory() {
-                match self.filesystem.read_directory(&entry.path) {
-                    Ok(entries) => {
-                        let dirs = entries.iter().filter(|e| e.is_directory()).count();
-                        let files = entries.len() - dirs;
-                        Some(format!("{} file(s), {} dir(s)", files, dirs))
-                    }
-                    Err(_) => None,
-                }
-            } else {
-                None
-            };
+            let children_info = self.format_children_info(&entry);
 
             self.dialog = Some(DialogKind::properties(
                 &entry.name,

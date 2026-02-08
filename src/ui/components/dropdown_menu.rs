@@ -502,34 +502,9 @@ impl<'a> DropdownMenu<'a> {
     }
 }
 
-impl Widget for DropdownMenu<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        if self.menu.items.is_empty() {
-            return;
-        }
-
-        let width = self.calculate_width();
-        let height = self.menu.items.len() as u16 + 2; // +2 for border
-
-        // 드롭다운 영역 계산
-        let dropdown_area = Rect {
-            x: area.x,
-            y: area.y,
-            width: width.min(area.width),
-            height: height.min(area.height),
-        };
-
-        // 배경 클리어
-        Clear.render(dropdown_area, buf);
-
-        // 테두리
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(self.border_color))
-            .style(Style::default().bg(self.bg_color));
-        block.render(dropdown_area, buf);
-
-        // 메뉴 항목 렌더링
+impl DropdownMenu<'_> {
+    /// 메인 메뉴 항목 루프 렌더링
+    fn render_main_items(&self, dropdown_area: Rect, buf: &mut Buffer) {
         for (i, item) in self.menu.items.iter().enumerate() {
             if i as u16 + 1 >= dropdown_area.height - 1 {
                 break;
@@ -542,64 +517,89 @@ impl Widget for DropdownMenu<'_> {
                 height: 1,
             };
 
-            // 서브메뉴가 열려있어도 부모 메뉴 항목 하이라이트 유지
             let is_selected = i == self.state.selected_item;
             self.render_item(item, is_selected, dropdown_area.width, buf, item_area);
         }
+    }
 
-        // 서브메뉴 렌더링
-        if self.state.submenu_open {
-            if let Some(item) = self.menu.items.get(self.state.selected_item) {
-                if item.has_submenu() {
-                    let submenu_width = self.calculate_submenu_width(&item.submenu);
-                    let submenu_height = item.submenu.len() as u16 + 2;
-
-                    let submenu_x = (dropdown_area.x + dropdown_area.width)
-                        .min(area.x + area.width - submenu_width);
-                    let submenu_y = dropdown_area.y + 1 + self.state.selected_item as u16;
-
-                    let submenu_area = Rect {
-                        x: submenu_x,
-                        y: submenu_y.min(area.y + area.height - submenu_height),
-                        width: submenu_width.min(area.width.saturating_sub(submenu_x - area.x)),
-                        height: submenu_height.min(area.height.saturating_sub(submenu_y - area.y)),
-                    };
-
-                    // 서브메뉴 배경 클리어
-                    Clear.render(submenu_area, buf);
-
-                    // 서브메뉴 테두리
-                    let submenu_block = Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(self.border_color))
-                        .style(Style::default().bg(self.bg_color));
-                    submenu_block.render(submenu_area, buf);
-
-                    // 서브메뉴 항목 렌더링
-                    for (j, subitem) in item.submenu.iter().enumerate() {
-                        if j as u16 + 1 >= submenu_area.height - 1 {
-                            break;
-                        }
-
-                        let subitem_area = Rect {
-                            x: submenu_area.x,
-                            y: submenu_area.y + 1 + j as u16,
-                            width: submenu_area.width,
-                            height: 1,
-                        };
-
-                        let is_selected = j == self.state.selected_submenu_item;
-                        self.render_item(
-                            subitem,
-                            is_selected,
-                            submenu_area.width,
-                            buf,
-                            subitem_area,
-                        );
-                    }
-                }
-            }
+    /// 서브메뉴 프레임 + 항목 렌더링
+    fn render_submenu(&self, dropdown_area: Rect, area: Rect, buf: &mut Buffer) {
+        if !self.state.submenu_open {
+            return;
         }
+        let Some(item) = self.menu.items.get(self.state.selected_item) else {
+            return;
+        };
+        if !item.has_submenu() {
+            return;
+        }
+
+        let submenu_width = self.calculate_submenu_width(&item.submenu);
+        let submenu_height = item.submenu.len() as u16 + 2;
+
+        let submenu_x =
+            (dropdown_area.x + dropdown_area.width).min(area.x + area.width - submenu_width);
+        let submenu_y = dropdown_area.y + 1 + self.state.selected_item as u16;
+
+        let submenu_area = Rect {
+            x: submenu_x,
+            y: submenu_y.min(area.y + area.height - submenu_height),
+            width: submenu_width.min(area.width.saturating_sub(submenu_x - area.x)),
+            height: submenu_height.min(area.height.saturating_sub(submenu_y - area.y)),
+        };
+
+        Clear.render(submenu_area, buf);
+
+        let submenu_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        submenu_block.render(submenu_area, buf);
+
+        for (j, subitem) in item.submenu.iter().enumerate() {
+            if j as u16 + 1 >= submenu_area.height - 1 {
+                break;
+            }
+
+            let subitem_area = Rect {
+                x: submenu_area.x,
+                y: submenu_area.y + 1 + j as u16,
+                width: submenu_area.width,
+                height: 1,
+            };
+
+            let is_selected = j == self.state.selected_submenu_item;
+            self.render_item(subitem, is_selected, submenu_area.width, buf, subitem_area);
+        }
+    }
+}
+
+impl Widget for DropdownMenu<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        if self.menu.items.is_empty() {
+            return;
+        }
+
+        let width = self.calculate_width();
+        let height = self.menu.items.len() as u16 + 2;
+
+        let dropdown_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: width.min(area.width),
+            height: height.min(area.height),
+        };
+
+        Clear.render(dropdown_area, buf);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        block.render(dropdown_area, buf);
+
+        self.render_main_items(dropdown_area, buf);
+        self.render_submenu(dropdown_area, area, buf);
     }
 }
 

@@ -300,18 +300,238 @@ impl<'a> Panel<'a> {
     }
 }
 
+/// 컬럼 레이아웃 정보
+struct ColumnLayout {
+    show_permissions: bool,
+    show_size: bool,
+    date_format: &'static str,
+    name_width: usize,
+    size_width: usize,
+    date_width: usize,
+    perm_width: usize,
+}
+
+impl Panel<'_> {
+    /// 패널 너비 기반 컬럼 표시 여부/크기 결정
+    fn calculate_column_layout(width: usize) -> ColumnLayout {
+        let (show_permissions, show_size, date_format) = match width {
+            w if w >= 60 => (true, true, "long"),
+            w if w >= 40 => (false, true, "short"),
+            _ => (false, false, "short"),
+        };
+
+        let perm_width = if show_permissions { 12 } else { 0 };
+        let date_width = if date_format == "long" { 12 } else { 6 };
+        let size_width = if show_size { 10 } else { 0 };
+        let margins = 6;
+        let name_width = width
+            .saturating_sub(perm_width)
+            .saturating_sub(size_width)
+            .saturating_sub(date_width)
+            .saturating_sub(margins);
+
+        ColumnLayout {
+            show_permissions,
+            show_size,
+            date_format,
+            name_width,
+            size_width,
+            date_width,
+            perm_width,
+        }
+    }
+
+    /// 헤더 행 + 구분선 렌더링. y를 2 증가시킨다.
+    fn render_header(layout: &ColumnLayout, inner: Rect, buf: &mut Buffer, y: &mut u16) {
+        let header_style = Style::default()
+            .fg(Color::Rgb(150, 150, 150))
+            .add_modifier(Modifier::BOLD);
+
+        let mut header_spans = vec![Span::raw(" ")];
+        header_spans.push(Span::styled(
+            format!("{:<width$}", "Name", width = layout.name_width),
+            header_style,
+        ));
+
+        if layout.show_size {
+            header_spans.push(Span::raw(" "));
+            header_spans.push(Span::styled(format!("{:<10}", "Size"), header_style));
+        }
+
+        header_spans.push(Span::raw(" "));
+        header_spans.push(Span::styled(
+            format!(
+                "{:<width$}",
+                "Modified",
+                width = if layout.date_format == "long" { 12 } else { 8 }
+            ),
+            header_style,
+        ));
+
+        if layout.show_permissions {
+            header_spans.push(Span::raw(" "));
+            header_spans.push(Span::styled(format!("{:<11}", "Permissions"), header_style));
+        }
+
+        let header_line = Line::from(header_spans);
+        buf.set_line(inner.x, inner.y + *y, &header_line, inner.width);
+        *y += 1;
+
+        let separator = "─".repeat(inner.width as usize);
+        buf.set_string(
+            inner.x,
+            inner.y + *y,
+            separator,
+            Style::default().fg(Color::Rgb(60, 60, 60)),
+        );
+        *y += 1;
+    }
+
+    /// ".." 항목 렌더링
+    fn render_parent_entry(&self, inner: Rect, buf: &mut Buffer, y: &mut u16) {
+        let is_selected = self.selected_index == 0;
+        let style = if is_selected {
+            Style::default()
+                .bg(self.file_selected_bg_color)
+                .fg(self.file_selected_color)
+        } else {
+            Style::default().fg(Color::Rgb(150, 150, 150))
+        };
+
+        let parent_text = "[..]";
+        let padding_width = (inner.width as usize).saturating_sub(parent_text.len() + 1);
+        let padding = " ".repeat(padding_width);
+
+        let parent_spans = vec![
+            Span::styled(" ", style),
+            Span::styled(parent_text, style),
+            Span::styled(padding, style),
+        ];
+
+        let parent_line = Line::from(parent_spans);
+        buf.set_line(inner.x, inner.y + *y, &parent_line, inner.width);
+        *y += 1;
+    }
+
+    /// 단일 파일 행 렌더링
+    fn render_file_entry(
+        &self,
+        entry: &FileEntry,
+        entry_index: usize,
+        layout: &ColumnLayout,
+        inner: Rect,
+        buf: &mut Buffer,
+        y: &mut u16,
+    ) {
+        let is_cursor = if self.show_parent {
+            entry_index + 1 == self.selected_index
+        } else {
+            entry_index == self.selected_index
+        };
+        let is_marked = self.selected_items.contains(&entry_index);
+
+        let (fg, bg, marker) = match (is_cursor, is_marked) {
+            (true, true) => (
+                self.file_marked_color,
+                Some(self.file_selected_bg_color),
+                "*",
+            ),
+            (true, false) => (
+                self.file_selected_color,
+                Some(self.file_selected_bg_color),
+                " ",
+            ),
+            (false, true) => (self.file_marked_color, None, "*"),
+            (false, false) => (self.file_color(&entry.file_type), None, " "),
+        };
+
+        let style = if let Some(bg_color) = bg {
+            Style::default().fg(fg).bg(bg_color)
+        } else {
+            Style::default().fg(fg)
+        };
+
+        let marker_style = if is_marked {
+            Style::default()
+                .fg(self.file_marked_symbol_color)
+                .bg(bg.unwrap_or(self.bg_color))
+        } else if let Some(bg_color) = bg {
+            Style::default().bg(bg_color)
+        } else {
+            Style::default()
+        };
+
+        let mut line_spans = vec![Span::styled(marker, marker_style)];
+
+        // 아이콘 + 파일명
+        let icon = self.file_icon(&entry.file_type);
+        let display_name = self.truncate_name(&entry.name, layout.name_width.saturating_sub(4));
+        let name_str = format!("{} {}", icon, display_name);
+        let name_display_width = name_str.width();
+        let name_padding = layout.name_width.saturating_sub(name_display_width + 1);
+
+        line_spans.push(Span::styled(name_str, style));
+        line_spans.push(Span::styled(" ".repeat(name_padding), style));
+
+        // 크기
+        if layout.show_size {
+            line_spans.push(Span::styled(" ", style));
+            let size_str = if entry.is_directory() {
+                "-".to_string()
+            } else {
+                format_file_size(entry.size)
+            };
+            line_spans.push(Span::styled(format!("{:>9}", size_str), style));
+        }
+
+        // 날짜
+        line_spans.push(Span::styled(" ", style));
+        let date_str = if layout.date_format == "long" {
+            format_date(entry.modified)
+        } else {
+            let full_date = format_date(entry.modified);
+            if full_date.contains(':') {
+                full_date
+            } else {
+                full_date.split('-').skip(1).collect::<Vec<_>>().join("-")
+            }
+        };
+        line_spans.push(Span::styled(
+            format!("{:<width$}", date_str, width = layout.date_width),
+            style,
+        ));
+
+        // 권한
+        if layout.show_permissions {
+            line_spans.push(Span::styled(" ", style));
+            let perm_str = format_permissions(entry.permissions.as_ref());
+            line_spans.push(Span::styled(format!("{:<11}", perm_str), style));
+        }
+
+        let file_line = Line::from(line_spans);
+        buf.set_line(inner.x, inner.y + *y, &file_line, inner.width);
+        *y += 1;
+    }
+
+    /// 빈 패널 메시지 렌더링
+    fn render_empty_state(inner: Rect, buf: &mut Buffer, y: u16) {
+        let empty_text = Line::from(vec![Span::styled(
+            " <empty>",
+            Style::default().fg(Color::Rgb(100, 100, 100)),
+        )]);
+        buf.set_line(inner.x, inner.y + y, &empty_text, inner.width);
+    }
+}
+
 impl Widget for Panel<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // 빈 영역은 렌더링하지 않음
         if area.width == 0 || area.height == 0 {
             return;
         }
 
-        // 제목(경로) 최대 너비 계산 (테두리 2 + 양쪽 공백 2 = 4)
         let title_max_width = (area.width as usize).saturating_sub(4);
         let display_title = self.truncate_path(self.title, title_max_width);
 
-        // 블록 생성 및 렌더링
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(self.border_color()))
@@ -324,240 +544,33 @@ impl Widget for Panel<'_> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // 내부 영역이 너무 작으면 렌더링하지 않음
         if inner.height < 3 {
             return;
         }
 
-        // 패널 크기에 따른 컬럼 설정
-        // 듀얼 패널 모드에서는 각 패널이 전체 터미널의 절반 정도이므로
-        // 패널 기준으로 더 낮은 threshold 사용
-        let width = inner.width as usize;
-        let (show_permissions, show_size, date_format) = match width {
-            w if w >= 60 => (true, true, "long"),   // "2026-01-30"
-            w if w >= 40 => (false, true, "short"), // "01-30"
-            _ => (false, false, "short"),           // "01-30"
-        };
+        let layout = Self::calculate_column_layout(inner.width as usize);
+        let mut y: u16 = 0;
 
-        // 컬럼 너비 계산
-        let perm_width = if show_permissions { 12 } else { 0 };
-        let date_width = if date_format == "long" { 12 } else { 6 };
-        let size_width = if show_size { 10 } else { 0 };
-        let margins = 6; // 좌우 여백 + 구분 공백
-        let name_width = width
-            .saturating_sub(perm_width)
-            .saturating_sub(size_width)
-            .saturating_sub(date_width)
-            .saturating_sub(margins);
+        Self::render_header(&layout, inner, buf, &mut y);
 
-        let mut y = 0;
-
-        // 헤더 렌더링
-        let mut header_spans = vec![Span::raw(" ")];
-        header_spans.push(Span::styled(
-            format!("{:<width$}", "Name", width = name_width),
-            Style::default()
-                .fg(Color::Rgb(150, 150, 150))
-                .add_modifier(Modifier::BOLD),
-        ));
-
-        if show_size {
-            header_spans.push(Span::raw(" "));
-            header_spans.push(Span::styled(
-                format!("{:<10}", "Size"),
-                Style::default()
-                    .fg(Color::Rgb(150, 150, 150))
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-
-        header_spans.push(Span::raw(" "));
-        header_spans.push(Span::styled(
-            format!(
-                "{:<width$}",
-                "Modified",
-                width = if date_format == "long" { 12 } else { 8 }
-            ),
-            Style::default()
-                .fg(Color::Rgb(150, 150, 150))
-                .add_modifier(Modifier::BOLD),
-        ));
-
-        if show_permissions {
-            header_spans.push(Span::raw(" "));
-            header_spans.push(Span::styled(
-                format!("{:<11}", "Permissions"),
-                Style::default()
-                    .fg(Color::Rgb(150, 150, 150))
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-
-        let header_line = Line::from(header_spans);
-        buf.set_line(inner.x, inner.y + y, &header_line, inner.width);
-        y += 1;
-
-        // 구분선
-        let separator = "─".repeat(inner.width as usize);
-        buf.set_string(
-            inner.x,
-            inner.y + y,
-            separator,
-            Style::default().fg(Color::Rgb(60, 60, 60)),
-        );
-        y += 1;
-
-        // ".." (상위 디렉토리) 항목
         if self.show_parent {
-            let is_selected = self.selected_index == 0;
-            let style = if is_selected {
-                Style::default()
-                    .bg(self.file_selected_bg_color)
-                    .fg(self.file_selected_color)
-            } else {
-                Style::default().fg(Color::Rgb(150, 150, 150))
-            };
-
-            // 전체 행 하이라이트를 위해 너비만큼 패딩
-            let parent_text = "[..]";
-            let padding_width = (inner.width as usize).saturating_sub(parent_text.len() + 1);
-            let padding = " ".repeat(padding_width);
-
-            let parent_spans = vec![
-                Span::styled(" ", style),
-                Span::styled(parent_text, style),
-                Span::styled(padding, style),
-            ];
-
-            let parent_line = Line::from(parent_spans);
-            buf.set_line(inner.x, inner.y + y, &parent_line, inner.width);
-            y += 1;
+            self.render_parent_entry(inner, buf, &mut y);
         }
 
-        // 가용 높이 계산
         let available_height = (inner.height as usize).saturating_sub(y as usize);
-
-        // 파일 리스트 렌더링
         let start = self.scroll_offset;
         let end = (start + available_height).min(self.entries.len());
 
         for (i, entry) in self.entries[start..end].iter().enumerate() {
             let entry_index = start + i;
-            // show_parent가 true면 ".."이 index 0을 차지하므로
-            // entries는 index 1부터 시작
-            let is_cursor = if self.show_parent {
-                entry_index + 1 == self.selected_index
-            } else {
-                entry_index == self.selected_index
-            };
-
-            // 다중 선택 여부 (entries 인덱스 기반)
-            let is_marked = self.selected_items.contains(&entry_index);
-
-            // 스타일 결정: 4가지 조합
-            // - 커서+마킹: 배경 하이라이트 + 골드색 전경
-            // - 커서만: 배경 하이라이트 + 선택 전경색
-            // - 마킹만: 골드색 전경, 배경 없음
-            // - 없음: 파일 타입 색상
-            let (fg, bg, marker) = match (is_cursor, is_marked) {
-                (true, true) => (
-                    self.file_marked_color,
-                    Some(self.file_selected_bg_color),
-                    "*",
-                ),
-                (true, false) => (
-                    self.file_selected_color,
-                    Some(self.file_selected_bg_color),
-                    " ",
-                ),
-                (false, true) => (self.file_marked_color, None, "*"),
-                (false, false) => (self.file_color(&entry.file_type), None, " "),
-            };
-
-            let style = if let Some(bg_color) = bg {
-                Style::default().fg(fg).bg(bg_color)
-            } else {
-                Style::default().fg(fg)
-            };
-
-            // 마커 스타일 (항상 골드색)
-            let marker_style = if is_marked {
-                Style::default()
-                    .fg(self.file_marked_symbol_color)
-                    .bg(bg.unwrap_or(self.bg_color))
-            } else if let Some(bg_color) = bg {
-                Style::default().bg(bg_color)
-            } else {
-                Style::default()
-            };
-
-            // 파일 라인 구성 - 마커가 맨 앞에
-            let mut line_spans = vec![Span::styled(marker, marker_style)];
-
-            // 아이콘 + 파일명
-            let icon = self.file_icon(&entry.file_type);
-            let display_name = self.truncate_name(&entry.name, name_width.saturating_sub(4)); // 아이콘 너비 + 마커 고려
-            let name_str = format!("{} {}", icon, display_name);
-            let name_display_width = name_str.width();
-            let name_padding = name_width.saturating_sub(name_display_width + 1); // +1 for marker
-
-            line_spans.push(Span::styled(name_str, style));
-            line_spans.push(Span::styled(" ".repeat(name_padding), style));
-
-            // 크기
-            if show_size {
-                line_spans.push(Span::styled(" ", style));
-                let size_str = if entry.is_directory() {
-                    "-".to_string()
-                } else {
-                    format_file_size(entry.size)
-                };
-                line_spans.push(Span::styled(format!("{:>9}", size_str), style));
-            }
-
-            // 날짜
-            line_spans.push(Span::styled(" ", style));
-            let date_str = if date_format == "long" {
-                format_date(entry.modified)
-            } else {
-                // 짧은 형식: "MM-DD"
-                let full_date = format_date(entry.modified);
-                if full_date.contains(':') {
-                    full_date // 오늘이면 시간 표시
-                } else {
-                    // "2026-01-30" -> "01-30"
-                    full_date.split('-').skip(1).collect::<Vec<_>>().join("-")
-                }
-            };
-            line_spans.push(Span::styled(
-                format!("{:<width$}", date_str, width = date_width),
-                style,
-            ));
-
-            // 권한
-            if show_permissions {
-                line_spans.push(Span::styled(" ", style));
-                let perm_str = format_permissions(entry.permissions.as_ref());
-                line_spans.push(Span::styled(format!("{:<11}", perm_str), style));
-            }
-
-            let file_line = Line::from(line_spans);
-            buf.set_line(inner.x, inner.y + y, &file_line, inner.width);
-            y += 1;
-
-            // 가용 높이 초과 시 중단
+            self.render_file_entry(entry, entry_index, &layout, inner, buf, &mut y);
             if y >= inner.height {
                 break;
             }
         }
 
-        // 빈 패널 상태 표시 (파일이 없고 ".."도 없을 때)
         if self.entries.is_empty() && !self.show_parent && y < inner.height {
-            let empty_text = Line::from(vec![Span::styled(
-                " <empty>",
-                Style::default().fg(Color::Rgb(100, 100, 100)),
-            )]);
-            buf.set_line(inner.x, inner.y + y, &empty_text, inner.width);
+            Self::render_empty_state(inner, buf, y);
         }
     }
 }

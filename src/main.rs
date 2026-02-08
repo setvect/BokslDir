@@ -463,59 +463,34 @@ fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     }
 }
 
-/// 메인 UI 렌더링
-fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
-    let areas = app.layout.areas();
-    let active_panel = app.layout.active_panel();
-    let theme = app.theme_manager.current();
-
-    // 메뉴바 렌더링
-    let menu_bar = MenuBar::new()
-        .menus(&app.menus)
-        .menu_active(app.is_menu_active())
-        .selected_menu(app.menu_state.selected_menu)
-        .theme(theme);
-    f.render_widget(menu_bar, areas.menu_bar);
-
-    // 좌측 패널 렌더링
-    let left_path = app.left_panel.current_path.to_string_lossy();
-    let show_parent_left = app.left_panel.current_path.parent().is_some();
-    let left_panel = Panel::new()
-        .title(&left_path)
-        .status(if active_panel == ActivePanel::Left {
+/// 패널 위젯 생성 + 렌더링 (좌/우 공통)
+fn render_panel(
+    f: &mut ratatui::Frame<'_>,
+    panel_state: &crate::models::PanelState,
+    is_active: bool,
+    theme: &ui::Theme,
+    area: Rect,
+) {
+    let path = panel_state.current_path.to_string_lossy();
+    let show_parent = panel_state.current_path.parent().is_some();
+    let panel = Panel::new()
+        .title(&path)
+        .status(if is_active {
             PanelStatus::Active
         } else {
             PanelStatus::Inactive
         })
-        .entries(&app.left_panel.entries)
-        .selected_index(app.left_panel.selected_index)
-        .scroll_offset(app.left_panel.scroll_offset)
-        .show_parent(show_parent_left)
-        .selected_items(&app.left_panel.selected_items)
+        .entries(&panel_state.entries)
+        .selected_index(panel_state.selected_index)
+        .scroll_offset(panel_state.scroll_offset)
+        .show_parent(show_parent)
+        .selected_items(&panel_state.selected_items)
         .theme(theme);
-    f.render_widget(left_panel, areas.left_panel);
+    f.render_widget(panel, area);
+}
 
-    // 우측 패널 렌더링 (듀얼 패널 모드일 때만)
-    if app.layout.is_dual_panel() {
-        let right_path = app.right_panel.current_path.to_string_lossy();
-        let show_parent_right = app.right_panel.current_path.parent().is_some();
-        let right_panel = Panel::new()
-            .title(&right_path)
-            .status(if active_panel == ActivePanel::Right {
-                PanelStatus::Active
-            } else {
-                PanelStatus::Inactive
-            })
-            .entries(&app.right_panel.entries)
-            .selected_index(app.right_panel.selected_index)
-            .scroll_offset(app.right_panel.scroll_offset)
-            .show_parent(show_parent_right)
-            .selected_items(&app.right_panel.selected_items)
-            .theme(theme);
-        f.render_widget(right_panel, areas.right_panel);
-    }
-
-    // 상태바 렌더링
+/// 상태바 데이터 수집 + 렌더링
+fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, area: Rect) {
     let active_panel_state = app.active_panel_state();
     let file_count = active_panel_state.file_count();
     let dir_count = active_panel_state.dir_count();
@@ -533,33 +508,73 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .layout_mode(app.layout_mode_str())
         .pending_key(pending_display.as_deref())
         .theme(theme);
-    f.render_widget(status_bar, areas.status_bar);
+    f.render_widget(status_bar, area);
+}
 
-    // 커맨드바 렌더링
+/// 메뉴 드롭다운 조건부 렌더링
+fn render_dropdown_if_active(
+    f: &mut ratatui::Frame<'_>,
+    app: &App,
+    theme: &ui::Theme,
+    menu_bar_area: Rect,
+) {
+    if !app.is_menu_active() {
+        return;
+    }
+    if let Some(menu) = app.menus.get(app.menu_state.selected_menu) {
+        let menu_bar_widget = MenuBar::new().menus(&app.menus);
+        let menu_x = menu_bar_widget.get_menu_x_position(app.menu_state.selected_menu);
+
+        let dropdown_area = Rect {
+            x: menu_x,
+            y: menu_bar_area.y + 1,
+            width: f.area().width.saturating_sub(menu_x),
+            height: f.area().height.saturating_sub(menu_bar_area.y + 1),
+        };
+
+        let dropdown = DropdownMenu::new(menu, &app.menu_state).theme(theme);
+        f.render_widget(dropdown, dropdown_area);
+    }
+}
+
+/// 메인 UI 렌더링
+fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
+    let areas = app.layout.areas();
+    let active_panel = app.layout.active_panel();
+    let theme = app.theme_manager.current();
+
+    let menu_bar = MenuBar::new()
+        .menus(&app.menus)
+        .menu_active(app.is_menu_active())
+        .selected_menu(app.menu_state.selected_menu)
+        .theme(theme);
+    f.render_widget(menu_bar, areas.menu_bar);
+
+    render_panel(
+        f,
+        &app.left_panel,
+        active_panel == ActivePanel::Left,
+        theme,
+        areas.left_panel,
+    );
+
+    if app.layout.is_dual_panel() {
+        render_panel(
+            f,
+            &app.right_panel,
+            active_panel == ActivePanel::Right,
+            theme,
+            areas.right_panel,
+        );
+    }
+
+    render_status_bar(f, app, theme, areas.status_bar);
+
     let command_bar = CommandBar::new().theme(theme);
     f.render_widget(command_bar, areas.command_bar);
 
-    // 드롭다운 메뉴 렌더링 (메뉴가 활성화되어 있을 때)
-    if app.is_menu_active() {
-        if let Some(menu) = app.menus.get(app.menu_state.selected_menu) {
-            // 메뉴 위치 계산
-            let menu_bar_widget = MenuBar::new().menus(&app.menus);
-            let menu_x = menu_bar_widget.get_menu_x_position(app.menu_state.selected_menu);
+    render_dropdown_if_active(f, app, theme, areas.menu_bar);
 
-            // 드롭다운 영역 (메뉴바 아래)
-            let dropdown_area = Rect {
-                x: menu_x,
-                y: areas.menu_bar.y + 1,
-                width: f.area().width.saturating_sub(menu_x),
-                height: f.area().height.saturating_sub(areas.menu_bar.y + 1),
-            };
-
-            let dropdown = DropdownMenu::new(menu, &app.menu_state).theme(theme);
-            f.render_widget(dropdown, dropdown_area);
-        }
-    }
-
-    // 다이얼로그 렌더링 (최상위 레이어)
     if let Some(ref dialog_kind) = app.dialog {
         let dialog = Dialog::new(dialog_kind).theme(theme);
         f.render_widget(dialog, f.area());

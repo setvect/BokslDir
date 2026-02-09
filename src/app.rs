@@ -4,6 +4,7 @@ use crate::core::actions::Action;
 use crate::models::operation::{
     ConflictResolution, FlattenedFile, OperationState, OperationType, PendingOperation,
 };
+use crate::models::panel_state::{SortBy, SortOrder};
 use crate::models::PanelState;
 use crate::system::FileSystem;
 use crate::ui::{
@@ -266,6 +267,16 @@ impl App {
                     IconMode::Ascii => IconMode::Emoji,
                 };
             }
+            Action::SortByName => self.sort_active_panel(SortBy::Name),
+            Action::SortBySize => self.sort_active_panel(SortBy::Size),
+            Action::SortByDate => self.sort_active_panel(SortBy::Modified),
+            Action::SortByExt => self.sort_active_panel(SortBy::Extension),
+            Action::SortAscending => self.toggle_sort_order(),
+            Action::SortDescending => {
+                self.active_panel_state_mut()
+                    .set_sort_order(SortOrder::Descending);
+                self.re_sort_active_panel();
+            }
             // 미구현 액션은 무시
             _ => {}
         }
@@ -276,6 +287,88 @@ impl App {
         if let Some(action) = Action::from_id(action_id) {
             self.execute_action(action);
         }
+    }
+
+    // === 정렬 관련 메서드 (Phase 5.1) ===
+
+    /// 활성 패널 정렬 기준 변경 (같은 기준이면 순서 토글)
+    fn sort_active_panel(&mut self, sort_by: SortBy) {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+
+        // 현재 포커스 파일명 저장
+        let focused_name = {
+            let entry_index = if has_parent {
+                panel.selected_index.saturating_sub(1)
+            } else {
+                panel.selected_index
+            };
+            panel.entries.get(entry_index).map(|e| e.name.clone())
+        };
+
+        let panel = self.active_panel_state_mut();
+        panel.set_sort(sort_by);
+        panel.sort_entries();
+
+        // 포커스 파일 위치 복원
+        if let Some(name) = focused_name {
+            let offset = if has_parent { 1 } else { 0 };
+            if let Some(idx) = panel.entries.iter().position(|e| e.name == name) {
+                panel.selected_index = idx + offset;
+            }
+        }
+
+        // 다중 선택 초기화 (인덱스 무효화)
+        panel.selected_items.clear();
+
+        let indicator = panel.sort_indicator();
+        self.set_toast(&indicator);
+        self.adjust_scroll_offset();
+    }
+
+    /// 활성 패널 정렬 순서 토글
+    fn toggle_sort_order(&mut self) {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+
+        let focused_name = {
+            let entry_index = if has_parent {
+                panel.selected_index.saturating_sub(1)
+            } else {
+                panel.selected_index
+            };
+            panel.entries.get(entry_index).map(|e| e.name.clone())
+        };
+
+        let panel = self.active_panel_state_mut();
+        panel.sort_order = match panel.sort_order {
+            SortOrder::Ascending => SortOrder::Descending,
+            SortOrder::Descending => SortOrder::Ascending,
+        };
+        panel.sort_entries();
+
+        if let Some(name) = focused_name {
+            let offset = if has_parent { 1 } else { 0 };
+            if let Some(idx) = panel.entries.iter().position(|e| e.name == name) {
+                panel.selected_index = idx + offset;
+            }
+        }
+
+        panel.selected_items.clear();
+
+        let indicator = panel.sort_indicator();
+        self.set_toast(&indicator);
+        self.adjust_scroll_offset();
+    }
+
+    /// 활성 패널 재정렬 (정렬 상태 변경 후 호출)
+    fn re_sort_active_panel(&mut self) {
+        let panel = self.active_panel_state_mut();
+        panel.sort_entries();
+        panel.selected_items.clear();
+
+        let indicator = panel.sort_indicator();
+        self.set_toast(&indicator);
     }
 
     // === 파일 탐색 관련 메서드 (Phase 2.3) ===

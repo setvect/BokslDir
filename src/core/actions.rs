@@ -42,7 +42,7 @@ pub enum Action {
     ThemeDark,
     ThemeLight,
     ThemeContrast,
-    // Sort (미구현 — Phase 5)
+    // Sort (Phase 5.1)
     SortByName,
     SortBySize,
     SortByDate,
@@ -61,6 +61,7 @@ pub enum ActionCategory {
     Navigation,
     FileOperation,
     Selection,
+    Sort,
     System,
 }
 
@@ -396,52 +397,52 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         shortcut_display: None,
         command_bar: None,
     },
-    // Sort (Phase 5)
+    // Sort (Phase 5.1)
     ActionDef {
         action: Action::SortByName,
         id: "sort_name",
         label: "Sort by name",
-        category: ActionCategory::System,
-        shortcut_display: None,
+        category: ActionCategory::Sort,
+        shortcut_display: Some("sn"),
         command_bar: None,
     },
     ActionDef {
         action: Action::SortBySize,
         id: "sort_size",
         label: "Sort by size",
-        category: ActionCategory::System,
-        shortcut_display: None,
+        category: ActionCategory::Sort,
+        shortcut_display: Some("ss"),
         command_bar: None,
     },
     ActionDef {
         action: Action::SortByDate,
         id: "sort_date",
         label: "Sort by date",
-        category: ActionCategory::System,
-        shortcut_display: None,
+        category: ActionCategory::Sort,
+        shortcut_display: Some("sd"),
         command_bar: None,
     },
     ActionDef {
         action: Action::SortByExt,
         id: "sort_ext",
         label: "Sort by extension",
-        category: ActionCategory::System,
-        shortcut_display: None,
+        category: ActionCategory::Sort,
+        shortcut_display: Some("se"),
         command_bar: None,
     },
     ActionDef {
         action: Action::SortAscending,
         id: "sort_asc",
-        label: "Ascending",
-        category: ActionCategory::System,
-        shortcut_display: None,
+        label: "Reverse order",
+        category: ActionCategory::Sort,
+        shortcut_display: Some("sr"),
         command_bar: None,
     },
     ActionDef {
         action: Action::SortDescending,
         id: "sort_desc",
         label: "Descending",
-        category: ActionCategory::System,
+        category: ActionCategory::Sort,
         shortcut_display: None,
         command_bar: None,
     },
@@ -675,6 +676,7 @@ pub fn generate_help_entries() -> Vec<(&'static str, Vec<(&'static str, &'static
         (ActionCategory::Navigation, "Navigation"),
         (ActionCategory::FileOperation, "File Operations"),
         (ActionCategory::Selection, "Selection"),
+        (ActionCategory::Sort, "Sort"),
         (ActionCategory::System, "System"),
     ];
 

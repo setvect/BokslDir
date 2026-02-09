@@ -120,18 +120,43 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
 
 /// 일반 모드 키 처리 (액션 레지스트리 기반)
 fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
-    // 1) pending 키 시퀀스 처리 (gg 전용)
+    // 1) pending 키 시퀀스 처리 (gg, s+키)
     if let Some(pending) = app.pending_key {
         app.clear_pending_key();
-        if let ('g', KeyCode::Char('g')) = (pending, &code) {
-            app.execute_action(Action::GoToTop);
-            return;
+        match (pending, &code) {
+            ('g', KeyCode::Char('g')) => {
+                app.execute_action(Action::GoToTop);
+                return;
+            }
+            ('s', KeyCode::Char('n')) => {
+                app.execute_action(Action::SortByName);
+                return;
+            }
+            ('s', KeyCode::Char('s')) => {
+                app.execute_action(Action::SortBySize);
+                return;
+            }
+            ('s', KeyCode::Char('d')) => {
+                app.execute_action(Action::SortByDate);
+                return;
+            }
+            ('s', KeyCode::Char('e')) => {
+                app.execute_action(Action::SortByExt);
+                return;
+            }
+            ('s', KeyCode::Char('r')) => {
+                app.execute_action(Action::SortAscending);
+                return;
+            }
+            _ => {} // 잘못된 시퀀스, fall through
         }
     }
 
-    // 2) 'g' 시작 시 시퀀스 모드 진입
-    if modifiers == KeyModifiers::NONE && code == KeyCode::Char('g') {
-        app.set_pending_key('g');
+    // 2) 'g' 또는 's' 시작 시 시퀀스 모드 진입
+    if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Char('g') | KeyCode::Char('s')) {
+        if let KeyCode::Char(c) = code {
+            app.set_pending_key(c);
+        }
         return;
     }
 
@@ -498,6 +523,7 @@ fn render_panel(
         .show_parent(show_parent)
         .selected_items(&panel_state.selected_items)
         .icon_mode(icon_mode)
+        .sort_state(panel_state.sort_by, panel_state.sort_order)
         .theme(theme);
     f.render_widget(panel, area);
 }
@@ -513,6 +539,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
 
     let pending_display = app.pending_key_display();
     let toast_display = app.toast_display().map(|s| s.to_string());
+    let sort_display = active_panel_state.sort_indicator();
     let status_bar = StatusBar::new()
         .file_count(file_count)
         .dir_count(dir_count)
@@ -522,6 +549,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .layout_mode(app.layout_mode_str())
         .pending_key(pending_display.as_deref())
         .toast(toast_display.as_deref())
+        .sort_info(Some(&sort_display))
         .theme(theme);
     f.render_widget(status_bar, area);
 }

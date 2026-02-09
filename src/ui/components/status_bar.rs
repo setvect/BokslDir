@@ -30,6 +30,8 @@ pub struct StatusBar<'a> {
     pending_key: Option<&'a str>,
     /// 토스트 메시지 (한글 IME 등)
     toast: Option<&'a str>,
+    /// 정렬 정보 표시
+    sort_info: Option<&'a str>,
     /// 배경색
     bg_color: Color,
     /// 전경색
@@ -47,6 +49,7 @@ impl<'a> Default for StatusBar<'a> {
             layout_mode: "DUAL",
             pending_key: None,
             toast: None,
+            sort_info: None,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
         }
@@ -103,6 +106,12 @@ impl<'a> StatusBar<'a> {
     /// 토스트 메시지 설정
     pub fn toast(mut self, toast: Option<&'a str>) -> Self {
         self.toast = toast;
+        self
+    }
+
+    /// 정렬 정보 설정
+    pub fn sort_info(mut self, info: Option<&'a str>) -> Self {
+        self.sort_info = info;
         self
     }
 
@@ -185,13 +194,20 @@ impl Widget for StatusBar<'_> {
             None => String::new(),
         };
 
+        // 정렬 정보
+        let sort_info_str = if let Some(info) = self.sort_info {
+            format!("[{}] ", info)
+        } else {
+            String::new()
+        };
+
         // 오른쪽 정보: 레이아웃 모드 (넓은 화면에서만)
         let layout_info = if w >= 60 {
             format!("[{}] ", self.layout_mode)
         } else {
             String::new()
         };
-        let right_total_len = layout_info.len();
+        let right_total_len = sort_info_str.len() + layout_info.len();
 
         // 가용 공간 계산
         let left_len = left_info.len() + selected_info.len() + pending_info.len();
@@ -205,6 +221,10 @@ impl Widget for StatusBar<'_> {
             Span::styled(&selected_info, Style::default().fg(Color::Yellow)),
             Span::styled(&pending_info, Style::default().fg(Color::Cyan)),
             Span::raw(padding),
+            Span::styled(
+                sort_info_str,
+                Style::default().fg(Color::Rgb(100, 180, 255)),
+            ),
             Span::styled(layout_info, Style::default().fg(Color::Rgb(100, 100, 100))),
         ];
 

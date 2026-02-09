@@ -4,6 +4,7 @@
 // 파일 리스트 표시, 선택 상태, 테두리 렌더링
 
 use crate::models::file_entry::{FileEntry, FileType};
+use crate::models::panel_state::{SortBy, SortOrder};
 use crate::ui::Theme;
 use crate::utils::formatter::{format_date, format_file_size, format_permissions};
 use ratatui::{
@@ -74,6 +75,10 @@ pub struct Panel<'a> {
     symlink_color: Color,
     /// 아이콘 모드
     icon_mode: IconMode,
+    /// 현재 정렬 기준
+    sort_by: SortBy,
+    /// 현재 정렬 순서
+    sort_order: SortOrder,
 }
 
 /// 빈 HashSet을 위한 정적 참조
@@ -102,6 +107,8 @@ impl<'a> Default for Panel<'a> {
             executable_color: Color::Rgb(78, 201, 176),
             symlink_color: Color::Rgb(206, 145, 120),
             icon_mode: IconMode::default(),
+            sort_by: SortBy::Name,
+            sort_order: SortOrder::Ascending,
         }
     }
 }
@@ -168,6 +175,13 @@ impl<'a> Panel<'a> {
     /// 아이콘 모드 설정
     pub fn icon_mode(mut self, mode: IconMode) -> Self {
         self.icon_mode = mode;
+        self
+    }
+
+    /// 정렬 상태 설정
+    pub fn sort_state(mut self, sort_by: SortBy, sort_order: SortOrder) -> Self {
+        self.sort_by = sort_by;
+        self.sort_order = sort_order;
         self
     }
 
@@ -372,25 +386,54 @@ impl Panel<'_> {
     }
 
     /// 헤더 행 + 구분선 렌더링. y를 2 증가시킨다.
-    fn render_header(layout: &ColumnLayout, inner: Rect, buf: &mut Buffer, y: &mut u16) {
+    fn render_header(
+        layout: &ColumnLayout,
+        inner: Rect,
+        buf: &mut Buffer,
+        y: &mut u16,
+        sort_by: SortBy,
+        sort_order: SortOrder,
+    ) {
         let header_style = Style::default()
             .fg(Color::Rgb(150, 150, 150))
             .add_modifier(Modifier::BOLD);
 
+        let arrow = match sort_order {
+            SortOrder::Ascending => "▲",
+            SortOrder::Descending => "▼",
+        };
+
+        // Name 헤더 (Extension 정렬 시 "Name(Ext)" 표시)
+        let name_label = match sort_by {
+            SortBy::Name => format!("Name {}", arrow),
+            SortBy::Extension => format!("Name(Ext) {}", arrow),
+            _ => "Name".to_string(),
+        };
+
         let mut header_spans = vec![Span::raw(" ")];
         header_spans.push(Span::styled(
-            format!("{:<width$}", "Name", width = layout.name_width),
+            format!("{:<width$}", name_label, width = layout.name_width),
             header_style,
         ));
 
         if layout.show_size {
+            let size_label = if sort_by == SortBy::Size {
+                format!("Size {}", arrow)
+            } else {
+                "Size".to_string()
+            };
             header_spans.push(Span::raw(" "));
-            header_spans.push(Span::styled(format!("{:<10}", "Size"), header_style));
+            header_spans.push(Span::styled(format!("{:<10}", size_label), header_style));
         }
 
+        let modified_label = if sort_by == SortBy::Modified {
+            format!("Modified {}", arrow)
+        } else {
+            "Modified".to_string()
+        };
         header_spans.push(Span::raw(" "));
         header_spans.push(Span::styled(
-            format!("{:<width$}", "Modified", width = layout.date_width),
+            format!("{:<width$}", modified_label, width = layout.date_width),
             header_style,
         ));
 
@@ -580,7 +623,7 @@ impl Widget for Panel<'_> {
         let layout = Self::calculate_column_layout(inner.width as usize, has_scrollbar);
         let mut y: u16 = 0;
 
-        Self::render_header(&layout, inner, buf, &mut y);
+        Self::render_header(&layout, inner, buf, &mut y, self.sort_by, self.sort_order);
 
         if self.show_parent {
             self.render_parent_entry(inner, buf, &mut y);

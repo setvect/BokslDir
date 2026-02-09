@@ -72,6 +72,12 @@ pub enum DialogKind {
         selected_button: usize, // 0: OK, 1: Cancel
         original_path: PathBuf,
     },
+    /// 필터 입력 다이얼로그 (Phase 5.2)
+    FilterInput {
+        value: String,
+        cursor_pos: usize,
+        selected_button: usize, // 0: OK, 1: Cancel
+    },
     /// 단축키 도움말 다이얼로그 (Phase 4)
     Help { scroll_offset: usize },
     /// 파일 속성 다이얼로그
@@ -171,6 +177,17 @@ impl DialogKind {
             cursor_pos,
             selected_button: 0,
             original_path,
+        }
+    }
+
+    /// 필터 입력 다이얼로그
+    pub fn filter_input(initial: Option<&str>) -> Self {
+        let value = initial.unwrap_or("").to_string();
+        let cursor_pos = value.len();
+        DialogKind::FilterInput {
+            value,
+            cursor_pos,
+            selected_button: 0,
         }
     }
 
@@ -303,7 +320,8 @@ impl<'a> Dialog<'a> {
         let (width, height) = match self.kind {
             DialogKind::Input { .. }
             | DialogKind::MkdirInput { .. }
-            | DialogKind::RenameInput { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 7u16),
+            | DialogKind::RenameInput { .. }
+            | DialogKind::FilterInput { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 7u16),
             DialogKind::Confirm { .. } => (40u16.min(sw.saturating_sub(4)).max(25), 8u16),
             DialogKind::Conflict { .. } => (55u16.min(sw.saturating_sub(4)).max(35), 15u16),
             DialogKind::Progress { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 11u16),
@@ -1106,6 +1124,21 @@ impl Widget for Dialog<'_> {
                     dialog_area,
                     "Rename",
                     "New name:",
+                    value,
+                    *cursor_pos,
+                    *selected_button,
+                );
+            }
+            DialogKind::FilterInput {
+                value,
+                cursor_pos,
+                selected_button,
+            } => {
+                self.render_input(
+                    buf,
+                    dialog_area,
+                    "Filter",
+                    "Pattern (supports * ?):",
                     value,
                     *cursor_pos,
                     *selected_button,

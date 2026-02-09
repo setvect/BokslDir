@@ -214,6 +214,10 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         DialogKind::Help { .. } => {
             handle_help_dialog_keys(app, modifiers, code);
         }
+        // Phase 5.2: 필터
+        DialogKind::FilterInput { .. } => {
+            handle_filter_input_dialog_keys(app, modifiers, code);
+        }
     }
 }
 
@@ -446,6 +450,40 @@ fn handle_help_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: KeyCod
     }
 }
 
+/// 필터 입력 다이얼로그 키 처리
+fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    match (modifiers, code) {
+        (_, KeyCode::Enter) => {
+            let selected_button = app.get_filter_selected_button().unwrap_or(0);
+            if selected_button == 0 {
+                // OK 버튼
+                if let Some(value) = app.get_filter_input_value() {
+                    app.confirm_filter(value);
+                }
+            } else {
+                // Cancel 버튼 — 필터 해제
+                app.cancel_filter();
+            }
+        }
+        (_, KeyCode::Esc) => {
+            app.cancel_filter();
+        }
+        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            app.dialog_filter_toggle_button();
+        }
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            app.dialog_filter_input_char(c);
+        }
+        (_, KeyCode::Backspace) => app.dialog_filter_input_backspace(),
+        (_, KeyCode::Delete) => app.dialog_filter_input_delete(),
+        (_, KeyCode::Left) => app.dialog_filter_input_left(),
+        (_, KeyCode::Right) => app.dialog_filter_input_right(),
+        (_, KeyCode::Home) => app.dialog_filter_input_home(),
+        (_, KeyCode::End) => app.dialog_filter_input_end(),
+        _ => {}
+    }
+}
+
 /// 메뉴 모드 키 처리
 fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     match (modifiers, code) {
@@ -524,6 +562,7 @@ fn render_panel(
         .selected_items(&panel_state.selected_items)
         .icon_mode(icon_mode)
         .sort_state(panel_state.sort_by, panel_state.sort_order)
+        .filter_pattern(panel_state.filter.as_deref())
         .theme(theme);
     f.render_widget(panel, area);
 }
@@ -540,6 +579,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
     let pending_display = app.pending_key_display();
     let toast_display = app.toast_display().map(|s| s.to_string());
     let sort_display = active_panel_state.sort_indicator();
+    let filter_display = active_panel_state.filter_indicator();
     let status_bar = StatusBar::new()
         .file_count(file_count)
         .dir_count(dir_count)
@@ -550,6 +590,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .pending_key(pending_display.as_deref())
         .toast(toast_display.as_deref())
         .sort_info(Some(&sort_display))
+        .filter_info(filter_display.as_deref())
         .theme(theme);
     f.render_widget(status_bar, area);
 }

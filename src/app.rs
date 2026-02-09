@@ -277,6 +277,9 @@ impl App {
                     .set_sort_order(SortOrder::Descending);
                 self.re_sort_active_panel();
             }
+            // Filter / Search (Phase 5.2)
+            Action::StartFilter => self.start_filter(),
+            Action::ClearFilter => self.clear_filter(),
             // 미구현 액션은 무시
             _ => {}
         }
@@ -1839,6 +1842,218 @@ impl App {
 
     pub fn get_rename_selected_button(&self) -> Option<usize> {
         if let Some(DialogKind::RenameInput {
+            selected_button, ..
+        }) = &self.dialog
+        {
+            Some(*selected_button)
+        } else {
+            None
+        }
+    }
+
+    // === 필터/검색 관련 메서드 (Phase 5.2) ===
+
+    /// 필터 시작 (/)
+    pub fn start_filter(&mut self) {
+        let initial = self.active_panel_state().filter.clone();
+        // 다이얼로그 취소 시 복원하기 위해 현재 필터 저장
+        self.dialog = Some(DialogKind::filter_input(initial.as_deref()));
+    }
+
+    /// 필터 해제
+    pub fn clear_filter(&mut self) {
+        match self.active_panel() {
+            ActivePanel::Left => {
+                self.left_panel.set_filter(None);
+                let _ = self.left_panel.refresh(&self.filesystem);
+            }
+            ActivePanel::Right => {
+                self.right_panel.set_filter(None);
+                let _ = self.right_panel.refresh(&self.filesystem);
+            }
+        }
+        self.set_toast("Filter cleared");
+    }
+
+    /// 필터 확인 적용
+    pub fn confirm_filter(&mut self, pattern: String) {
+        let pattern = pattern.trim().to_string();
+        if pattern.is_empty() {
+            self.clear_filter();
+            self.dialog = None;
+            return;
+        }
+
+        match self.active_panel() {
+            ActivePanel::Left => {
+                self.left_panel.set_filter(Some(pattern.clone()));
+                let _ = self.left_panel.refresh(&self.filesystem);
+            }
+            ActivePanel::Right => {
+                self.right_panel.set_filter(Some(pattern.clone()));
+                let _ = self.right_panel.refresh(&self.filesystem);
+            }
+        }
+        self.dialog = None;
+        self.set_toast(&format!("Filter: {}", pattern));
+    }
+
+    /// 라이브 필터 업데이트 (다이얼로그 입력 중 실시간 반영)
+    pub fn apply_live_filter(&mut self, pattern: &str) {
+        let filter = if pattern.is_empty() {
+            None
+        } else {
+            Some(pattern.to_string())
+        };
+        match self.active_panel() {
+            ActivePanel::Left => {
+                self.left_panel.set_filter(filter);
+                let _ = self.left_panel.refresh(&self.filesystem);
+            }
+            ActivePanel::Right => {
+                self.right_panel.set_filter(filter);
+                let _ = self.right_panel.refresh(&self.filesystem);
+            }
+        }
+    }
+
+    /// 필터 취소 (다이얼로그 ESC — 필터 해제하고 다이얼로그 닫기)
+    pub fn cancel_filter(&mut self) {
+        match self.active_panel() {
+            ActivePanel::Left => {
+                self.left_panel.set_filter(None);
+                let _ = self.left_panel.refresh(&self.filesystem);
+            }
+            ActivePanel::Right => {
+                self.right_panel.set_filter(None);
+                let _ = self.right_panel.refresh(&self.filesystem);
+            }
+        }
+        self.dialog = None;
+    }
+
+    // === FilterInput 다이얼로그 입력 처리 ===
+
+    pub fn dialog_filter_input_char(&mut self, c: char) {
+        let new_value = if let Some(DialogKind::FilterInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            value.insert(*cursor_pos, c);
+            *cursor_pos += c.len_utf8();
+            Some(value.clone())
+        } else {
+            None
+        };
+        if let Some(v) = new_value {
+            self.apply_live_filter(&v);
+        }
+    }
+
+    pub fn dialog_filter_input_backspace(&mut self) {
+        let new_value = if let Some(DialogKind::FilterInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                let prev = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                value.remove(prev);
+                *cursor_pos = prev;
+            }
+            Some(value.clone())
+        } else {
+            None
+        };
+        if let Some(v) = new_value {
+            self.apply_live_filter(&v);
+        }
+    }
+
+    pub fn dialog_filter_input_delete(&mut self) {
+        let new_value = if let Some(DialogKind::FilterInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos < value.len() {
+                value.remove(*cursor_pos);
+            }
+            Some(value.clone())
+        } else {
+            None
+        };
+        if let Some(v) = new_value {
+            self.apply_live_filter(&v);
+        }
+    }
+
+    pub fn dialog_filter_input_left(&mut self) {
+        if let Some(DialogKind::FilterInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                *cursor_pos = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+            }
+        }
+    }
+
+    pub fn dialog_filter_input_right(&mut self) {
+        if let Some(DialogKind::FilterInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos < value.len() {
+                *cursor_pos = value[*cursor_pos..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| *cursor_pos + i)
+                    .unwrap_or(value.len());
+            }
+        }
+    }
+
+    pub fn dialog_filter_input_home(&mut self) {
+        if let Some(DialogKind::FilterInput { cursor_pos, .. }) = &mut self.dialog {
+            *cursor_pos = 0;
+        }
+    }
+
+    pub fn dialog_filter_input_end(&mut self) {
+        if let Some(DialogKind::FilterInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            *cursor_pos = value.len();
+        }
+    }
+
+    pub fn dialog_filter_toggle_button(&mut self) {
+        if let Some(DialogKind::FilterInput {
+            selected_button, ..
+        }) = &mut self.dialog
+        {
+            *selected_button = if *selected_button == 0 { 1 } else { 0 };
+        }
+    }
+
+    pub fn get_filter_input_value(&self) -> Option<String> {
+        if let Some(DialogKind::FilterInput { value, .. }) = &self.dialog {
+            Some(value.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_filter_selected_button(&self) -> Option<usize> {
+        if let Some(DialogKind::FilterInput {
             selected_button, ..
         }) = &self.dialog
         {

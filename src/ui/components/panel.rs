@@ -7,6 +7,7 @@ use crate::models::file_entry::{FileEntry, FileType};
 use crate::models::panel_state::{SortBy, SortOrder};
 use crate::ui::Theme;
 use crate::utils::formatter::{format_date, format_file_size, format_permissions};
+use crate::utils::glob;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -79,6 +80,8 @@ pub struct Panel<'a> {
     sort_by: SortBy,
     /// 현재 정렬 순서
     sort_order: SortOrder,
+    /// 필터 패턴 (하이라이트용)
+    filter_pattern: Option<&'a str>,
 }
 
 /// 빈 HashSet을 위한 정적 참조
@@ -109,6 +112,7 @@ impl<'a> Default for Panel<'a> {
             icon_mode: IconMode::default(),
             sort_by: SortBy::Name,
             sort_order: SortOrder::Ascending,
+            filter_pattern: None,
         }
     }
 }
@@ -182,6 +186,12 @@ impl<'a> Panel<'a> {
     pub fn sort_state(mut self, sort_by: SortBy, sort_order: SortOrder) -> Self {
         self.sort_by = sort_by;
         self.sort_order = sort_order;
+        self
+    }
+
+    /// 필터 패턴 설정 (하이라이트용)
+    pub fn filter_pattern(mut self, pattern: Option<&'a str>) -> Self {
+        self.filter_pattern = pattern;
         self
     }
 
@@ -532,14 +542,57 @@ impl Panel<'_> {
 
         let mut line_spans = vec![Span::styled(marker, marker_style)];
 
-        // 아이콘 + 파일명
+        // 아이콘 + 파일명 (필터 하이라이트 지원)
         let icon = self.file_icon(&entry.file_type);
         let display_name = self.truncate_name(&entry.name, layout.name_width.saturating_sub(4));
-        let name_str = format!("{} {}", icon, display_name);
-        let name_display_width = name_str.width();
-        let name_padding = layout.name_width.saturating_sub(name_display_width + 1);
+        let icon_str = format!("{} ", icon);
+        line_spans.push(Span::styled(&icon_str, style));
 
-        line_spans.push(Span::styled(name_str, style));
+        let highlight_style = if let Some(bg_color) = bg {
+            Style::default()
+                .fg(Color::Rgb(255, 255, 100))
+                .bg(bg_color)
+                .add_modifier(Modifier::UNDERLINED)
+        } else {
+            Style::default()
+                .fg(Color::Rgb(255, 255, 100))
+                .add_modifier(Modifier::UNDERLINED)
+        };
+
+        if let Some(pattern) = self.filter_pattern {
+            if !pattern.is_empty() && !glob::is_glob_pattern(pattern) {
+                // contains 매칭: 매칭 부분만 하이라이트
+                let name_lower = display_name.to_lowercase();
+                let pattern_lower = pattern.to_lowercase();
+                if let Some(pos) = name_lower.find(&pattern_lower) {
+                    let before: String = display_name.chars().take(pos).collect();
+                    let matched: String = display_name
+                        .chars()
+                        .skip(pos)
+                        .take(pattern_lower.len())
+                        .collect();
+                    let after: String = display_name
+                        .chars()
+                        .skip(pos + pattern_lower.len())
+                        .collect();
+                    line_spans.push(Span::styled(before, style));
+                    line_spans.push(Span::styled(matched, highlight_style));
+                    line_spans.push(Span::styled(after, style));
+                } else {
+                    line_spans.push(Span::styled(&display_name, style));
+                }
+            } else if glob::is_glob_pattern(pattern) {
+                // glob 매칭: 전체 이름에 하이라이트 스타일
+                line_spans.push(Span::styled(&display_name, highlight_style));
+            } else {
+                line_spans.push(Span::styled(&display_name, style));
+            }
+        } else {
+            line_spans.push(Span::styled(&display_name, style));
+        }
+
+        let name_with_icon_width = icon_str.width() + display_name.width();
+        let name_padding = layout.name_width.saturating_sub(name_with_icon_width + 1);
         line_spans.push(Span::styled(" ".repeat(name_padding), style));
 
         // 크기

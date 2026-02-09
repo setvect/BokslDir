@@ -3,6 +3,7 @@
 use crate::models::file_entry::FileEntry;
 use crate::system::filesystem::FileSystem;
 use crate::utils::error::Result;
+use crate::utils::glob;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -80,9 +81,16 @@ impl PanelState {
             entries.retain(|entry| !entry.is_hidden);
         }
 
-        // 필터 적용
+        // 필터 적용 (글로브 패턴 또는 부분 문자열 매칭)
         if let Some(ref filter) = self.filter {
-            entries.retain(|entry| entry.name.to_lowercase().contains(&filter.to_lowercase()));
+            if !filter.is_empty() {
+                if glob::is_glob_pattern(filter) {
+                    entries.retain(|entry| glob::glob_match(filter, &entry.name));
+                } else {
+                    let filter_lower = filter.to_lowercase();
+                    entries.retain(|entry| entry.name.to_lowercase().contains(&filter_lower));
+                }
+            }
         }
 
         self.entries = entries;
@@ -237,6 +245,21 @@ impl PanelState {
             SortOrder::Descending => "▼",
         };
         format!("{} {}", name, arrow)
+    }
+
+    // === 필터 관련 메서드 (Phase 5.2) ===
+
+    /// 필터 설정
+    pub fn set_filter(&mut self, pattern: Option<String>) {
+        self.filter = pattern;
+    }
+
+    /// 필터 상태 표시 문자열 (상태바용)
+    pub fn filter_indicator(&self) -> Option<String> {
+        self.filter
+            .as_ref()
+            .filter(|f| !f.is_empty())
+            .map(|f| format!("Filter: {}", f))
     }
 
     // === 다중 선택 관련 메서드 (Phase 3.1) ===
@@ -688,6 +711,90 @@ mod tests {
 
         state.sort_by = SortBy::Extension;
         assert_eq!(state.sort_indicator(), "Ext ▲");
+    }
+
+    // === 필터 테스트 (Phase 5.2) ===
+
+    #[test]
+    fn test_filter_contains() {
+        let mut state = PanelState::default();
+        state.entries = vec![
+            create_test_entry("main.rs"),
+            create_test_entry("test.rs"),
+            create_test_entry("readme.md"),
+        ];
+        state.filter = Some("main".to_string());
+
+        // contains 필터: "main" 포함 항목만 남기기
+        let filter = state.filter.clone().unwrap();
+        let filter_lower = filter.to_lowercase();
+        state
+            .entries
+            .retain(|e| e.name.to_lowercase().contains(&filter_lower));
+        assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.entries[0].name, "main.rs");
+    }
+
+    #[test]
+    fn test_filter_glob_star() {
+        let mut state = PanelState::default();
+        state.entries = vec![
+            create_test_entry("main.rs"),
+            create_test_entry("test.rs"),
+            create_test_entry("readme.md"),
+        ];
+
+        // glob 필터: *.rs
+        state
+            .entries
+            .retain(|e| crate::utils::glob::glob_match("*.rs", &e.name));
+        assert_eq!(state.entries.len(), 2);
+        assert_eq!(state.entries[0].name, "main.rs");
+        assert_eq!(state.entries[1].name, "test.rs");
+    }
+
+    #[test]
+    fn test_filter_glob_question() {
+        let mut state = PanelState::default();
+        state.entries = vec![
+            create_test_entry("a.rs"),
+            create_test_entry("ab.rs"),
+            create_test_entry("abc.rs"),
+        ];
+
+        state
+            .entries
+            .retain(|e| crate::utils::glob::glob_match("??.rs", &e.name));
+        assert_eq!(state.entries.len(), 1);
+        assert_eq!(state.entries[0].name, "ab.rs");
+    }
+
+    #[test]
+    fn test_filter_case_insensitive() {
+        let mut state = PanelState::default();
+        state.entries = vec![
+            create_test_entry("README.md"),
+            create_test_entry("readme.txt"),
+            create_test_entry("other.rs"),
+        ];
+
+        let filter_lower = "readme".to_lowercase();
+        state
+            .entries
+            .retain(|e| e.name.to_lowercase().contains(&filter_lower));
+        assert_eq!(state.entries.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_indicator() {
+        let mut state = PanelState::default();
+        assert!(state.filter_indicator().is_none());
+
+        state.filter = Some("*.rs".to_string());
+        assert_eq!(state.filter_indicator(), Some("Filter: *.rs".to_string()));
+
+        state.filter = Some(String::new());
+        assert!(state.filter_indicator().is_none());
     }
 
     #[test]

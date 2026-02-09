@@ -32,6 +32,8 @@ pub struct StatusBar<'a> {
     toast: Option<&'a str>,
     /// 정렬 정보 표시
     sort_info: Option<&'a str>,
+    /// 필터 정보 표시
+    filter_info: Option<&'a str>,
     /// 배경색
     bg_color: Color,
     /// 전경색
@@ -50,6 +52,7 @@ impl<'a> Default for StatusBar<'a> {
             pending_key: None,
             toast: None,
             sort_info: None,
+            filter_info: None,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
         }
@@ -112,6 +115,12 @@ impl<'a> StatusBar<'a> {
     /// 정렬 정보 설정
     pub fn sort_info(mut self, info: Option<&'a str>) -> Self {
         self.sort_info = info;
+        self
+    }
+
+    /// 필터 정보 설정
+    pub fn filter_info(mut self, info: Option<&'a str>) -> Self {
+        self.filter_info = info;
         self
     }
 
@@ -201,13 +210,20 @@ impl Widget for StatusBar<'_> {
             String::new()
         };
 
+        // 필터 정보
+        let filter_info_str = if let Some(info) = self.filter_info {
+            format!("[{}] ", info)
+        } else {
+            String::new()
+        };
+
         // 오른쪽 정보: 레이아웃 모드 (넓은 화면에서만)
         let layout_info = if w >= 60 {
             format!("[{}] ", self.layout_mode)
         } else {
             String::new()
         };
-        let right_total_len = sort_info_str.len() + layout_info.len();
+        let right_total_len = filter_info_str.len() + sort_info_str.len() + layout_info.len();
 
         // 가용 공간 계산
         let left_len = left_info.len() + selected_info.len() + pending_info.len();
@@ -221,6 +237,10 @@ impl Widget for StatusBar<'_> {
             Span::styled(&selected_info, Style::default().fg(Color::Yellow)),
             Span::styled(&pending_info, Style::default().fg(Color::Cyan)),
             Span::raw(padding),
+            Span::styled(
+                filter_info_str,
+                Style::default().fg(Color::Rgb(100, 220, 100)),
+            ),
             Span::styled(
                 sort_info_str,
                 Style::default().fg(Color::Rgb(100, 180, 255)),

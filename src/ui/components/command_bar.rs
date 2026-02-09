@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn test_command_bar_default() {
         let bar = CommandBar::default();
-        assert_eq!(bar.commands.len(), 19);
+        assert_eq!(bar.commands.len(), 20);
     }
 
     #[test]

@@ -49,6 +49,9 @@ pub enum Action {
     SortByExt,
     SortAscending,
     SortDescending,
+    // Filter (Phase 5.2)
+    StartFilter,
+    ClearFilter,
     // Settings
     ToggleIconMode,
     // About
@@ -62,6 +65,7 @@ pub enum ActionCategory {
     FileOperation,
     Selection,
     Sort,
+    Filter,
     System,
 }
 
@@ -446,6 +450,27 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         shortcut_display: None,
         command_bar: None,
     },
+    // Filter (Phase 5.2)
+    ActionDef {
+        action: Action::StartFilter,
+        id: "filter_start",
+        label: "Filter",
+        category: ActionCategory::Filter,
+        shortcut_display: Some("/"),
+        command_bar: Some(CommandBarEntry {
+            key: "/",
+            label: "Filter",
+            priority: 22,
+        }),
+    },
+    ActionDef {
+        action: Action::ClearFilter,
+        id: "filter_clear",
+        label: "Clear filter",
+        category: ActionCategory::Filter,
+        shortcut_display: None,
+        command_bar: None,
+    },
     // About
     ActionDef {
         action: Action::About,
@@ -617,6 +642,12 @@ pub fn key_bindings() -> Vec<KeyBinding> {
             modifiers: Some(KeyModifiers::NONE),
             action: Action::DeselectAll,
         },
+        // 필터/검색 (Phase 5.2)
+        KeyBinding {
+            code: KeyCode::Char('/'),
+            modifiers: Some(KeyModifiers::NONE),
+            action: Action::StartFilter,
+        },
         // 시스템
         KeyBinding {
             code: KeyCode::Char('?'),
@@ -677,6 +708,7 @@ pub fn generate_help_entries() -> Vec<(&'static str, Vec<(&'static str, &'static
         (ActionCategory::FileOperation, "File Operations"),
         (ActionCategory::Selection, "Selection"),
         (ActionCategory::Sort, "Sort"),
+        (ActionCategory::Filter, "Filter / Search"),
         (ActionCategory::System, "System"),
     ];
 
@@ -796,7 +828,7 @@ mod tests {
     #[test]
     fn test_command_bar_count() {
         let items = generate_command_bar_items();
-        // 19 items with command_bar entries
-        assert_eq!(items.len(), 19);
+        // 20 items with command_bar entries (19 + Filter)
+        assert_eq!(items.len(), 20);
     }
 }

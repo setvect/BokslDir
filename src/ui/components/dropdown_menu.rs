@@ -654,6 +654,9 @@ pub fn create_default_menus() -> Vec<Menu> {
                     menu_action("sort_desc", "내림차순"),
                 ],
             ),
+            MenuItem::separator(),
+            menu_action("filter_start", "필터링"),
+            menu_action("filter_clear", "필터 해제"),
         ]),
         Menu::new("settings", "설정(S)").hotkey('s').items(vec![
             MenuItem::submenu(

@@ -54,6 +54,11 @@ pub enum Action {
     ClearFilter,
     // Settings
     ToggleIconMode,
+    // View (Phase 5.3)
+    ToggleHidden,
+    ShowMountPoints,
+    SizeFormatAuto,
+    SizeFormatBytes,
     // About
     About,
 }
@@ -471,6 +476,39 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         shortcut_display: None,
         command_bar: None,
     },
+    // View (Phase 5.3)
+    ActionDef {
+        action: Action::ToggleHidden,
+        id: "toggle_hidden",
+        label: "Toggle hidden files",
+        category: ActionCategory::System,
+        shortcut_display: Some("."),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::ShowMountPoints,
+        id: "mount_points",
+        label: "Mount points",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("gm"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::SizeFormatAuto,
+        id: "size_auto",
+        label: "Size: Auto",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::SizeFormatBytes,
+        id: "size_bytes",
+        label: "Size: Bytes",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
     // About
     ActionDef {
         action: Action::About,
@@ -647,6 +685,12 @@ pub fn key_bindings() -> Vec<KeyBinding> {
             code: KeyCode::Char('/'),
             modifiers: Some(KeyModifiers::NONE),
             action: Action::StartFilter,
+        },
+        // 숨김 파일 토글 (Phase 5.3)
+        KeyBinding {
+            code: KeyCode::Char('.'),
+            modifiers: Some(KeyModifiers::NONE),
+            action: Action::ToggleHidden,
         },
         // 시스템
         KeyBinding {

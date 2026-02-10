@@ -3,10 +3,13 @@
 //
 // 파일 리스트 표시, 선택 상태, 테두리 렌더링
 
+use crate::app::SizeFormat;
 use crate::models::file_entry::{FileEntry, FileType};
 use crate::models::panel_state::{SortBy, SortOrder};
 use crate::ui::Theme;
-use crate::utils::formatter::{format_date, format_file_size, format_permissions};
+use crate::utils::formatter::{
+    format_date, format_file_size, format_file_size_bytes, format_permissions,
+};
 use crate::utils::glob;
 use ratatui::{
     buffer::Buffer,
@@ -82,6 +85,8 @@ pub struct Panel<'a> {
     sort_order: SortOrder,
     /// 필터 패턴 (하이라이트용)
     filter_pattern: Option<&'a str>,
+    /// 파일 크기 표시 형식
+    size_format: SizeFormat,
 }
 
 /// 빈 HashSet을 위한 정적 참조
@@ -113,6 +118,7 @@ impl<'a> Default for Panel<'a> {
             sort_by: SortBy::Name,
             sort_order: SortOrder::Ascending,
             filter_pattern: None,
+            size_format: SizeFormat::default(),
         }
     }
 }
@@ -192,6 +198,12 @@ impl<'a> Panel<'a> {
     /// 필터 패턴 설정 (하이라이트용)
     pub fn filter_pattern(mut self, pattern: Option<&'a str>) -> Self {
         self.filter_pattern = pattern;
+        self
+    }
+
+    /// 크기 표시 형식 설정
+    pub fn size_format(mut self, format: SizeFormat) -> Self {
+        self.size_format = format;
         self
     }
 
@@ -601,7 +613,10 @@ impl Panel<'_> {
             let size_str = if entry.is_directory() {
                 "-".to_string()
             } else {
-                format_file_size(entry.size)
+                match self.size_format {
+                    SizeFormat::Auto => format_file_size(entry.size),
+                    SizeFormat::Bytes => format_file_size_bytes(entry.size),
+                }
             };
             line_spans.push(Span::styled(format!("{:>9}", size_str), style));
         }

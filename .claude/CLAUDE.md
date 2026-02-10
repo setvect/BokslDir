@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
-**현재 상태**: Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
+**현재 상태**: Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
 **다음 단계**: Phase 6 - 추가 기능
 
 ## 개발 명령어
@@ -153,6 +153,15 @@ src/
 - 상태바 필터 표시: `[Filter: *.rs]` (녹색)
 - 보기 메뉴: 필터링/필터 해제 항목 추가
 
+### Phase 5.3: 기타 탐색 기능
+- 숨김 파일 토글: `.` 키, 양쪽 패널 동시 토글, 상태바 `[Hidden]` 인디케이터
+- 마운트 포인트: `gm` 키 시퀀스, 선택형 다이얼로그 (j/k/Enter/Esc)
+  - macOS: Home, Root, /Volumes/* 자동 탐지
+  - Linux: Home, Root, /mnt/*, /media/* 자동 탐지
+- 파일 크기 표시 형식: 보기 메뉴 > 크기 표시 형식 (자동 KB/MB/GB, 바이트)
+  - App.size_format: SizeFormat enum (Auto, Bytes)
+  - 패널 + 상태바 모두 반영
+
 ## 단축키 매핑 (Vim 스타일)
 
 **Normal 모드 키바인딩** (F키 제거 완료, Vim only):
@@ -180,6 +189,8 @@ src/
 | | `se` | 확장자순 정렬 |
 | | `sr` | 정렬 순서 반전 |
 | 검색/필터 | `/` | 빠른 필터 (글로브 지원) |
+| 보기 | `.` | 숨김 파일 토글 |
+| | `gm` | 마운트 포인트 |
 | 시스템 | `q` | 종료 |
 | | `Tab` | 패널 전환 |
 | | `F9` | 메뉴 |

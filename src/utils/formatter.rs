@@ -36,6 +36,24 @@ pub fn format_file_size(bytes: u64) -> String {
     }
 }
 
+/// 파일 크기를 정확한 바이트로 포맷팅 (천 단위 콤마)
+///
+/// # Examples
+/// ```
+/// use boksldir::utils::formatter::format_file_size_bytes;
+///
+/// assert_eq!(format_file_size_bytes(0), "0 B");
+/// assert_eq!(format_file_size_bytes(1024), "1,024 B");
+/// assert_eq!(format_file_size_bytes(1234567), "1,234,567 B");
+/// ```
+pub fn format_file_size_bytes(bytes: u64) -> String {
+    if bytes == 0 {
+        "0 B".to_string()
+    } else {
+        format!("{} B", format_number_with_commas(bytes))
+    }
+}
+
 /// 시스템 시간을 통일된 날짜 형식으로 포맷팅
 ///
 /// 항상 "YYYY-MM-DD HH:MM" 형식 (16자 고정)

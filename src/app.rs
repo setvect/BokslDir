@@ -16,6 +16,16 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
 
+/// 파일 크기 표시 형식
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SizeFormat {
+    /// 자동 (B/KB/MB/GB)
+    #[default]
+    Auto,
+    /// 정확한 바이트 (천 단위 콤마)
+    Bytes,
+}
+
 /// 앱 상태
 pub struct App {
     /// 종료 플래그
@@ -48,6 +58,8 @@ pub struct App {
     pub toast_message: Option<(String, Instant)>,
     /// 아이콘 표시 모드
     pub icon_mode: crate::ui::components::panel::IconMode,
+    /// 파일 크기 표시 형식
+    pub size_format: SizeFormat,
 }
 
 impl App {
@@ -91,6 +103,7 @@ impl App {
             pending_key_time: None,
             toast_message: None,
             icon_mode: crate::ui::components::panel::IconMode::default(),
+            size_format: SizeFormat::default(),
         })
     }
 
@@ -280,6 +293,17 @@ impl App {
             // Filter / Search (Phase 5.2)
             Action::StartFilter => self.start_filter(),
             Action::ClearFilter => self.clear_filter(),
+            // View (Phase 5.3)
+            Action::ToggleHidden => self.toggle_hidden(),
+            Action::ShowMountPoints => self.show_mount_points(),
+            Action::SizeFormatAuto => {
+                self.size_format = SizeFormat::Auto;
+                self.set_toast("Size format: Auto");
+            }
+            Action::SizeFormatBytes => {
+                self.size_format = SizeFormat::Bytes;
+                self.set_toast("Size format: Bytes");
+            }
             // 미구현 액션은 무시
             _ => {}
         }
@@ -1851,6 +1875,88 @@ impl App {
         }
     }
 
+    // === 숨김 파일 토글 (Phase 5.3) ===
+
+    /// 숨김 파일 표시/숨김 토글 (양쪽 패널 동시)
+    pub fn toggle_hidden(&mut self) {
+        let new_val = !self.left_panel.show_hidden;
+        self.left_panel.show_hidden = new_val;
+        self.right_panel.show_hidden = new_val;
+        let _ = self.left_panel.refresh(&self.filesystem);
+        let _ = self.right_panel.refresh(&self.filesystem);
+        self.set_toast(if new_val {
+            "Hidden files shown"
+        } else {
+            "Hidden files hidden"
+        });
+    }
+
+    /// 마운트 포인트 다이얼로그 표시
+    pub fn show_mount_points(&mut self) {
+        let points = self.filesystem.list_mount_points();
+        let items: Vec<(String, std::path::PathBuf)> =
+            points.into_iter().map(|mp| (mp.name, mp.path)).collect();
+        if items.is_empty() {
+            self.dialog = Some(DialogKind::message(
+                "Mount Points",
+                "No mount points found.",
+            ));
+        } else {
+            self.dialog = Some(DialogKind::mount_points(items));
+        }
+    }
+
+    /// 마운트 포인트로 이동
+    pub fn go_to_mount_point(&mut self, path: std::path::PathBuf) {
+        match self.active_panel() {
+            ActivePanel::Left => {
+                let _ = self.left_panel.change_directory(path, &self.filesystem);
+            }
+            ActivePanel::Right => {
+                let _ = self.right_panel.change_directory(path, &self.filesystem);
+            }
+        }
+        self.dialog = None;
+    }
+
+    /// 마운트 포인트 다이얼로그에서 선택 이동 (아래)
+    pub fn mount_points_move_down(&mut self) {
+        if let Some(DialogKind::MountPoints {
+            items,
+            selected_index,
+        }) = &mut self.dialog
+        {
+            if *selected_index + 1 < items.len() {
+                *selected_index += 1;
+            }
+        }
+    }
+
+    /// 마운트 포인트 다이얼로그에서 선택 이동 (위)
+    pub fn mount_points_move_up(&mut self) {
+        if let Some(DialogKind::MountPoints { selected_index, .. }) = &mut self.dialog {
+            if *selected_index > 0 {
+                *selected_index -= 1;
+            }
+        }
+    }
+
+    /// 마운트 포인트 다이얼로그에서 선택 확인
+    pub fn mount_points_confirm(&mut self) {
+        let path = if let Some(DialogKind::MountPoints {
+            items,
+            selected_index,
+        }) = &self.dialog
+        {
+            items.get(*selected_index).map(|(_, p)| p.clone())
+        } else {
+            None
+        };
+        if let Some(path) = path {
+            self.go_to_mount_point(path);
+        }
+    }
+
     // === 필터/검색 관련 메서드 (Phase 5.2) ===
 
     /// 필터 시작 (/)
@@ -2279,6 +2385,7 @@ impl Default for App {
                 pending_key_time: None,
                 toast_message: None,
                 icon_mode: crate::ui::components::panel::IconMode::default(),
+                size_format: SizeFormat::default(),
             }
         })
     }

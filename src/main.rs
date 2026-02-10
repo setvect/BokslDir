@@ -18,7 +18,10 @@ use ui::{
     ActivePanel, CommandBar, Dialog, DialogKind, DropdownMenu, LayoutMode, MenuBar, Panel,
     PanelStatus, StatusBar, WarningScreen,
 };
-use utils::{error::Result, formatter::format_file_size};
+use utils::{
+    error::Result,
+    formatter::{format_file_size, format_file_size_bytes},
+};
 
 fn main() -> Result<()> {
     // Setup terminal
@@ -128,6 +131,10 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
                 app.execute_action(Action::GoToTop);
                 return;
             }
+            ('g', KeyCode::Char('m')) => {
+                app.execute_action(Action::ShowMountPoints);
+                return;
+            }
             ('s', KeyCode::Char('n')) => {
                 app.execute_action(Action::SortByName);
                 return;
@@ -217,6 +224,10 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         // Phase 5.2: 필터
         DialogKind::FilterInput { .. } => {
             handle_filter_input_dialog_keys(app, modifiers, code);
+        }
+        // Phase 5.3: 마운트 포인트
+        DialogKind::MountPoints { .. } => {
+            handle_mount_points_dialog_keys(app, code);
         }
     }
 }
@@ -450,6 +461,25 @@ fn handle_help_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: KeyCod
     }
 }
 
+/// 마운트 포인트 다이얼로그 키 처리
+fn handle_mount_points_dialog_keys(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.close_dialog();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.mount_points_move_down();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.mount_points_move_up();
+        }
+        KeyCode::Enter | KeyCode::Char('l') => {
+            app.mount_points_confirm();
+        }
+        _ => {}
+    }
+}
+
 /// 필터 입력 다이얼로그 키 처리
 fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     match (modifiers, code) {
@@ -545,6 +575,7 @@ fn render_panel(
     theme: &ui::Theme,
     area: Rect,
     icon_mode: ui::components::panel::IconMode,
+    size_format: app::SizeFormat,
 ) {
     let path = panel_state.current_path.to_string_lossy();
     let show_parent = panel_state.current_path.parent().is_some();
@@ -563,6 +594,7 @@ fn render_panel(
         .icon_mode(icon_mode)
         .sort_state(panel_state.sort_by, panel_state.sort_order)
         .filter_pattern(panel_state.filter.as_deref())
+        .size_format(size_format)
         .theme(theme);
     f.render_widget(panel, area);
 }
@@ -572,9 +604,15 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
     let active_panel_state = app.active_panel_state();
     let file_count = active_panel_state.file_count();
     let dir_count = active_panel_state.dir_count();
-    let total_size = format_file_size(active_panel_state.total_size());
+    let total_size = match app.size_format {
+        app::SizeFormat::Auto => format_file_size(active_panel_state.total_size()),
+        app::SizeFormat::Bytes => format_file_size_bytes(active_panel_state.total_size()),
+    };
     let selected_count = active_panel_state.selected_count();
-    let selected_size = format_file_size(active_panel_state.selected_size());
+    let selected_size = match app.size_format {
+        app::SizeFormat::Auto => format_file_size(active_panel_state.selected_size()),
+        app::SizeFormat::Bytes => format_file_size_bytes(active_panel_state.selected_size()),
+    };
 
     let pending_display = app.pending_key_display();
     let toast_display = app.toast_display().map(|s| s.to_string());
@@ -591,6 +629,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .toast(toast_display.as_deref())
         .sort_info(Some(&sort_display))
         .filter_info(filter_display.as_deref())
+        .show_hidden(active_panel_state.show_hidden)
         .theme(theme);
     f.render_widget(status_bar, area);
 }
@@ -641,6 +680,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         theme,
         areas.left_panel,
         app.icon_mode,
+        app.size_format,
     );
 
     if app.layout.is_dual_panel() {
@@ -651,6 +691,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
             theme,
             areas.right_panel,
             app.icon_mode,
+            app.size_format,
         );
     }
 

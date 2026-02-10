@@ -657,6 +657,17 @@ pub fn create_default_menus() -> Vec<Menu> {
             MenuItem::separator(),
             menu_action("filter_start", "필터링"),
             menu_action("filter_clear", "필터 해제"),
+            MenuItem::separator(),
+            menu_action("toggle_hidden", "숨김 파일 표시"),
+            menu_action("mount_points", "마운트 포인트"),
+            MenuItem::submenu(
+                "size_format",
+                "크기 표시 형식",
+                vec![
+                    menu_action("size_auto", "자동 (KB/MB/GB)"),
+                    menu_action("size_bytes", "바이트"),
+                ],
+            ),
         ]),
         Menu::new("settings", "설정(S)").hotkey('s').items(vec![
             MenuItem::submenu(

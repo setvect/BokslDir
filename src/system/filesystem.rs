@@ -5,6 +5,13 @@ use crate::utils::error::{BokslDirError, Result};
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
 
+/// 마운트 포인트 정보
+#[derive(Debug, Clone)]
+pub struct MountPoint {
+    pub name: String,
+    pub path: PathBuf,
+}
+
 /// 파일 시스템 모듈
 pub struct FileSystem;
 
@@ -159,6 +166,71 @@ impl FileSystem {
     #[allow(clippy::unused_self)]
     pub fn is_directory(&self, path: &Path) -> bool {
         path.is_dir()
+    }
+
+    // === Phase 5.3: 마운트 포인트 ===
+
+    /// 시스템 마운트 포인트 목록 반환
+    #[allow(clippy::unused_self)]
+    pub fn list_mount_points(&self) -> Vec<MountPoint> {
+        let mut points = Vec::new();
+
+        // 홈 디렉토리
+        if let Ok(home) = std::env::var("HOME") {
+            let home_path = PathBuf::from(&home);
+            if home_path.is_dir() {
+                points.push(MountPoint {
+                    name: format!("~ ({})", home),
+                    path: home_path,
+                });
+            }
+        }
+
+        // 루트
+        let root = PathBuf::from("/");
+        if root.is_dir() {
+            points.push(MountPoint {
+                name: "/".to_string(),
+                path: root,
+            });
+        }
+
+        // macOS: /Volumes/*
+        #[cfg(target_os = "macos")]
+        {
+            let volumes = PathBuf::from("/Volumes");
+            if let Ok(entries) = fs::read_dir(&volumes) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        points.push(MountPoint {
+                            name: format!("/Volumes/{}", name),
+                            path,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Linux: /mnt/*, /media/$USER/*
+        #[cfg(target_os = "linux")]
+        {
+            for base in &["/mnt", "/media"] {
+                let base_path = PathBuf::from(base);
+                if let Ok(entries) = fs::read_dir(&base_path) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            let name = path.to_string_lossy().to_string();
+                            points.push(MountPoint { name, path });
+                        }
+                    }
+                }
+            }
+        }
+
+        points
     }
 
     // === Phase 3.2: 파일 복사/이동 메서드 ===

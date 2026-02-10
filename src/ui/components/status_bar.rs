@@ -34,6 +34,8 @@ pub struct StatusBar<'a> {
     sort_info: Option<&'a str>,
     /// 필터 정보 표시
     filter_info: Option<&'a str>,
+    /// 숨김 파일 표시 여부
+    show_hidden: bool,
     /// 배경색
     bg_color: Color,
     /// 전경색
@@ -53,6 +55,7 @@ impl<'a> Default for StatusBar<'a> {
             toast: None,
             sort_info: None,
             filter_info: None,
+            show_hidden: false,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
         }
@@ -121,6 +124,12 @@ impl<'a> StatusBar<'a> {
     /// 필터 정보 설정
     pub fn filter_info(mut self, info: Option<&'a str>) -> Self {
         self.filter_info = info;
+        self
+    }
+
+    /// 숨김 파일 표시 여부 설정
+    pub fn show_hidden(mut self, show: bool) -> Self {
+        self.show_hidden = show;
         self
     }
 
@@ -217,13 +226,21 @@ impl Widget for StatusBar<'_> {
             String::new()
         };
 
+        // 숨김 파일 표시 정보
+        let hidden_info_str = if self.show_hidden {
+            "[Hidden] ".to_string()
+        } else {
+            String::new()
+        };
+
         // 오른쪽 정보: 레이아웃 모드 (넓은 화면에서만)
         let layout_info = if w >= 60 {
             format!("[{}] ", self.layout_mode)
         } else {
             String::new()
         };
-        let right_total_len = filter_info_str.len() + sort_info_str.len() + layout_info.len();
+        let right_total_len =
+            hidden_info_str.len() + filter_info_str.len() + sort_info_str.len() + layout_info.len();
 
         // 가용 공간 계산
         let left_len = left_info.len() + selected_info.len() + pending_info.len();
@@ -237,6 +254,10 @@ impl Widget for StatusBar<'_> {
             Span::styled(&selected_info, Style::default().fg(Color::Yellow)),
             Span::styled(&pending_info, Style::default().fg(Color::Cyan)),
             Span::raw(padding),
+            Span::styled(
+                hidden_info_str,
+                Style::default().fg(Color::Rgb(180, 140, 255)),
+            ),
             Span::styled(
                 filter_info_str,
                 Style::default().fg(Color::Rgb(100, 220, 100)),

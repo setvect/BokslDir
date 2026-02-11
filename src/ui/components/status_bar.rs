@@ -11,6 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 /// 상태바 컴포넌트
 pub struct StatusBar<'a> {
@@ -36,6 +37,8 @@ pub struct StatusBar<'a> {
     filter_info: Option<&'a str>,
     /// 숨김 파일 표시 여부
     show_hidden: bool,
+    /// IME 상태 표시
+    ime_info: Option<&'a str>,
     /// 배경색
     bg_color: Color,
     /// 전경색
@@ -56,6 +59,7 @@ impl<'a> Default for StatusBar<'a> {
             sort_info: None,
             filter_info: None,
             show_hidden: false,
+            ime_info: None,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
         }
@@ -130,6 +134,12 @@ impl<'a> StatusBar<'a> {
     /// 숨김 파일 표시 여부 설정
     pub fn show_hidden(mut self, show: bool) -> Self {
         self.show_hidden = show;
+        self
+    }
+
+    /// IME 상태 설정
+    pub fn ime_info(mut self, info: Option<&'a str>) -> Self {
+        self.ime_info = info;
         self
     }
 
@@ -233,27 +243,46 @@ impl Widget for StatusBar<'_> {
             String::new()
         };
 
+        // IME 상태 표시
+        let ime_info_str = if let Some(info) = self.ime_info {
+            format!("[{}] ", info)
+        } else {
+            String::new()
+        };
+
         // 오른쪽 정보: 레이아웃 모드 (넓은 화면에서만)
         let layout_info = if w >= 60 {
             format!("[{}] ", self.layout_mode)
         } else {
             String::new()
         };
-        let right_total_len =
-            hidden_info_str.len() + filter_info_str.len() + sort_info_str.len() + layout_info.len();
 
-        // 가용 공간 계산
+        // 가용 공간 계산 (unicode width 사용)
+        let right_total_width = UnicodeWidthStr::width(ime_info_str.as_str())
+            + UnicodeWidthStr::width(hidden_info_str.as_str())
+            + UnicodeWidthStr::width(filter_info_str.as_str())
+            + UnicodeWidthStr::width(sort_info_str.as_str())
+            + UnicodeWidthStr::width(layout_info.as_str());
+
         let left_len = left_info.len() + selected_info.len() + pending_info.len();
         let padding_len =
             area.width
-                .saturating_sub(left_len as u16 + right_total_len as u16) as usize;
+                .saturating_sub(left_len as u16 + right_total_width as u16) as usize;
         let padding = " ".repeat(padding_len);
+
+        // IME 상태 색상: 한글이면 노란색 경고, 영문이면 녹색
+        let ime_color = if self.ime_info == Some("한글") {
+            Color::Rgb(255, 180, 50) // 노란-주황 (한글 모드 경고)
+        } else {
+            Color::Rgb(100, 200, 100) // 녹색 (영문 모드)
+        };
 
         let spans = vec![
             Span::styled(&left_info, Style::default().fg(self.fg_color)),
             Span::styled(&selected_info, Style::default().fg(Color::Yellow)),
             Span::styled(&pending_info, Style::default().fg(Color::Cyan)),
             Span::raw(padding),
+            Span::styled(ime_info_str, Style::default().fg(ime_color)),
             Span::styled(
                 hidden_info_str,
                 Style::default().fg(Color::Rgb(180, 140, 255)),
@@ -289,5 +318,17 @@ mod tests {
         assert_eq!(status_bar.file_count, 10);
         assert_eq!(status_bar.dir_count, 5);
         assert_eq!(status_bar.total_size, "1.2GB");
+    }
+
+    #[test]
+    fn test_status_bar_with_ime() {
+        let status_bar = StatusBar::new().ime_info(Some("한글"));
+        assert_eq!(status_bar.ime_info, Some("한글"));
+
+        let status_bar = StatusBar::new().ime_info(Some("EN"));
+        assert_eq!(status_bar.ime_info, Some("EN"));
+
+        let status_bar = StatusBar::new().ime_info(None);
+        assert_eq!(status_bar.ime_info, None);
     }
 }

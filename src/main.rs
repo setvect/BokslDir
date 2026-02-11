@@ -14,6 +14,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::io;
+use system::ime;
 use ui::{
     ActivePanel, CommandBar, Dialog, DialogKind, DropdownMenu, LayoutMode, MenuBar, Panel,
     PanelStatus, StatusBar, WarningScreen,
@@ -103,6 +104,12 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
 
         // 토스트 메시지 만료 체크
         app.clear_expired_toast();
+
+        // IME 상태 폴링
+        let new_ime = ime::get_current_ime();
+        if new_ime != app.ime_status {
+            app.ime_status = new_ime;
+        }
 
         // 파일 작업 진행 중이면 다음 파일 처리
         if app.is_operation_processing() {
@@ -618,6 +625,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
     let toast_display = app.toast_display().map(|s| s.to_string());
     let sort_display = active_panel_state.sort_indicator();
     let filter_display = active_panel_state.filter_indicator();
+    let ime_label = app.ime_status.display_label();
     let status_bar = StatusBar::new()
         .file_count(file_count)
         .dir_count(dir_count)
@@ -630,6 +638,11 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .sort_info(Some(&sort_display))
         .filter_info(filter_display.as_deref())
         .show_hidden(active_panel_state.show_hidden)
+        .ime_info(if app.ime_status.should_display() {
+            Some(ime_label)
+        } else {
+            None
+        })
         .theme(theme);
     f.render_widget(status_bar, area);
 }

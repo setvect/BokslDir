@@ -6,7 +6,7 @@ use crate::models::operation::{
 };
 use crate::models::panel_state::{SortBy, SortOrder};
 use crate::models::PanelState;
-use crate::system::FileSystem;
+use crate::system::{FileSystem, ImeStatus};
 use crate::ui::{
     create_default_menus, ActivePanel, DialogKind, LayoutManager, LayoutMode, Menu, MenuState,
     ThemeManager,
@@ -60,6 +60,8 @@ pub struct App {
     pub icon_mode: crate::ui::components::panel::IconMode,
     /// 파일 크기 표시 형식
     pub size_format: SizeFormat,
+    /// 현재 IME 상태
+    pub ime_status: ImeStatus,
 }
 
 impl App {
@@ -104,6 +106,7 @@ impl App {
             toast_message: None,
             icon_mode: crate::ui::components::panel::IconMode::default(),
             size_format: SizeFormat::default(),
+            ime_status: crate::system::get_current_ime(),
         })
     }
 
@@ -2386,6 +2389,7 @@ impl Default for App {
                 toast_message: None,
                 icon_mode: crate::ui::components::panel::IconMode::default(),
                 size_format: SizeFormat::default(),
+                ime_status: ImeStatus::Unknown,
             }
         })
     }

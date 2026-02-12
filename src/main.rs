@@ -162,12 +162,70 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
                 app.execute_action(Action::SortAscending);
                 return;
             }
+            // Tab (Phase 6.1)
+            ('t', KeyCode::Char('n')) => {
+                app.execute_action(Action::TabNew);
+                return;
+            }
+            ('t', KeyCode::Char('c')) => {
+                app.execute_action(Action::TabClose);
+                return;
+            }
+            ('t', KeyCode::Char('l')) => {
+                app.execute_action(Action::TabNext);
+                return;
+            }
+            ('t', KeyCode::Char('h')) => {
+                app.execute_action(Action::TabPrev);
+                return;
+            }
+            ('t', KeyCode::Char('1')) => {
+                app.execute_action(Action::TabSwitch1);
+                return;
+            }
+            ('t', KeyCode::Char('2')) => {
+                app.execute_action(Action::TabSwitch2);
+                return;
+            }
+            ('t', KeyCode::Char('3')) => {
+                app.execute_action(Action::TabSwitch3);
+                return;
+            }
+            ('t', KeyCode::Char('4')) => {
+                app.execute_action(Action::TabSwitch4);
+                return;
+            }
+            ('t', KeyCode::Char('5')) => {
+                app.execute_action(Action::TabSwitch5);
+                return;
+            }
+            ('t', KeyCode::Char('6')) => {
+                app.execute_action(Action::TabSwitch6);
+                return;
+            }
+            ('t', KeyCode::Char('7')) => {
+                app.execute_action(Action::TabSwitch7);
+                return;
+            }
+            ('t', KeyCode::Char('8')) => {
+                app.execute_action(Action::TabSwitch8);
+                return;
+            }
+            ('t', KeyCode::Char('9')) => {
+                app.execute_action(Action::TabSwitch9);
+                return;
+            }
             _ => {} // 잘못된 시퀀스, fall through
         }
     }
 
-    // 2) 'g' 또는 's' 시작 시 시퀀스 모드 진입
-    if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Char('g') | KeyCode::Char('s')) {
+    // 2) 'g', 's', 't' 시작 시 시퀀스 모드 진입
+    if modifiers == KeyModifiers::NONE
+        && matches!(
+            code,
+            KeyCode::Char('g') | KeyCode::Char('s') | KeyCode::Char('t')
+        )
+    {
         if let KeyCode::Char(c) = code {
             app.set_pending_key(c);
         }
@@ -575,6 +633,7 @@ fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
 }
 
 /// 패널 위젯 생성 + 렌더링 (좌/우 공통)
+#[allow(clippy::too_many_arguments)]
 fn render_panel(
     f: &mut ratatui::Frame<'_>,
     panel_state: &crate::models::PanelState,
@@ -583,6 +642,8 @@ fn render_panel(
     area: Rect,
     icon_mode: ui::components::panel::IconMode,
     size_format: app::SizeFormat,
+    tab_count: usize,
+    active_tab: usize,
 ) {
     let path = panel_state.current_path.to_string_lossy();
     let show_parent = panel_state.current_path.parent().is_some();
@@ -602,6 +663,7 @@ fn render_panel(
         .sort_state(panel_state.sort_by, panel_state.sort_order)
         .filter_pattern(panel_state.filter.as_deref())
         .size_format(size_format)
+        .tab_info(tab_count, active_tab)
         .theme(theme);
     f.render_widget(panel, area);
 }
@@ -638,6 +700,10 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .sort_info(Some(&sort_display))
         .filter_info(filter_display.as_deref())
         .show_hidden(active_panel_state.show_hidden)
+        .tab_info(
+            app.active_tab_manager().tab_count(),
+            app.active_tab_manager().active_tab,
+        )
         .ime_info(if app.ime_status.should_display() {
             Some(ime_label)
         } else {
@@ -688,23 +754,27 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
     render_panel(
         f,
-        &app.left_panel,
+        app.left_tabs.active_panel(),
         active_panel == ActivePanel::Left,
         theme,
         areas.left_panel,
         app.icon_mode,
         app.size_format,
+        app.left_tabs.tab_count(),
+        app.left_tabs.active_tab,
     );
 
     if app.layout.is_dual_panel() {
         render_panel(
             f,
-            &app.right_panel,
+            app.right_tabs.active_panel(),
             active_panel == ActivePanel::Right,
             theme,
             areas.right_panel,
             app.icon_mode,
             app.size_format,
+            app.right_tabs.tab_count(),
+            app.right_tabs.active_tab,
         );
     }
 

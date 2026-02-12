@@ -660,6 +660,18 @@ pub fn create_default_menus() -> Vec<Menu> {
             MenuItem::separator(),
             menu_action("toggle_hidden", "숨김 파일 표시"),
             menu_action("mount_points", "마운트 포인트"),
+            MenuItem::separator(),
+            MenuItem::submenu(
+                "tab",
+                "탭",
+                vec![
+                    menu_action("tab_new", "새 탭"),
+                    menu_action("tab_close", "탭 닫기"),
+                    MenuItem::separator(),
+                    menu_action("tab_next", "다음 탭"),
+                    menu_action("tab_prev", "이전 탭"),
+                ],
+            ),
             MenuItem::submenu(
                 "size_format",
                 "크기 표시 형식",

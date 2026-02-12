@@ -5,6 +5,7 @@ use crate::models::operation::{
     ConflictResolution, FlattenedFile, OperationState, OperationType, PendingOperation,
 };
 use crate::models::panel_state::{SortBy, SortOrder};
+use crate::models::tab_manager::TabManager;
 use crate::models::PanelState;
 use crate::system::{FileSystem, ImeStatus};
 use crate::ui::{
@@ -32,10 +33,10 @@ pub struct App {
     pub should_quit: bool,
     /// 레이아웃 매니저
     pub layout: LayoutManager,
-    /// 좌측 패널 상태
-    pub left_panel: PanelState,
-    /// 우측 패널 상태
-    pub right_panel: PanelState,
+    /// 좌측 탭 관리자
+    pub left_tabs: TabManager,
+    /// 우측 탭 관리자
+    pub right_tabs: TabManager,
     /// 파일 시스템
     pub filesystem: FileSystem,
     /// 메뉴 목록
@@ -83,18 +84,18 @@ impl App {
 
         let filesystem = FileSystem::new();
 
-        // 패널 상태 초기화 및 파일 목록 로드
-        let mut left_panel = PanelState::new(current_dir.clone());
-        left_panel.refresh(&filesystem)?;
+        // 탭 관리자 초기화 및 파일 목록 로드
+        let mut left_tabs = TabManager::new(current_dir.clone());
+        left_tabs.active_panel_mut().refresh(&filesystem)?;
 
-        let mut right_panel = PanelState::new(current_dir);
-        right_panel.refresh(&filesystem)?;
+        let mut right_tabs = TabManager::new(current_dir);
+        right_tabs.active_panel_mut().refresh(&filesystem)?;
 
         Ok(Self {
             should_quit: false,
             layout: LayoutManager::new(),
-            left_panel,
-            right_panel,
+            left_tabs,
+            right_tabs,
             filesystem,
             menus: create_default_menus(),
             menu_state: MenuState::new(),
@@ -133,24 +134,40 @@ impl App {
     /// 현재 활성 패널의 경로 반환
     pub fn active_path(&self) -> &std::path::Path {
         match self.layout.active_panel() {
-            ActivePanel::Left => &self.left_panel.current_path,
-            ActivePanel::Right => &self.right_panel.current_path,
+            ActivePanel::Left => &self.left_tabs.active_panel().current_path,
+            ActivePanel::Right => &self.right_tabs.active_panel().current_path,
         }
     }
 
     /// 활성 패널 상태 반환
     pub fn active_panel_state(&self) -> &PanelState {
         match self.layout.active_panel() {
-            ActivePanel::Left => &self.left_panel,
-            ActivePanel::Right => &self.right_panel,
+            ActivePanel::Left => self.left_tabs.active_panel(),
+            ActivePanel::Right => self.right_tabs.active_panel(),
         }
     }
 
     /// 활성 패널 상태 반환 (mutable)
     pub fn active_panel_state_mut(&mut self) -> &mut PanelState {
         match self.layout.active_panel() {
-            ActivePanel::Left => &mut self.left_panel,
-            ActivePanel::Right => &mut self.right_panel,
+            ActivePanel::Left => self.left_tabs.active_panel_mut(),
+            ActivePanel::Right => self.right_tabs.active_panel_mut(),
+        }
+    }
+
+    /// 활성 탭 관리자 반환
+    pub fn active_tab_manager(&self) -> &TabManager {
+        match self.layout.active_panel() {
+            ActivePanel::Left => &self.left_tabs,
+            ActivePanel::Right => &self.right_tabs,
+        }
+    }
+
+    /// 활성 탭 관리자 반환 (mutable)
+    pub fn active_tab_manager_mut(&mut self) -> &mut TabManager {
+        match self.layout.active_panel() {
+            ActivePanel::Left => &mut self.left_tabs,
+            ActivePanel::Right => &mut self.right_tabs,
         }
     }
 
@@ -307,6 +324,20 @@ impl App {
                 self.size_format = SizeFormat::Bytes;
                 self.set_toast("Size format: Bytes");
             }
+            // Tab (Phase 6.1)
+            Action::TabNew => self.tab_new(),
+            Action::TabClose => self.tab_close(),
+            Action::TabNext => self.tab_next(),
+            Action::TabPrev => self.tab_prev(),
+            Action::TabSwitch1 => self.tab_switch(1),
+            Action::TabSwitch2 => self.tab_switch(2),
+            Action::TabSwitch3 => self.tab_switch(3),
+            Action::TabSwitch4 => self.tab_switch(4),
+            Action::TabSwitch5 => self.tab_switch(5),
+            Action::TabSwitch6 => self.tab_switch(6),
+            Action::TabSwitch7 => self.tab_switch(7),
+            Action::TabSwitch8 => self.tab_switch(8),
+            Action::TabSwitch9 => self.tab_switch(9),
             // 미구현 액션은 무시
             _ => {}
         }
@@ -482,18 +513,24 @@ impl App {
 
             match self.active_panel() {
                 ActivePanel::Left => {
-                    let _ = self.left_panel.change_directory_and_focus(
-                        parent_path,
-                        current_dir_name.as_deref(),
-                        &self.filesystem,
-                    );
+                    let _ = self
+                        .left_tabs
+                        .active_panel_mut()
+                        .change_directory_and_focus(
+                            parent_path,
+                            current_dir_name.as_deref(),
+                            &self.filesystem,
+                        );
                 }
                 ActivePanel::Right => {
-                    let _ = self.right_panel.change_directory_and_focus(
-                        parent_path,
-                        current_dir_name.as_deref(),
-                        &self.filesystem,
-                    );
+                    let _ = self
+                        .right_tabs
+                        .active_panel_mut()
+                        .change_directory_and_focus(
+                            parent_path,
+                            current_dir_name.as_deref(),
+                            &self.filesystem,
+                        );
                 }
             }
         }
@@ -503,10 +540,10 @@ impl App {
     pub fn refresh_current(&mut self) {
         match self.active_panel() {
             ActivePanel::Left => {
-                let _ = self.left_panel.refresh(&self.filesystem);
+                let _ = self.left_tabs.active_panel_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                let _ = self.right_panel.refresh(&self.filesystem);
+                let _ = self.right_tabs.active_panel_mut().refresh(&self.filesystem);
             }
         }
     }
@@ -721,18 +758,24 @@ impl App {
 
             match self.active_panel() {
                 ActivePanel::Left => {
-                    let _ = self.left_panel.change_directory_and_focus(
-                        parent_path,
-                        current_dir_name.as_deref(),
-                        &self.filesystem,
-                    );
+                    let _ = self
+                        .left_tabs
+                        .active_panel_mut()
+                        .change_directory_and_focus(
+                            parent_path,
+                            current_dir_name.as_deref(),
+                            &self.filesystem,
+                        );
                 }
                 ActivePanel::Right => {
-                    let _ = self.right_panel.change_directory_and_focus(
-                        parent_path,
-                        current_dir_name.as_deref(),
-                        &self.filesystem,
-                    );
+                    let _ = self
+                        .right_tabs
+                        .active_panel_mut()
+                        .change_directory_and_focus(
+                            parent_path,
+                            current_dir_name.as_deref(),
+                            &self.filesystem,
+                        );
                 }
             }
         }
@@ -742,10 +785,16 @@ impl App {
     fn enter_directory(&mut self, path: PathBuf) {
         match self.active_panel() {
             ActivePanel::Left => {
-                let _ = self.left_panel.change_directory(path, &self.filesystem);
+                let _ = self
+                    .left_tabs
+                    .active_panel_mut()
+                    .change_directory(path, &self.filesystem);
             }
             ActivePanel::Right => {
-                let _ = self.right_panel.change_directory(path, &self.filesystem);
+                let _ = self
+                    .right_tabs
+                    .active_panel_mut()
+                    .change_directory(path, &self.filesystem);
             }
         }
     }
@@ -835,8 +884,8 @@ impl App {
     /// 비활성 패널 상태 반환
     pub fn inactive_panel_state(&self) -> &PanelState {
         match self.layout.active_panel() {
-            ActivePanel::Left => &self.right_panel,
-            ActivePanel::Right => &self.left_panel,
+            ActivePanel::Left => self.right_tabs.active_panel(),
+            ActivePanel::Right => self.left_tabs.active_panel(),
         }
     }
 
@@ -1878,15 +1927,79 @@ impl App {
         }
     }
 
+    // === 탭 관련 메서드 (Phase 6.1) ===
+
+    /// 새 탭 생성
+    fn tab_new(&mut self) {
+        let created = match self.active_panel() {
+            ActivePanel::Left => self.left_tabs.new_tab(),
+            ActivePanel::Right => self.right_tabs.new_tab(),
+        };
+        if created {
+            // 새 탭의 파일 목록 로드
+            match self.active_panel() {
+                ActivePanel::Left => {
+                    let _ = self.left_tabs.active_panel_mut().refresh(&self.filesystem);
+                }
+                ActivePanel::Right => {
+                    let _ = self.right_tabs.active_panel_mut().refresh(&self.filesystem);
+                }
+            }
+            let tab_num = self.active_tab_manager().active_tab + 1;
+            self.set_toast(&format!("Tab {} created", tab_num));
+        } else {
+            self.set_toast("Maximum tabs reached (9)");
+        }
+    }
+
+    /// 탭 닫기
+    fn tab_close(&mut self) {
+        let closed = match self.active_panel() {
+            ActivePanel::Left => self.left_tabs.close_tab(),
+            ActivePanel::Right => self.right_tabs.close_tab(),
+        };
+        if closed {
+            let total = self.active_tab_manager().tab_count();
+            self.set_toast(&format!("Tab closed ({} remaining)", total));
+        } else {
+            self.set_toast("Cannot close last tab");
+        }
+    }
+
+    /// 다음 탭
+    fn tab_next(&mut self) {
+        self.active_tab_manager_mut().next_tab();
+    }
+
+    /// 이전 탭
+    fn tab_prev(&mut self) {
+        self.active_tab_manager_mut().prev_tab();
+    }
+
+    /// 번호로 탭 전환 (1-based)
+    fn tab_switch(&mut self, number: usize) {
+        let switched = match self.active_panel() {
+            ActivePanel::Left => self.left_tabs.switch_to(number),
+            ActivePanel::Right => self.right_tabs.switch_to(number),
+        };
+        if !switched {
+            self.set_toast(&format!("Tab {} does not exist", number));
+        }
+    }
+
     // === 숨김 파일 토글 (Phase 5.3) ===
 
-    /// 숨김 파일 표시/숨김 토글 (양쪽 패널 동시)
+    /// 숨김 파일 표시/숨김 토글 (모든 탭에 일괄 적용)
     pub fn toggle_hidden(&mut self) {
-        let new_val = !self.left_panel.show_hidden;
-        self.left_panel.show_hidden = new_val;
-        self.right_panel.show_hidden = new_val;
-        let _ = self.left_panel.refresh(&self.filesystem);
-        let _ = self.right_panel.refresh(&self.filesystem);
+        let new_val = !self.left_tabs.active_panel().show_hidden;
+        for tab in &mut self.left_tabs.tabs {
+            tab.panel.show_hidden = new_val;
+            let _ = tab.panel.refresh(&self.filesystem);
+        }
+        for tab in &mut self.right_tabs.tabs {
+            tab.panel.show_hidden = new_val;
+            let _ = tab.panel.refresh(&self.filesystem);
+        }
         self.set_toast(if new_val {
             "Hidden files shown"
         } else {
@@ -1913,10 +2026,16 @@ impl App {
     pub fn go_to_mount_point(&mut self, path: std::path::PathBuf) {
         match self.active_panel() {
             ActivePanel::Left => {
-                let _ = self.left_panel.change_directory(path, &self.filesystem);
+                let _ = self
+                    .left_tabs
+                    .active_panel_mut()
+                    .change_directory(path, &self.filesystem);
             }
             ActivePanel::Right => {
-                let _ = self.right_panel.change_directory(path, &self.filesystem);
+                let _ = self
+                    .right_tabs
+                    .active_panel_mut()
+                    .change_directory(path, &self.filesystem);
             }
         }
         self.dialog = None;
@@ -1973,12 +2092,12 @@ impl App {
     pub fn clear_filter(&mut self) {
         match self.active_panel() {
             ActivePanel::Left => {
-                self.left_panel.set_filter(None);
-                let _ = self.left_panel.refresh(&self.filesystem);
+                self.left_tabs.active_panel_mut().set_filter(None);
+                let _ = self.left_tabs.active_panel_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                self.right_panel.set_filter(None);
-                let _ = self.right_panel.refresh(&self.filesystem);
+                self.right_tabs.active_panel_mut().set_filter(None);
+                let _ = self.right_tabs.active_panel_mut().refresh(&self.filesystem);
             }
         }
         self.set_toast("Filter cleared");
@@ -1995,12 +2114,16 @@ impl App {
 
         match self.active_panel() {
             ActivePanel::Left => {
-                self.left_panel.set_filter(Some(pattern.clone()));
-                let _ = self.left_panel.refresh(&self.filesystem);
+                self.left_tabs
+                    .active_panel_mut()
+                    .set_filter(Some(pattern.clone()));
+                let _ = self.left_tabs.active_panel_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                self.right_panel.set_filter(Some(pattern.clone()));
-                let _ = self.right_panel.refresh(&self.filesystem);
+                self.right_tabs
+                    .active_panel_mut()
+                    .set_filter(Some(pattern.clone()));
+                let _ = self.right_tabs.active_panel_mut().refresh(&self.filesystem);
             }
         }
         self.dialog = None;
@@ -2016,12 +2139,12 @@ impl App {
         };
         match self.active_panel() {
             ActivePanel::Left => {
-                self.left_panel.set_filter(filter);
-                let _ = self.left_panel.refresh(&self.filesystem);
+                self.left_tabs.active_panel_mut().set_filter(filter);
+                let _ = self.left_tabs.active_panel_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                self.right_panel.set_filter(filter);
-                let _ = self.right_panel.refresh(&self.filesystem);
+                self.right_tabs.active_panel_mut().set_filter(filter);
+                let _ = self.right_tabs.active_panel_mut().refresh(&self.filesystem);
             }
         }
     }
@@ -2030,12 +2153,12 @@ impl App {
     pub fn cancel_filter(&mut self) {
         match self.active_panel() {
             ActivePanel::Left => {
-                self.left_panel.set_filter(None);
-                let _ = self.left_panel.refresh(&self.filesystem);
+                self.left_tabs.active_panel_mut().set_filter(None);
+                let _ = self.left_tabs.active_panel_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                self.right_panel.set_filter(None);
-                let _ = self.right_panel.refresh(&self.filesystem);
+                self.right_tabs.active_panel_mut().set_filter(None);
+                let _ = self.right_tabs.active_panel_mut().refresh(&self.filesystem);
             }
         }
         self.dialog = None;
@@ -2172,10 +2295,14 @@ impl App {
         }
     }
 
-    /// 양쪽 패널 새로고침
+    /// 양쪽 패널 새로고침 (모든 탭)
     pub fn refresh_both_panels(&mut self) {
-        let _ = self.left_panel.refresh(&self.filesystem);
-        let _ = self.right_panel.refresh(&self.filesystem);
+        for tab in &mut self.left_tabs.tabs {
+            let _ = tab.panel.refresh(&self.filesystem);
+        }
+        for tab in &mut self.right_tabs.tabs {
+            let _ = tab.panel.refresh(&self.filesystem);
+        }
     }
 
     // === 다이얼로그 입력 처리 메서드 ===
@@ -2376,8 +2503,8 @@ impl Default for App {
             Self {
                 should_quit: false,
                 layout: LayoutManager::new(),
-                left_panel: PanelState::new(current_dir.clone()),
-                right_panel: PanelState::new(current_dir),
+                left_tabs: TabManager::new(current_dir.clone()),
+                right_tabs: TabManager::new(current_dir),
                 filesystem,
                 menus: create_default_menus(),
                 menu_state: MenuState::new(),

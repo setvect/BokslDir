@@ -87,6 +87,8 @@ pub struct Panel<'a> {
     filter_pattern: Option<&'a str>,
     /// 파일 크기 표시 형식
     size_format: SizeFormat,
+    /// 탭 정보 (tab_count, active_tab_index) - 2개 이상일 때만 표시
+    tab_info: Option<(usize, usize)>,
 }
 
 /// 빈 HashSet을 위한 정적 참조
@@ -119,6 +121,7 @@ impl<'a> Default for Panel<'a> {
             sort_order: SortOrder::Ascending,
             filter_pattern: None,
             size_format: SizeFormat::default(),
+            tab_info: None,
         }
     }
 }
@@ -204,6 +207,14 @@ impl<'a> Panel<'a> {
     /// 크기 표시 형식 설정
     pub fn size_format(mut self, format: SizeFormat) -> Self {
         self.size_format = format;
+        self
+    }
+
+    /// 탭 정보 설정 (2개 이상 탭일 때만 표시)
+    pub fn tab_info(mut self, tab_count: usize, active_tab: usize) -> Self {
+        if tab_count > 1 {
+            self.tab_info = Some((tab_count, active_tab));
+        }
         self
     }
 
@@ -664,16 +675,59 @@ impl Widget for Panel<'_> {
         }
 
         let title_max_width = (area.width as usize).saturating_sub(4);
-        let display_title = self.truncate_path(self.title, title_max_width);
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(self.border_color()))
-            .title(Span::styled(
-                format!(" {} ", display_title),
-                self.title_style(),
-            ))
-            .style(Style::default().bg(self.bg_color));
+        let block = if let Some((tab_count, active_tab)) = self.tab_info {
+            // 탭 인디케이터 + 경로 표시
+            let mut title_spans = Vec::new();
+            title_spans.push(Span::raw(" "));
+
+            // 탭 인디케이터 너비 계산
+            let mut tab_width = 0usize;
+            for i in 0..tab_count {
+                tab_width += format!("[{}]", i + 1).len();
+            }
+            tab_width += 1; // 탭과 경로 사이 공백
+
+            for i in 0..tab_count {
+                let label = format!("[{}]", i + 1);
+                if i == active_tab {
+                    title_spans.push(Span::styled(
+                        label,
+                        Style::default()
+                            .fg(self.active_border_color)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    title_spans.push(Span::styled(
+                        label,
+                        Style::default().fg(Color::Rgb(100, 100, 100)),
+                    ));
+                }
+            }
+            title_spans.push(Span::raw(" "));
+
+            let path_max_width = title_max_width.saturating_sub(tab_width);
+            let display_title = self.truncate_path(self.title, path_max_width);
+            title_spans.push(Span::styled(display_title, self.title_style()));
+            title_spans.push(Span::raw(" "));
+
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(self.border_color()))
+                .title(Line::from(title_spans))
+                .style(Style::default().bg(self.bg_color))
+        } else {
+            // 탭 1개: 기존 경로만 표시
+            let display_title = self.truncate_path(self.title, title_max_width);
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(self.border_color()))
+                .title(Span::styled(
+                    format!(" {} ", display_title),
+                    self.title_style(),
+                ))
+                .style(Style::default().bg(self.bg_color))
+        };
 
         let inner = block.inner(area);
         block.render(area, buf);

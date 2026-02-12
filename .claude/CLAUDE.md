@@ -10,8 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
-**현재 상태**: Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
-**다음 단계**: Phase 6 - 추가 기능
+**현재 상태**: Phase 6.1 완료 (탭 시스템) + Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
+**다음 단계**: Phase 6.2 - 디렉토리 히스토리
 
 ## 개발 명령어
 
@@ -55,7 +55,8 @@ src/
 │       └── command_bar.rs  # 단축키 바
 ├── models/             # 데이터 모델
 │   ├── file_entry.rs   # 파일 정보 (FileEntry, FileType)
-│   └── panel_state.rs  # 패널 상태 (PanelState)
+│   ├── panel_state.rs  # 패널 상태 (PanelState, TabState)
+│   └── tab_manager.rs  # 탭 관리 (TabManager)
 ├── system/             # System Layer
 │   └── filesystem.rs   # 파일 시스템 추상화 (FileSystem)
 └── utils/
@@ -83,7 +84,8 @@ src/
 
 ### 핵심 구조체
 
-- **App** (`app.rs`): 전체 앱 상태 관리, 패널/메뉴/테마 상태 보유
+- **App** (`app.rs`): 전체 앱 상태 관리, 탭/메뉴/테마 상태 보유 (left_tabs/right_tabs: TabManager)
+- **TabManager** (`models/tab_manager.rs`): 탭 관리 (Vec<TabState>, active_tab, max 9탭)
 - **PanelState** (`models/panel_state.rs`): 패널별 경로, 파일 목록, 커서 인덱스, 스크롤 오프셋, 다중 선택(selected_items)
 - **FileEntry** (`models/file_entry.rs`): 파일 메타데이터 (이름, 크기, 날짜, 권한, 타입)
 - **Panel** (`ui/components/panel.rs`): 파일 리스트 렌더링 위젯
@@ -162,6 +164,15 @@ src/
   - App.size_format: SizeFormat enum (Auto, Bytes)
   - 패널 + 상태바 모두 반영
 
+### Phase 6.1: 탭 시스템
+- 패널별 독립 탭: 좌/우 패널 각각 최대 9개 탭
+- 탭 조작: `tn` 새 탭, `tc` 닫기, `tl`/`th` 다음/이전, `t1`~`t9` 번호 전환
+- 탭 인디케이터: 패널 테두리 상단 `[1][2*][3]`, 2개 이상일 때만 표시
+- 상태바: `[Tab 2/5]` 인디케이터 (2개 이상 탭)
+- 새 탭: 현재 탭 경로/정렬/숨김 설정 상속, 필터는 미상속
+- 숨김 파일 토글: 모든 탭에 일괄 적용
+- 보기 메뉴 > 탭 서브메뉴 (새 탭/닫기/다음/이전)
+
 ## 단축키 매핑 (Vim 스타일)
 
 **Normal 모드 키바인딩** (F키 제거 완료, Vim only):
@@ -191,6 +202,11 @@ src/
 | 검색/필터 | `/` | 빠른 필터 (글로브 지원) |
 | 보기 | `.` | 숨김 파일 토글 |
 | | `gm` | 마운트 포인트 |
+| 탭 | `tn` | 새 탭 |
+| | `tc` | 탭 닫기 |
+| | `tl` | 다음 탭 |
+| | `th` | 이전 탭 |
+| | `t1`~`t9` | 탭 번호로 전환 |
 | 시스템 | `q` | 종료 |
 | | `Tab` | 패널 전환 |
 | | `F9` | 메뉴 |

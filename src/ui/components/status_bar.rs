@@ -37,6 +37,8 @@ pub struct StatusBar<'a> {
     filter_info: Option<&'a str>,
     /// 숨김 파일 표시 여부
     show_hidden: bool,
+    /// 탭 정보 (tab_count, active_tab_index)
+    tab_info: Option<(usize, usize)>,
     /// IME 상태 표시
     ime_info: Option<&'a str>,
     /// 배경색
@@ -59,6 +61,7 @@ impl<'a> Default for StatusBar<'a> {
             sort_info: None,
             filter_info: None,
             show_hidden: false,
+            tab_info: None,
             ime_info: None,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
@@ -134,6 +137,14 @@ impl<'a> StatusBar<'a> {
     /// 숨김 파일 표시 여부 설정
     pub fn show_hidden(mut self, show: bool) -> Self {
         self.show_hidden = show;
+        self
+    }
+
+    /// 탭 정보 설정
+    pub fn tab_info(mut self, tab_count: usize, active_tab: usize) -> Self {
+        if tab_count > 1 {
+            self.tab_info = Some((tab_count, active_tab));
+        }
         self
     }
 
@@ -236,6 +247,13 @@ impl Widget for StatusBar<'_> {
             String::new()
         };
 
+        // 탭 정보
+        let tab_info_str = if let Some((count, active)) = self.tab_info {
+            format!("[Tab {}/{}] ", active + 1, count)
+        } else {
+            String::new()
+        };
+
         // 숨김 파일 표시 정보
         let hidden_info_str = if self.show_hidden {
             "[Hidden] ".to_string()
@@ -259,6 +277,7 @@ impl Widget for StatusBar<'_> {
 
         // 가용 공간 계산 (unicode width 사용)
         let right_total_width = UnicodeWidthStr::width(ime_info_str.as_str())
+            + UnicodeWidthStr::width(tab_info_str.as_str())
             + UnicodeWidthStr::width(hidden_info_str.as_str())
             + UnicodeWidthStr::width(filter_info_str.as_str())
             + UnicodeWidthStr::width(sort_info_str.as_str())
@@ -283,6 +302,7 @@ impl Widget for StatusBar<'_> {
             Span::styled(&pending_info, Style::default().fg(Color::Cyan)),
             Span::raw(padding),
             Span::styled(ime_info_str, Style::default().fg(ime_color)),
+            Span::styled(tab_info_str, Style::default().fg(Color::Rgb(180, 200, 255))),
             Span::styled(
                 hidden_info_str,
                 Style::default().fg(Color::Rgb(180, 140, 255)),

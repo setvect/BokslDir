@@ -343,6 +343,21 @@ fn extract_extension(name: &str) -> String {
     }
 }
 
+/// 탭 상태 (패널 내 탭 하나의 상태)
+#[derive(Debug, Clone)]
+pub struct TabState {
+    /// 탭 ID (1-based, 표시용)
+    pub id: usize,
+    /// 패널 상태 (디렉토리, 파일 목록, 커서, 정렬 등)
+    pub panel: PanelState,
+}
+
+impl TabState {
+    pub fn new(id: usize, panel: PanelState) -> Self {
+        Self { id, panel }
+    }
+}
+
 impl Default for PanelState {
     fn default() -> Self {
         Self {

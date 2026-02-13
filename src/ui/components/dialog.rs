@@ -85,6 +85,11 @@ pub enum DialogKind {
         items: Vec<(String, std::path::PathBuf)>,
         selected_index: usize,
     },
+    /// 탭 목록 선택 다이얼로그 (Phase 6.1)
+    TabList {
+        items: Vec<String>,
+        selected_index: usize,
+    },
     /// 파일 속성 다이얼로그
     Properties {
         name: String,
@@ -201,6 +206,14 @@ impl DialogKind {
         DialogKind::MountPoints {
             items,
             selected_index: 0,
+        }
+    }
+
+    /// 탭 목록 선택 다이얼로그
+    pub fn tab_list(items: Vec<String>, selected_index: usize) -> Self {
+        DialogKind::TabList {
+            items,
+            selected_index,
         }
     }
 
@@ -358,6 +371,12 @@ impl<'a> Dialog<'a> {
             DialogKind::MountPoints { items, .. } => {
                 let list_lines = items.len().min(15) as u16;
                 let w = 50u16.min(sw.saturating_sub(4)).max(30);
+                let h = (4 + list_lines).min(sh.saturating_sub(4)).max(6);
+                (w, h)
+            }
+            DialogKind::TabList { items, .. } => {
+                let list_lines = items.len().min(10) as u16;
+                let w = 45u16.min(sw.saturating_sub(4)).max(30);
                 let h = (4 + list_lines).min(sh.saturating_sub(4)).max(6);
                 (w, h)
             }
@@ -981,6 +1000,73 @@ impl<'a> Dialog<'a> {
         );
     }
 
+    fn render_tab_list(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        items: &[String],
+        selected_index: usize,
+    ) {
+        let block = Block::default()
+            .title(" Tabs ")
+            .title_style(
+                Style::default()
+                    .fg(self.title_color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        block.render(area, buf);
+
+        let inner = Rect {
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(3),
+        };
+
+        let normal_style = Style::default().fg(self.fg_color);
+        let selected_style = Style::default()
+            .fg(self.button_selected_fg)
+            .bg(self.button_selected_bg);
+
+        let visible_height = inner.height as usize;
+        let scroll = if selected_index >= visible_height {
+            selected_index - visible_height + 1
+        } else {
+            0
+        };
+
+        for (i, name) in items.iter().skip(scroll).enumerate() {
+            if i >= visible_height {
+                break;
+            }
+            let actual_index = scroll + i;
+            let style = if actual_index == selected_index {
+                selected_style
+            } else {
+                normal_style
+            };
+
+            let y = inner.y + i as u16;
+            let label = format!(" {}: {}", actual_index + 1, name);
+            let display = format!("{:<width$}", label, width = inner.width as usize);
+            buf.set_string(inner.x, y, &display, style);
+        }
+
+        // 하단 힌트
+        let hint = " j/k:Move  Enter:Go  Esc:Close ";
+        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint_y = area.y + area.height - 1;
+        buf.set_string(
+            hint_x,
+            hint_y,
+            hint,
+            Style::default().fg(Color::Rgb(100, 100, 100)),
+        );
+    }
+
     fn render_help(&self, buf: &mut Buffer, area: Rect, scroll_offset: usize) {
         // 테두리
         let block = Block::default()
@@ -1239,6 +1325,12 @@ impl Widget for Dialog<'_> {
                 selected_index,
             } => {
                 self.render_mount_points(buf, dialog_area, items, *selected_index);
+            }
+            DialogKind::TabList {
+                items,
+                selected_index,
+            } => {
+                self.render_tab_list(buf, dialog_area, items, *selected_index);
             }
             DialogKind::Help { scroll_offset } => {
                 self.render_help(buf, dialog_area, *scroll_offset);

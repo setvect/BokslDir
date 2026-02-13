@@ -43,6 +43,8 @@ pub enum PanelStatus {
 pub struct Panel<'a> {
     /// 패널 제목 (경로)
     title: &'a str,
+    /// 현재 패널 탭 개수
+    tab_count: usize,
     /// 패널 상태
     status: PanelStatus,
     /// 파일 목록
@@ -97,6 +99,7 @@ impl<'a> Default for Panel<'a> {
     fn default() -> Self {
         Self {
             title: "",
+            tab_count: 1,
             status: PanelStatus::default(),
             entries: &[],
             selected_index: 0,
@@ -131,6 +134,12 @@ impl<'a> Panel<'a> {
     /// 제목 설정
     pub fn title(mut self, title: &'a str) -> Self {
         self.title = title;
+        self
+    }
+
+    /// 탭 개수 설정
+    pub fn tab_count(mut self, count: usize) -> Self {
+        self.tab_count = count.max(1);
         self
     }
 
@@ -407,6 +416,7 @@ impl Panel<'_> {
         }
     }
 
+    /// 탭바 렌더링. y를 1 증가시킨다.
     /// 헤더 행 + 구분선 렌더링. y를 2 증가시킨다.
     fn render_header(
         layout: &ColumnLayout,
@@ -663,16 +673,45 @@ impl Widget for Panel<'_> {
             return;
         }
 
-        let title_max_width = (area.width as usize).saturating_sub(4);
-        let display_title = self.truncate_path(self.title, title_max_width);
+        let show_tab_count = self.tab_count > 1;
+        let count_text = format!("[{}]", self.tab_count);
+        let count_width = if show_tab_count {
+            count_text.width()
+        } else {
+            0
+        };
+        let title_max_width = (area.width as usize)
+            .saturating_sub(4)
+            .saturating_sub(if show_tab_count { count_width + 1 } else { 0 });
+        let display_title = self.truncate_path(self.title, title_max_width.max(1));
+        let mut title_spans = vec![Span::styled(
+            format!(" {} ", display_title),
+            self.title_style(),
+        )];
+        if show_tab_count {
+            title_spans.push(Span::styled(
+                count_text.clone(),
+                Style::default()
+                    .fg(self.active_border_color)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            title_spans.push(Span::raw(" "));
+        }
+
+        // very narrow width fallback
+        if show_tab_count && (area.width as usize) < count_width + 4 {
+            title_spans = vec![Span::styled(
+                format!(" {} ", count_text),
+                Style::default()
+                    .fg(self.active_border_color)
+                    .add_modifier(Modifier::BOLD),
+            )];
+        }
 
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(self.border_color()))
-            .title(Span::styled(
-                format!(" {} ", display_title),
-                self.title_style(),
-            ))
+            .title(Line::from(title_spans))
             .style(Style::default().bg(self.bg_color));
 
         let inner = block.inner(area);

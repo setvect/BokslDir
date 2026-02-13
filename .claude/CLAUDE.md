@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
-**현재 상태**: Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
+**현재 상태**: Phase 6.1 완료 (탭 시스템) + Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
 **다음 단계**: Phase 6 - 추가 기능
 
 ## 개발 명령어
@@ -162,6 +162,14 @@ src/
   - App.size_format: SizeFormat enum (Auto, Bytes)
   - 패널 + 상태바 모두 반영
 
+### Phase 6.1: 탭 시스템
+- 패널별 독립 탭 상태 (`PanelTabs`)
+- 탭 키 시퀀스: `tn`(새 탭), `tx`(닫기), `tt`(목록 모달)
+- 활성 탭 목록 모달: `tt` (j/k/Enter/Esc로 이동/선택/닫기)
+- 패널 타이틀에 탭 개수 표시 (`~/path [3]`)
+- 탭별 경로/커서/스크롤/정렬/필터/선택/숨김 상태 독립 보존
+- 마지막 탭 닫기 금지 (토스트 안내)
+
 ## 단축키 매핑 (Vim 스타일)
 
 **Normal 모드 키바인딩** (F키 제거 완료, Vim only):
@@ -172,6 +180,9 @@ src/
 | | `h`/`l` | 상위 디렉토리/진입 (←/Enter도 가능) |
 | | `gg`/`G` | 맨 위/맨 아래 (Home/End도 가능) |
 | | `Ctrl+U`/`Ctrl+D` | 반 페이지 위/아래 (PageUp/PageDown도 가능) |
+| | `tn` | 새 탭 |
+| | `tx` | 탭 닫기 (마지막 탭 제외) |
+| | `tt` | 활성 패널 탭 목록 모달 |
 | 파일 조작 | `y` | 복사 |
 | | `x` | 이동 |
 | | `d` | 삭제(휴지통) |

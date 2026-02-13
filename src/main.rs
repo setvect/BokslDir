@@ -8,7 +8,7 @@ mod utils;
 use app::App;
 use core::actions::{find_action, Action};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -84,6 +84,9 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
         // Handle events (작업 중에도 ESC 키 처리 가능)
         if event::poll(poll_timeout)? {
             if let Event::Key(key) = event::read()? {
+                if matches!(key.kind, KeyEventKind::Release) {
+                    continue;
+                }
                 if app.is_dialog_active() {
                     // 다이얼로그 모드에서의 키 처리
                     handle_dialog_keys(app, key.modifiers, key.code);
@@ -130,7 +133,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
 
 /// 일반 모드 키 처리 (액션 레지스트리 기반)
 fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
-    // 1) pending 키 시퀀스 처리 (gg, s+키)
+    // 1) pending 키 시퀀스 처리 (gg, s+키, t+키)
     if let Some(pending) = app.pending_key {
         app.clear_pending_key();
         match (pending, &code) {
@@ -162,12 +165,29 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
                 app.execute_action(Action::SortAscending);
                 return;
             }
+            ('t', KeyCode::Char('n')) => {
+                app.execute_action(Action::TabNew);
+                return;
+            }
+            ('t', KeyCode::Char('x')) => {
+                app.execute_action(Action::TabClose);
+                return;
+            }
+            ('t', KeyCode::Char('t')) => {
+                app.execute_action(Action::ShowTabList);
+                return;
+            }
             _ => {} // 잘못된 시퀀스, fall through
         }
     }
 
-    // 2) 'g' 또는 's' 시작 시 시퀀스 모드 진입
-    if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Char('g') | KeyCode::Char('s')) {
+    // 2) 'g' 또는 's' 또는 't' 시작 시 시퀀스 모드 진입
+    if modifiers == KeyModifiers::NONE
+        && matches!(
+            code,
+            KeyCode::Char('g') | KeyCode::Char('s') | KeyCode::Char('t')
+        )
+    {
         if let KeyCode::Char(c) = code {
             app.set_pending_key(c);
         }
@@ -235,6 +255,9 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         // Phase 5.3: 마운트 포인트
         DialogKind::MountPoints { .. } => {
             handle_mount_points_dialog_keys(app, code);
+        }
+        DialogKind::TabList { .. } => {
+            handle_tab_list_dialog_keys(app, code);
         }
     }
 }
@@ -487,6 +510,25 @@ fn handle_mount_points_dialog_keys(app: &mut App, code: KeyCode) {
     }
 }
 
+/// 탭 목록 다이얼로그 키 처리
+fn handle_tab_list_dialog_keys(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.close_dialog();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.tab_list_move_down();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.tab_list_move_up();
+        }
+        KeyCode::Enter | KeyCode::Char('l') => {
+            app.tab_list_confirm();
+        }
+        _ => {}
+    }
+}
+
 /// 필터 입력 다이얼로그 키 처리
 fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     match (modifiers, code) {
@@ -575,9 +617,11 @@ fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
 }
 
 /// 패널 위젯 생성 + 렌더링 (좌/우 공통)
+#[allow(clippy::too_many_arguments)]
 fn render_panel(
     f: &mut ratatui::Frame<'_>,
     panel_state: &crate::models::PanelState,
+    tab_count: usize,
     is_active: bool,
     theme: &ui::Theme,
     area: Rect,
@@ -588,6 +632,7 @@ fn render_panel(
     let show_parent = panel_state.current_path.parent().is_some();
     let panel = Panel::new()
         .title(&path)
+        .tab_count(tab_count)
         .status(if is_active {
             PanelStatus::Active
         } else {
@@ -686,9 +731,13 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         .theme(theme);
     f.render_widget(menu_bar, areas.menu_bar);
 
+    let left_tab_count = app.panel_tab_count(ActivePanel::Left);
+    let right_tab_count = app.panel_tab_count(ActivePanel::Right);
+
     render_panel(
         f,
-        &app.left_panel,
+        app.left_active_panel_state(),
+        left_tab_count,
         active_panel == ActivePanel::Left,
         theme,
         areas.left_panel,
@@ -699,7 +748,8 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     if app.layout.is_dual_panel() {
         render_panel(
             f,
-            &app.right_panel,
+            app.right_active_panel_state(),
+            right_tab_count,
             active_panel == ActivePanel::Right,
             theme,
             areas.right_panel,

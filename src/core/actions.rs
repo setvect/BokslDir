@@ -20,6 +20,8 @@ pub enum Action {
     PageUp,
     PageDown,
     TogglePanel,
+    TabNew,
+    TabClose,
     // File Operations
     Copy,
     Move,
@@ -57,6 +59,7 @@ pub enum Action {
     // View (Phase 5.3)
     ToggleHidden,
     ShowMountPoints,
+    ShowTabList,
     SizeFormatAuto,
     SizeFormatBytes,
     // About
@@ -192,6 +195,22 @@ pub static ACTION_DEFS: &[ActionDef] = &[
             label: "Panel",
             priority: 54,
         }),
+    },
+    ActionDef {
+        action: Action::TabNew,
+        id: "tab_new",
+        label: "New tab",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("tn"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::TabClose,
+        id: "tab_close",
+        label: "Close tab",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("tx"),
+        command_bar: None,
     },
     // File Operations
     ActionDef {
@@ -494,6 +513,14 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         command_bar: None,
     },
     ActionDef {
+        action: Action::ShowTabList,
+        id: "tab_list",
+        label: "Show tab list",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("tt"),
+        command_bar: None,
+    },
+    ActionDef {
         action: Action::SizeFormatAuto,
         id: "size_auto",
         label: "Size: Auto",
@@ -786,6 +813,8 @@ mod tests {
     fn test_action_from_id() {
         assert_eq!(Action::from_id("copy"), Some(Action::Copy));
         assert_eq!(Action::from_id("quit"), Some(Action::Quit));
+        assert_eq!(Action::from_id("tab_new"), Some(Action::TabNew));
+        assert_eq!(Action::from_id("tab_list"), Some(Action::ShowTabList));
         assert_eq!(Action::from_id("nonexistent"), None);
     }
 
@@ -860,6 +889,8 @@ mod tests {
         let entries = generate_help_entries();
         assert!(!entries.is_empty());
         assert_eq!(entries[0].0, "Navigation");
+        let nav_items = &entries[0].1;
+        assert!(nav_items.iter().any(|(k, _)| *k == "tn"));
     }
 
     #[test]

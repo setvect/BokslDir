@@ -5,7 +5,7 @@ use crate::models::operation::{
     ConflictResolution, FlattenedFile, OperationState, OperationType, PendingOperation,
 };
 use crate::models::panel_state::{SortBy, SortOrder};
-use crate::models::PanelState;
+use crate::models::{PanelState, PanelTabs};
 use crate::system::{FileSystem, ImeStatus};
 use crate::ui::{
     create_default_menus, ActivePanel, DialogKind, LayoutManager, LayoutMode, Menu, MenuState,
@@ -32,10 +32,10 @@ pub struct App {
     pub should_quit: bool,
     /// 레이아웃 매니저
     pub layout: LayoutManager,
-    /// 좌측 패널 상태
-    pub left_panel: PanelState,
-    /// 우측 패널 상태
-    pub right_panel: PanelState,
+    /// 좌측 패널 탭 상태
+    pub left_tabs: PanelTabs,
+    /// 우측 패널 탭 상태
+    pub right_tabs: PanelTabs,
     /// 파일 시스템
     pub filesystem: FileSystem,
     /// 메뉴 목록
@@ -65,6 +65,8 @@ pub struct App {
 }
 
 impl App {
+    const MAX_TABS_PER_PANEL: usize = 5;
+
     pub fn new() -> Result<Self> {
         let current_dir = env::current_dir().unwrap_or_else(|_| {
             #[cfg(unix)]
@@ -93,8 +95,8 @@ impl App {
         Ok(Self {
             should_quit: false,
             layout: LayoutManager::new(),
-            left_panel,
-            right_panel,
+            left_tabs: PanelTabs::new(left_panel),
+            right_tabs: PanelTabs::new(right_panel),
             filesystem,
             menus: create_default_menus(),
             menu_state: MenuState::new(),
@@ -125,6 +127,88 @@ impl App {
         self.layout.toggle_panel();
     }
 
+    /// 활성 패널에 새 탭 생성
+    pub fn new_tab_active_panel(&mut self) {
+        match self.active_panel() {
+            ActivePanel::Left => {
+                if self.left_tabs.len() >= Self::MAX_TABS_PER_PANEL {
+                    self.set_toast("Max 5 tabs per panel");
+                    return;
+                }
+                let from = self.left_tabs.active().clone();
+                let idx = self.left_tabs.create_tab(&from);
+                self.set_toast(&format!("Tab created ({})", idx + 1));
+            }
+            ActivePanel::Right => {
+                if self.right_tabs.len() >= Self::MAX_TABS_PER_PANEL {
+                    self.set_toast("Max 5 tabs per panel");
+                    return;
+                }
+                let from = self.right_tabs.active().clone();
+                let idx = self.right_tabs.create_tab(&from);
+                self.set_toast(&format!("Tab created ({})", idx + 1));
+            }
+        }
+    }
+
+    /// 활성 패널의 현재 탭 닫기
+    pub fn close_tab_active_panel(&mut self) {
+        let closed = match self.active_panel() {
+            ActivePanel::Left => self.left_tabs.close_active_tab(),
+            ActivePanel::Right => self.right_tabs.close_active_tab(),
+        };
+
+        if closed {
+            self.set_toast("Tab closed");
+        } else {
+            self.set_toast("Cannot close last tab");
+        }
+    }
+
+    /// 활성 패널의 이전 탭 전환
+    pub fn prev_tab_active_panel(&mut self) {
+        let idx = match self.active_panel() {
+            ActivePanel::Left => {
+                self.left_tabs.prev_tab();
+                self.left_tabs.active_index()
+            }
+            ActivePanel::Right => {
+                self.right_tabs.prev_tab();
+                self.right_tabs.active_index()
+            }
+        };
+        self.set_toast(&format!("Tab {}", idx + 1));
+    }
+
+    /// 활성 패널의 다음 탭 전환
+    pub fn next_tab_active_panel(&mut self) {
+        let idx = match self.active_panel() {
+            ActivePanel::Left => {
+                self.left_tabs.next_tab();
+                self.left_tabs.active_index()
+            }
+            ActivePanel::Right => {
+                self.right_tabs.next_tab();
+                self.right_tabs.active_index()
+            }
+        };
+        self.set_toast(&format!("Tab {}", idx + 1));
+    }
+
+    /// 활성 패널의 특정 탭(0-based) 전환
+    pub fn switch_tab_active_panel(&mut self, index: usize) {
+        let ok = match self.active_panel() {
+            ActivePanel::Left => self.left_tabs.switch_to(index),
+            ActivePanel::Right => self.right_tabs.switch_to(index),
+        };
+
+        if ok {
+            self.set_toast(&format!("Tab {}", index + 1));
+        } else {
+            self.set_toast(&format!("No tab {}", index + 1));
+        }
+    }
+
     /// 활성 패널 반환
     pub fn active_panel(&self) -> ActivePanel {
         self.layout.active_panel()
@@ -133,24 +217,68 @@ impl App {
     /// 현재 활성 패널의 경로 반환
     pub fn active_path(&self) -> &std::path::Path {
         match self.layout.active_panel() {
-            ActivePanel::Left => &self.left_panel.current_path,
-            ActivePanel::Right => &self.right_panel.current_path,
+            ActivePanel::Left => &self.left_tabs.active().current_path,
+            ActivePanel::Right => &self.right_tabs.active().current_path,
         }
+    }
+
+    /// 좌측 활성 탭 상태 반환
+    pub fn left_active_panel_state(&self) -> &PanelState {
+        self.left_tabs.active()
+    }
+
+    /// 좌측 활성 탭 상태 반환 (mutable)
+    pub fn left_active_panel_state_mut(&mut self) -> &mut PanelState {
+        self.left_tabs.active_mut()
+    }
+
+    /// 우측 활성 탭 상태 반환
+    pub fn right_active_panel_state(&self) -> &PanelState {
+        self.right_tabs.active()
+    }
+
+    /// 우측 활성 탭 상태 반환 (mutable)
+    pub fn right_active_panel_state_mut(&mut self) -> &mut PanelState {
+        self.right_tabs.active_mut()
     }
 
     /// 활성 패널 상태 반환
     pub fn active_panel_state(&self) -> &PanelState {
         match self.layout.active_panel() {
-            ActivePanel::Left => &self.left_panel,
-            ActivePanel::Right => &self.right_panel,
+            ActivePanel::Left => self.left_tabs.active(),
+            ActivePanel::Right => self.right_tabs.active(),
         }
     }
 
     /// 활성 패널 상태 반환 (mutable)
     pub fn active_panel_state_mut(&mut self) -> &mut PanelState {
         match self.layout.active_panel() {
-            ActivePanel::Left => &mut self.left_panel,
-            ActivePanel::Right => &mut self.right_panel,
+            ActivePanel::Left => self.left_tabs.active_mut(),
+            ActivePanel::Right => self.right_tabs.active_mut(),
+        }
+    }
+
+    /// 패널별 탭 타이틀 반환
+    pub fn panel_tab_titles(&self, panel: ActivePanel) -> Vec<String> {
+        match panel {
+            ActivePanel::Left => self.left_tabs.titles(),
+            ActivePanel::Right => self.right_tabs.titles(),
+        }
+    }
+
+    /// 패널별 활성 탭 인덱스 반환
+    pub fn panel_active_tab_index(&self, panel: ActivePanel) -> usize {
+        match panel {
+            ActivePanel::Left => self.left_tabs.active_index(),
+            ActivePanel::Right => self.right_tabs.active_index(),
+        }
+    }
+
+    /// 패널별 탭 개수 반환
+    pub fn panel_tab_count(&self, panel: ActivePanel) -> usize {
+        match panel {
+            ActivePanel::Left => self.left_tabs.len(),
+            ActivePanel::Right => self.right_tabs.len(),
         }
     }
 
@@ -253,6 +381,8 @@ impl App {
             Action::GoToBottom => self.go_to_bottom(),
             Action::PageUp => self.move_selection_page_up(),
             Action::PageDown => self.move_selection_page_down(),
+            Action::TabNew => self.new_tab_active_panel(),
+            Action::TabClose => self.close_tab_active_panel(),
             Action::Copy => self.start_copy(),
             Action::Move => self.start_move(),
             Action::Delete => self.start_delete(),
@@ -299,6 +429,7 @@ impl App {
             // View (Phase 5.3)
             Action::ToggleHidden => self.toggle_hidden(),
             Action::ShowMountPoints => self.show_mount_points(),
+            Action::ShowTabList => self.show_tab_list(),
             Action::SizeFormatAuto => {
                 self.size_format = SizeFormat::Auto;
                 self.set_toast("Size format: Auto");
@@ -482,14 +613,14 @@ impl App {
 
             match self.active_panel() {
                 ActivePanel::Left => {
-                    let _ = self.left_panel.change_directory_and_focus(
+                    let _ = self.left_tabs.active_mut().change_directory_and_focus(
                         parent_path,
                         current_dir_name.as_deref(),
                         &self.filesystem,
                     );
                 }
                 ActivePanel::Right => {
-                    let _ = self.right_panel.change_directory_and_focus(
+                    let _ = self.right_tabs.active_mut().change_directory_and_focus(
                         parent_path,
                         current_dir_name.as_deref(),
                         &self.filesystem,
@@ -503,10 +634,10 @@ impl App {
     pub fn refresh_current(&mut self) {
         match self.active_panel() {
             ActivePanel::Left => {
-                let _ = self.left_panel.refresh(&self.filesystem);
+                let _ = self.left_tabs.active_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                let _ = self.right_panel.refresh(&self.filesystem);
+                let _ = self.right_tabs.active_mut().refresh(&self.filesystem);
             }
         }
     }
@@ -581,10 +712,10 @@ impl App {
         self.pending_key_time = None;
     }
 
-    /// 대기 키 만료 여부 (500ms)
+    /// 대기 키 만료 여부 (800ms)
     pub fn is_pending_key_expired(&self) -> bool {
         self.pending_key_time
-            .is_some_and(|t| t.elapsed().as_millis() > 500)
+            .is_some_and(|t| t.elapsed().as_millis() > 800)
     }
 
     /// 대기 키 표시 문자열 (상태바용)
@@ -721,14 +852,14 @@ impl App {
 
             match self.active_panel() {
                 ActivePanel::Left => {
-                    let _ = self.left_panel.change_directory_and_focus(
+                    let _ = self.left_tabs.active_mut().change_directory_and_focus(
                         parent_path,
                         current_dir_name.as_deref(),
                         &self.filesystem,
                     );
                 }
                 ActivePanel::Right => {
-                    let _ = self.right_panel.change_directory_and_focus(
+                    let _ = self.right_tabs.active_mut().change_directory_and_focus(
                         parent_path,
                         current_dir_name.as_deref(),
                         &self.filesystem,
@@ -742,10 +873,16 @@ impl App {
     fn enter_directory(&mut self, path: PathBuf) {
         match self.active_panel() {
             ActivePanel::Left => {
-                let _ = self.left_panel.change_directory(path, &self.filesystem);
+                let _ = self
+                    .left_tabs
+                    .active_mut()
+                    .change_directory(path, &self.filesystem);
             }
             ActivePanel::Right => {
-                let _ = self.right_panel.change_directory(path, &self.filesystem);
+                let _ = self
+                    .right_tabs
+                    .active_mut()
+                    .change_directory(path, &self.filesystem);
             }
         }
     }
@@ -835,8 +972,8 @@ impl App {
     /// 비활성 패널 상태 반환
     pub fn inactive_panel_state(&self) -> &PanelState {
         match self.layout.active_panel() {
-            ActivePanel::Left => &self.right_panel,
-            ActivePanel::Right => &self.left_panel,
+            ActivePanel::Left => self.right_tabs.active(),
+            ActivePanel::Right => self.left_tabs.active(),
         }
     }
 
@@ -1882,11 +2019,11 @@ impl App {
 
     /// 숨김 파일 표시/숨김 토글 (양쪽 패널 동시)
     pub fn toggle_hidden(&mut self) {
-        let new_val = !self.left_panel.show_hidden;
-        self.left_panel.show_hidden = new_val;
-        self.right_panel.show_hidden = new_val;
-        let _ = self.left_panel.refresh(&self.filesystem);
-        let _ = self.right_panel.refresh(&self.filesystem);
+        let new_val = !self.left_active_panel_state().show_hidden;
+        self.left_active_panel_state_mut().show_hidden = new_val;
+        self.right_active_panel_state_mut().show_hidden = new_val;
+        let _ = self.left_tabs.active_mut().refresh(&self.filesystem);
+        let _ = self.right_tabs.active_mut().refresh(&self.filesystem);
         self.set_toast(if new_val {
             "Hidden files shown"
         } else {
@@ -1909,14 +2046,63 @@ impl App {
         }
     }
 
+    /// 활성 패널 탭 목록 다이얼로그 표시
+    pub fn show_tab_list(&mut self) {
+        let active_panel = self.active_panel();
+        let items = self.panel_tab_titles(active_panel);
+        let selected_index = self.panel_active_tab_index(active_panel);
+        self.dialog = Some(DialogKind::tab_list(items, selected_index));
+    }
+
+    /// 탭 목록 다이얼로그에서 선택 이동 (아래)
+    pub fn tab_list_move_down(&mut self) {
+        if let Some(DialogKind::TabList {
+            items,
+            selected_index,
+        }) = &mut self.dialog
+        {
+            if *selected_index + 1 < items.len() {
+                *selected_index += 1;
+            }
+        }
+    }
+
+    /// 탭 목록 다이얼로그에서 선택 이동 (위)
+    pub fn tab_list_move_up(&mut self) {
+        if let Some(DialogKind::TabList { selected_index, .. }) = &mut self.dialog {
+            if *selected_index > 0 {
+                *selected_index -= 1;
+            }
+        }
+    }
+
+    /// 탭 목록 다이얼로그에서 선택 확인
+    pub fn tab_list_confirm(&mut self) {
+        let index = if let Some(DialogKind::TabList { selected_index, .. }) = &self.dialog {
+            Some(*selected_index)
+        } else {
+            None
+        };
+        if let Some(index) = index {
+            self.switch_tab_active_panel(index);
+            self.dialog = None;
+        }
+    }
+
     /// 마운트 포인트로 이동
     pub fn go_to_mount_point(&mut self, path: std::path::PathBuf) {
         match self.active_panel() {
             ActivePanel::Left => {
-                let _ = self.left_panel.change_directory(path, &self.filesystem);
+                let _ = self
+                    .left_tabs
+                    .active_mut()
+                    .change_directory(path, &self.filesystem);
             }
             ActivePanel::Right => {
-                let _ = self.right_panel.change_directory(path, &self.filesystem);
+                let _ = self
+                    .right_tabs
+                    .active_mut()
+                    .change_directory(path, &self.filesystem);
             }
         }
         self.dialog = None;
@@ -1973,12 +2159,12 @@ impl App {
     pub fn clear_filter(&mut self) {
         match self.active_panel() {
             ActivePanel::Left => {
-                self.left_panel.set_filter(None);
-                let _ = self.left_panel.refresh(&self.filesystem);
+                self.left_active_panel_state_mut().set_filter(None);
+                let _ = self.left_tabs.active_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                self.right_panel.set_filter(None);
-                let _ = self.right_panel.refresh(&self.filesystem);
+                self.right_active_panel_state_mut().set_filter(None);
+                let _ = self.right_tabs.active_mut().refresh(&self.filesystem);
             }
         }
         self.set_toast("Filter cleared");
@@ -1995,12 +2181,14 @@ impl App {
 
         match self.active_panel() {
             ActivePanel::Left => {
-                self.left_panel.set_filter(Some(pattern.clone()));
-                let _ = self.left_panel.refresh(&self.filesystem);
+                self.left_active_panel_state_mut()
+                    .set_filter(Some(pattern.clone()));
+                let _ = self.left_tabs.active_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                self.right_panel.set_filter(Some(pattern.clone()));
-                let _ = self.right_panel.refresh(&self.filesystem);
+                self.right_active_panel_state_mut()
+                    .set_filter(Some(pattern.clone()));
+                let _ = self.right_tabs.active_mut().refresh(&self.filesystem);
             }
         }
         self.dialog = None;
@@ -2016,12 +2204,12 @@ impl App {
         };
         match self.active_panel() {
             ActivePanel::Left => {
-                self.left_panel.set_filter(filter);
-                let _ = self.left_panel.refresh(&self.filesystem);
+                self.left_active_panel_state_mut().set_filter(filter);
+                let _ = self.left_tabs.active_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                self.right_panel.set_filter(filter);
-                let _ = self.right_panel.refresh(&self.filesystem);
+                self.right_active_panel_state_mut().set_filter(filter);
+                let _ = self.right_tabs.active_mut().refresh(&self.filesystem);
             }
         }
     }
@@ -2030,12 +2218,12 @@ impl App {
     pub fn cancel_filter(&mut self) {
         match self.active_panel() {
             ActivePanel::Left => {
-                self.left_panel.set_filter(None);
-                let _ = self.left_panel.refresh(&self.filesystem);
+                self.left_active_panel_state_mut().set_filter(None);
+                let _ = self.left_tabs.active_mut().refresh(&self.filesystem);
             }
             ActivePanel::Right => {
-                self.right_panel.set_filter(None);
-                let _ = self.right_panel.refresh(&self.filesystem);
+                self.right_active_panel_state_mut().set_filter(None);
+                let _ = self.right_tabs.active_mut().refresh(&self.filesystem);
             }
         }
         self.dialog = None;
@@ -2174,8 +2362,8 @@ impl App {
 
     /// 양쪽 패널 새로고침
     pub fn refresh_both_panels(&mut self) {
-        let _ = self.left_panel.refresh(&self.filesystem);
-        let _ = self.right_panel.refresh(&self.filesystem);
+        let _ = self.left_tabs.active_mut().refresh(&self.filesystem);
+        let _ = self.right_tabs.active_mut().refresh(&self.filesystem);
     }
 
     // === 다이얼로그 입력 처리 메서드 ===
@@ -2376,8 +2564,8 @@ impl Default for App {
             Self {
                 should_quit: false,
                 layout: LayoutManager::new(),
-                left_panel: PanelState::new(current_dir.clone()),
-                right_panel: PanelState::new(current_dir),
+                left_tabs: PanelTabs::new(PanelState::new(current_dir.clone())),
+                right_tabs: PanelTabs::new(PanelState::new(current_dir)),
                 filesystem,
                 menus: create_default_menus(),
                 menu_state: MenuState::new(),
@@ -2400,6 +2588,28 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    fn make_test_app() -> App {
+        let current_dir = std::path::PathBuf::from(".");
+        App {
+            should_quit: false,
+            layout: LayoutManager::new(),
+            left_tabs: PanelTabs::new(PanelState::new(current_dir.clone())),
+            right_tabs: PanelTabs::new(PanelState::new(current_dir)),
+            filesystem: FileSystem::new(),
+            menus: create_default_menus(),
+            menu_state: MenuState::new(),
+            theme_manager: ThemeManager::new(),
+            dialog: None,
+            pending_operation: None,
+            pending_key: None,
+            pending_key_time: None,
+            toast_message: None,
+            icon_mode: crate::ui::components::panel::IconMode::default(),
+            size_format: SizeFormat::default(),
+            ime_status: ImeStatus::Unknown,
+        }
+    }
 
     /// 재귀 경로 검사 테스트: 디렉토리를 자기 자신 내부로 복사
     #[test]
@@ -2516,5 +2726,87 @@ mod tests {
 
         assert!(result.is_some());
         assert!(result.unwrap().contains("Cannot move"));
+    }
+
+    #[test]
+    fn test_tab_create_close_and_guard_last() {
+        let mut app = make_test_app();
+
+        assert_eq!(app.left_tabs.len(), 1);
+        app.new_tab_active_panel();
+        assert_eq!(app.left_tabs.len(), 2);
+        assert_eq!(app.left_tabs.active_index(), 1);
+
+        app.close_tab_active_panel();
+        assert_eq!(app.left_tabs.len(), 1);
+
+        app.close_tab_active_panel();
+        assert_eq!(app.left_tabs.len(), 1);
+        assert_eq!(app.toast_display(), Some("Cannot close last tab"));
+    }
+
+    #[test]
+    fn test_tab_prev_next_and_switch() {
+        let mut app = make_test_app();
+        app.new_tab_active_panel();
+        app.new_tab_active_panel();
+        assert_eq!(app.left_tabs.active_index(), 2);
+
+        app.prev_tab_active_panel();
+        assert_eq!(app.left_tabs.active_index(), 1);
+        app.next_tab_active_panel();
+        assert_eq!(app.left_tabs.active_index(), 2);
+
+        app.switch_tab_active_panel(0);
+        assert_eq!(app.left_tabs.active_index(), 0);
+        app.switch_tab_active_panel(9);
+        assert_eq!(app.left_tabs.active_index(), 0);
+    }
+
+    #[test]
+    fn test_tab_state_persists_per_tab() {
+        let mut app = make_test_app();
+
+        app.active_panel_state_mut()
+            .set_filter(Some("alpha".to_string()));
+        app.new_tab_active_panel();
+        app.active_panel_state_mut()
+            .set_filter(Some("beta".to_string()));
+
+        app.prev_tab_active_panel();
+        assert_eq!(app.active_panel_state().filter.as_deref(), Some("alpha"));
+
+        app.next_tab_active_panel();
+        assert_eq!(app.active_panel_state().filter.as_deref(), Some("beta"));
+    }
+
+    #[test]
+    fn test_tab_max_limit_is_five() {
+        let mut app = make_test_app();
+
+        for _ in 0..4 {
+            app.new_tab_active_panel();
+        }
+        assert_eq!(app.left_tabs.len(), 5);
+
+        app.new_tab_active_panel();
+        assert_eq!(app.left_tabs.len(), 5);
+        assert_eq!(app.toast_display(), Some("Max 5 tabs per panel"));
+    }
+
+    #[test]
+    fn test_tab_list_dialog_select_and_switch() {
+        let mut app = make_test_app();
+        app.new_tab_active_panel();
+        app.new_tab_active_panel();
+        assert_eq!(app.left_tabs.active_index(), 2);
+
+        app.show_tab_list();
+        app.tab_list_move_up();
+        app.tab_list_move_up();
+        app.tab_list_confirm();
+
+        assert_eq!(app.left_tabs.active_index(), 0);
+        assert!(app.dialog.is_none());
     }
 }

@@ -8,6 +8,7 @@ use crate::core::actions::generate_help_entries;
 use crate::models::operation::{ConflictResolution, OperationProgress};
 use crate::ui::Theme;
 use crate::utils::formatter::format_file_size;
+use crate::utils::path_display;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -88,6 +89,11 @@ pub enum DialogKind {
     /// 탭 목록 선택 다이얼로그 (Phase 6.1)
     TabList {
         items: Vec<String>,
+        selected_index: usize,
+    },
+    /// 디렉토리 히스토리 목록 선택 다이얼로그 (Phase 6.2)
+    HistoryList {
+        items: Vec<(String, std::path::PathBuf, bool)>,
         selected_index: usize,
     },
     /// 파일 속성 다이얼로그
@@ -212,6 +218,17 @@ impl DialogKind {
     /// 탭 목록 선택 다이얼로그
     pub fn tab_list(items: Vec<String>, selected_index: usize) -> Self {
         DialogKind::TabList {
+            items,
+            selected_index,
+        }
+    }
+
+    /// 히스토리 목록 선택 다이얼로그
+    pub fn history_list(
+        items: Vec<(String, std::path::PathBuf, bool)>,
+        selected_index: usize,
+    ) -> Self {
+        DialogKind::HistoryList {
             items,
             selected_index,
         }
@@ -378,6 +395,12 @@ impl<'a> Dialog<'a> {
                 let list_lines = items.len().min(10) as u16;
                 let w = 45u16.min(sw.saturating_sub(4)).max(30);
                 let h = (4 + list_lines).min(sh.saturating_sub(4)).max(6);
+                (w, h)
+            }
+            DialogKind::HistoryList { items, .. } => {
+                let list_lines = items.len().min(12) as u16;
+                let w = 70u16.min(sw.saturating_sub(4)).max(40);
+                let h = (4 + list_lines).min(sh.saturating_sub(4)).max(8);
                 (w, h)
             }
             DialogKind::Properties { children_info, .. } => {
@@ -648,7 +671,7 @@ impl<'a> Dialog<'a> {
 
         // 대상 경로 표시
         buf.set_string(inner.x, inner.y + 2, "Target already exists:", msg_style);
-        let truncated_path = truncate_path_display(dest, inner.width as usize);
+        let truncated_path = path_display::truncate_path_buf(dest, inner.width as usize);
         buf.set_string(inner.x, inner.y + 3, &truncated_path, path_style);
 
         // 옵션 버튼들 (2줄로 배치)
@@ -699,7 +722,7 @@ impl<'a> Dialog<'a> {
 
         // 현재 파일
         let file_style = Style::default().fg(self.fg_color);
-        let truncated = truncate_middle(&progress.current_file, inner.width as usize);
+        let truncated = path_display::truncate_middle(&progress.current_file, inner.width as usize);
         buf.set_string(inner.x, inner.y, &truncated, file_style);
 
         // 진행률 바
@@ -803,7 +826,8 @@ impl<'a> Dialog<'a> {
                 );
                 break;
             }
-            let display = truncate_middle(item, inner.width.saturating_sub(4) as usize);
+            let display =
+                path_display::truncate_middle(item, inner.width.saturating_sub(4) as usize);
             let line = format!("  · {}", display);
             buf.set_string(inner.x, inner.y + 2 + i as u16, &line, item_style);
         }
@@ -911,8 +935,10 @@ impl<'a> Dialog<'a> {
 
         for (label, value) in &rows {
             buf.set_string(inner.x, y, label, label_style);
-            let truncated =
-                truncate_middle(value, inner.width.saturating_sub(label_width) as usize);
+            let truncated = path_display::truncate_middle(
+                value,
+                inner.width.saturating_sub(label_width) as usize,
+            );
             buf.set_string(inner.x + label_width, y, &truncated, value_style);
             y += 1;
         }
@@ -1057,6 +1083,109 @@ impl<'a> Dialog<'a> {
 
         // 하단 힌트
         let hint = " j/k:Move  Enter:Go  Esc:Close ";
+        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint_y = area.y + area.height - 1;
+        buf.set_string(
+            hint_x,
+            hint_y,
+            hint,
+            Style::default().fg(Color::Rgb(100, 100, 100)),
+        );
+    }
+
+    fn render_history_list(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        items: &[(String, std::path::PathBuf, bool)],
+        selected_index: usize,
+    ) {
+        let block = Block::default()
+            .title(" Directory History ")
+            .title_style(
+                Style::default()
+                    .fg(self.title_color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        block.render(area, buf);
+
+        let inner = Rect {
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(3),
+        };
+
+        let normal_style = Style::default().fg(self.fg_color);
+        let selected_style = Style::default()
+            .fg(self.button_selected_fg)
+            .bg(self.button_selected_bg);
+
+        let visible_height = inner.height as usize;
+        let scroll = if selected_index >= visible_height {
+            selected_index - visible_height + 1
+        } else {
+            0
+        };
+
+        for (i, (display_path, _path, is_current)) in items.iter().skip(scroll).enumerate() {
+            if i >= visible_height {
+                break;
+            }
+            let actual_index = scroll + i;
+            let style = if actual_index == selected_index {
+                selected_style
+            } else {
+                normal_style
+            };
+
+            let y = inner.y + i as u16;
+            let prefix = format!(" {}: ", actual_index + 1);
+            let marker = if *is_current { " (current)" } else { "" };
+            let total_width = inner.width as usize;
+            let reserved = UnicodeWidthStr::width(prefix.as_str()) + UnicodeWidthStr::width(marker);
+            let path_max_width = total_width.saturating_sub(reserved);
+            let path_display = path_display::truncate_path(display_path, path_max_width);
+            let label = format!("{}{}{}", prefix, path_display, marker);
+            let display = if UnicodeWidthStr::width(label.as_str()) > total_width {
+                path_display::truncate_middle(&label, total_width)
+            } else {
+                format!("{:<width$}", label, width = total_width)
+            };
+            buf.set_string(inner.x, y, &display, style);
+        }
+
+        // 스크롤바 (내용이 화면보다 많을 때만)
+        let total_items = items.len();
+        if total_items > visible_height && visible_height > 0 {
+            let track_height = visible_height;
+            let max_scroll = total_items.saturating_sub(visible_height);
+            let thumb_height = (track_height * track_height / total_items).max(1);
+            let thumb_pos = if max_scroll == 0 {
+                0
+            } else {
+                scroll * (track_height.saturating_sub(thumb_height)) / max_scroll
+            };
+
+            let scrollbar_x = area.x + area.width - 2;
+            let track_style = Style::default().fg(Color::Rgb(60, 60, 60));
+            let thumb_style = Style::default().fg(Color::Rgb(150, 150, 150));
+
+            for i in 0..track_height {
+                let sy = inner.y + i as u16;
+                let (symbol, style) = if i >= thumb_pos && i < thumb_pos + thumb_height {
+                    ("┃", thumb_style)
+                } else {
+                    ("│", track_style)
+                };
+                buf.set_string(scrollbar_x, sy, symbol, style);
+            }
+        }
+
+        let hint = " j/k:Move  Enter:Go  D:Clear  Esc:Close ";
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
         buf.set_string(
@@ -1332,6 +1461,12 @@ impl Widget for Dialog<'_> {
             } => {
                 self.render_tab_list(buf, dialog_area, items, *selected_index);
             }
+            DialogKind::HistoryList {
+                items,
+                selected_index,
+            } => {
+                self.render_history_list(buf, dialog_area, items, *selected_index);
+            }
             DialogKind::Help { scroll_offset } => {
                 self.render_help(buf, dialog_area, *scroll_offset);
             }
@@ -1358,31 +1493,6 @@ impl Widget for Dialog<'_> {
             }
         }
     }
-}
-
-/// 경로를 화면 너비에 맞게 축약
-fn truncate_path_display(path: &Path, max_width: usize) -> String {
-    let path_str = path.to_string_lossy();
-    if path_str.len() <= max_width {
-        path_str.to_string()
-    } else {
-        truncate_middle(&path_str, max_width)
-    }
-}
-
-/// 문자열 중간 생략
-fn truncate_middle(s: &str, max_width: usize) -> String {
-    if s.len() <= max_width {
-        return s.to_string();
-    }
-    if max_width < 5 {
-        return s.chars().take(max_width).collect();
-    }
-
-    let half = (max_width - 3) / 2;
-    let start: String = s.chars().take(half).collect();
-    let end: String = s.chars().skip(s.len() - half).collect();
-    format!("{}...{}", start, end)
 }
 
 #[cfg(test)]
@@ -1441,11 +1551,5 @@ mod tests {
             DialogResult::OverwriteAll.to_conflict_resolution(),
             Some(ConflictResolution::OverwriteAll)
         );
-    }
-
-    #[test]
-    fn test_truncate_middle() {
-        assert_eq!(truncate_middle("short", 10), "short");
-        assert_eq!(truncate_middle("verylongstring", 10), "ver...ing");
     }
 }

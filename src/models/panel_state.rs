@@ -8,6 +8,8 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+const MAX_HISTORY_ENTRIES: usize = 100;
+
 /// 정렬 기준
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortBy {
@@ -51,11 +53,16 @@ pub struct PanelState {
     pub show_hidden: bool,
     /// 필터 패턴
     pub filter: Option<String>,
+    /// 디렉토리 히스토리 (오래된 순)
+    pub history_entries: Vec<PathBuf>,
+    /// 현재 히스토리 인덱스
+    pub history_index: usize,
 }
 
 impl PanelState {
     /// 새 패널 상태 생성
     pub fn new(path: PathBuf) -> Self {
+        let history_seed = path.clone();
         Self {
             current_path: path,
             entries: Vec::new(),
@@ -66,6 +73,8 @@ impl PanelState {
             sort_order: SortOrder::Ascending,
             show_hidden: false,
             filter: None,
+            history_entries: vec![history_seed],
+            history_index: 0,
         }
     }
 
@@ -254,6 +263,97 @@ impl PanelState {
         self.filter = pattern;
     }
 
+    /// 디렉토리 히스토리 기록
+    ///
+    /// - 연속 중복 경로는 기록하지 않음
+    /// - 기존 히스토리는 보존하고 새 방문을 append
+    /// - 최대 100개 유지 (오래된 항목 삭제)
+    pub fn record_history(&mut self, path: PathBuf) {
+        if self.history_entries.is_empty() {
+            self.history_entries.push(path);
+            self.history_index = 0;
+            return;
+        }
+
+        if self.history_index >= self.history_entries.len() {
+            self.history_index = self.history_entries.len().saturating_sub(1);
+        }
+
+        if self.history_entries[self.history_index] == path {
+            return;
+        }
+
+        self.history_entries.push(path);
+        self.history_index = self.history_entries.len().saturating_sub(1);
+
+        if self.history_entries.len() > MAX_HISTORY_ENTRIES {
+            let overflow = self.history_entries.len() - MAX_HISTORY_ENTRIES;
+            self.history_entries.drain(0..overflow);
+            self.history_index = self.history_index.saturating_sub(overflow);
+        }
+    }
+
+    /// 뒤로 이동 가능 여부
+    pub fn can_go_back(&self) -> bool {
+        self.history_index > 0 && !self.history_entries.is_empty()
+    }
+
+    /// 앞으로 이동 가능 여부
+    pub fn can_go_forward(&self) -> bool {
+        !self.history_entries.is_empty() && self.history_index + 1 < self.history_entries.len()
+    }
+
+    /// 히스토리 뒤로 이동 대상 반환 (인덱스 이동 포함)
+    pub fn history_back_target(&mut self) -> Option<PathBuf> {
+        if !self.can_go_back() {
+            return None;
+        }
+        self.history_index -= 1;
+        self.history_entries.get(self.history_index).cloned()
+    }
+
+    /// 히스토리 앞으로 이동 대상 반환 (인덱스 이동 포함)
+    pub fn history_forward_target(&mut self) -> Option<PathBuf> {
+        if !self.can_go_forward() {
+            return None;
+        }
+        self.history_index += 1;
+        self.history_entries.get(self.history_index).cloned()
+    }
+
+    /// 히스토리 인덱스를 지정해 점프 (인덱스 이동 포함)
+    pub fn history_jump_to(&mut self, index: usize) -> Option<PathBuf> {
+        if index >= self.history_entries.len() {
+            return None;
+        }
+        self.history_index = index;
+        self.history_entries.get(self.history_index).cloned()
+    }
+
+    /// 히스토리 목록(최신순) 반환
+    ///
+    /// 반환: (표시 문자열, 경로, 현재 위치 여부)
+    pub fn history_items_latest_first(&self) -> Vec<(String, PathBuf, bool)> {
+        self.history_entries
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(idx, p)| {
+                (
+                    p.to_string_lossy().to_string(),
+                    p.clone(),
+                    idx == self.history_index,
+                )
+            })
+            .collect()
+    }
+
+    /// 현재 경로만 남기고 히스토리 전체 삭제
+    pub fn clear_history_to_current(&mut self) {
+        self.history_entries = vec![self.current_path.clone()];
+        self.history_index = 0;
+    }
+
     /// 필터 상태 표시 문자열 (상태바용)
     pub fn filter_indicator(&self) -> Option<String> {
         self.filter
@@ -355,6 +455,8 @@ impl Default for PanelState {
             sort_order: SortOrder::Ascending,
             show_hidden: false,
             filter: None,
+            history_entries: vec![PathBuf::from(".")],
+            history_index: 0,
         }
     }
 }
@@ -374,6 +476,8 @@ mod tests {
         assert_eq!(state.sort_order, SortOrder::Ascending);
         assert!(!state.show_hidden);
         assert!(state.selected_items.is_empty());
+        assert_eq!(state.history_entries, vec![path]);
+        assert_eq!(state.history_index, 0);
     }
 
     #[test]
@@ -795,6 +899,122 @@ mod tests {
 
         state.filter = Some(String::new());
         assert!(state.filter_indicator().is_none());
+    }
+
+    #[test]
+    fn test_history_prevents_consecutive_duplicates() {
+        let mut state = PanelState::new(PathBuf::from("/a"));
+        state.record_history(PathBuf::from("/a"));
+        assert_eq!(state.history_entries, vec![PathBuf::from("/a")]);
+        assert_eq!(state.history_index, 0);
+    }
+
+    #[test]
+    fn test_history_keeps_forward_entries_when_recording_new_path() {
+        let mut state = PanelState::new(PathBuf::from("/a"));
+        state.record_history(PathBuf::from("/b"));
+        state.record_history(PathBuf::from("/c"));
+
+        assert_eq!(state.history_back_target(), Some(PathBuf::from("/b")));
+        assert_eq!(state.history_index, 1);
+
+        state.record_history(PathBuf::from("/x"));
+        assert_eq!(
+            state.history_entries,
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from("/b"),
+                PathBuf::from("/c"),
+                PathBuf::from("/x")
+            ]
+        );
+        assert_eq!(state.history_index, 3);
+        assert!(!state.can_go_forward());
+    }
+
+    #[test]
+    fn test_history_back_forward_boundaries() {
+        let mut state = PanelState::new(PathBuf::from("/a"));
+        assert!(!state.can_go_back());
+        assert!(!state.can_go_forward());
+        assert_eq!(state.history_back_target(), None);
+        assert_eq!(state.history_forward_target(), None);
+
+        state.record_history(PathBuf::from("/b"));
+        assert!(state.can_go_back());
+        assert!(!state.can_go_forward());
+        assert_eq!(state.history_back_target(), Some(PathBuf::from("/a")));
+        assert!(!state.can_go_back());
+        assert!(state.can_go_forward());
+        assert_eq!(state.history_forward_target(), Some(PathBuf::from("/b")));
+        assert!(!state.can_go_forward());
+    }
+
+    #[test]
+    fn test_history_max_100_entries_and_index_adjustment() {
+        let mut state = PanelState::new(PathBuf::from("/0"));
+        for i in 1..=120 {
+            state.record_history(PathBuf::from(format!("/{}", i)));
+        }
+
+        assert_eq!(state.history_entries.len(), 100);
+        assert_eq!(state.history_entries.first(), Some(&PathBuf::from("/21")));
+        assert_eq!(state.history_entries.last(), Some(&PathBuf::from("/120")));
+        assert_eq!(state.history_index, 99);
+    }
+
+    #[test]
+    fn test_history_items_latest_first_marks_current() {
+        let mut state = PanelState::new(PathBuf::from("/a"));
+        state.record_history(PathBuf::from("/b"));
+        state.record_history(PathBuf::from("/c"));
+        let _ = state.history_back_target();
+
+        let items = state.history_items_latest_first();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].1, PathBuf::from("/c"));
+        assert!(!items[0].2);
+        assert_eq!(items[1].1, PathBuf::from("/b"));
+        assert!(items[1].2);
+        assert_eq!(items[2].1, PathBuf::from("/a"));
+        assert!(!items[2].2);
+    }
+
+    #[test]
+    fn test_clear_history_to_current() {
+        let mut state = PanelState::new(PathBuf::from("/a"));
+        state.record_history(PathBuf::from("/b"));
+        state.record_history(PathBuf::from("/c"));
+        state.current_path = PathBuf::from("/b");
+
+        state.clear_history_to_current();
+        assert_eq!(state.history_entries, vec![PathBuf::from("/b")]);
+        assert_eq!(state.history_index, 0);
+    }
+
+    #[test]
+    fn test_history_keeps_non_consecutive_duplicate_path() {
+        let mut state = PanelState::new(PathBuf::from("/a"));
+        state.record_history(PathBuf::from("/b"));
+        state.record_history(PathBuf::from("/a"));
+
+        assert_eq!(
+            state.history_entries,
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from("/b"),
+                PathBuf::from("/a")
+            ]
+        );
+        assert_eq!(state.history_index, 2);
+        assert_eq!(
+            state
+                .history_entries
+                .iter()
+                .filter(|p| **p == PathBuf::from("/a"))
+                .count(),
+            2
+        );
     }
 
     #[test]

@@ -177,6 +177,10 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
                 app.execute_action(Action::ShowTabList);
                 return;
             }
+            ('t', KeyCode::Char('h')) => {
+                app.execute_action(Action::ShowHistoryList);
+                return;
+            }
             _ => {} // 잘못된 시퀀스, fall through
         }
     }
@@ -258,6 +262,9 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         }
         DialogKind::TabList { .. } => {
             handle_tab_list_dialog_keys(app, code);
+        }
+        DialogKind::HistoryList { .. } => {
+            handle_history_list_dialog_keys(app, code);
         }
     }
 }
@@ -524,6 +531,28 @@ fn handle_tab_list_dialog_keys(app: &mut App, code: KeyCode) {
         }
         KeyCode::Enter | KeyCode::Char('l') => {
             app.tab_list_confirm();
+        }
+        _ => {}
+    }
+}
+
+/// 히스토리 목록 다이얼로그 키 처리
+fn handle_history_list_dialog_keys(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.close_dialog();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.history_list_move_down();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.history_list_move_up();
+        }
+        KeyCode::Enter | KeyCode::Char('l') => {
+            app.history_list_confirm();
+        }
+        KeyCode::Char('D') => {
+            app.history_list_clear_all();
         }
         _ => {}
     }

@@ -11,6 +11,7 @@ use crate::utils::formatter::{
     format_date, format_file_size, format_file_size_bytes, format_permissions,
 };
 use crate::utils::glob;
+use crate::utils::path_display;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -293,82 +294,6 @@ impl<'a> Panel<'a> {
             FileType::Symlink => self.symlink_color,
             FileType::File => self.file_normal_color,
         }
-    }
-
-    /// 경로를 최대 너비에 맞게 축약 (홈 디렉토리 ~로 축약 + 중간 생략)
-    fn truncate_path(&self, path: &str, max_width: usize) -> String {
-        // 1. 홈 디렉토리를 ~로 축약
-        let home_dir = std::env::var("HOME").unwrap_or_default();
-        let path = if !home_dir.is_empty() && path.starts_with(&home_dir) {
-            format!("~{}", &path[home_dir.len()..])
-        } else {
-            path.to_string()
-        };
-
-        let display_width = path.width();
-        if display_width <= max_width {
-            return path;
-        }
-
-        // 2. 중간 생략: 첫 번째 디렉토리 + ... + 마지막 디렉토리들
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-        if parts.len() <= 2 {
-            // 경로가 짧으면 뒤에서부터 자르기
-            return self.truncate_from_start(&path, max_width);
-        }
-
-        let ellipsis = "/...";
-
-        // 첫 번째 부분 (~ 또는 루트)
-        let first = if path.starts_with('~') {
-            "~".to_string()
-        } else {
-            format!("/{}", parts[0])
-        };
-
-        // 뒤에서부터 가능한 만큼 추가
-        let first_width = first.width() + ellipsis.width();
-        let available_width = max_width.saturating_sub(first_width);
-
-        let mut end_parts: Vec<&str> = Vec::new();
-        let mut current_width = 0;
-
-        for part in parts.iter().rev() {
-            let part_width = part.width() + 1; // +1 for "/"
-            if current_width + part_width > available_width {
-                break;
-            }
-            end_parts.insert(0, part);
-            current_width += part_width;
-        }
-
-        if end_parts.is_empty() {
-            // 마지막 디렉토리도 안 들어가면 그냥 뒤에서 자르기
-            return self.truncate_from_start(&path, max_width);
-        }
-
-        format!("{}{}/{}", first, ellipsis, end_parts.join("/"))
-    }
-
-    /// 경로를 앞에서부터 자르기 (fallback)
-    fn truncate_from_start(&self, path: &str, max_width: usize) -> String {
-        let ellipsis = "...";
-        let ellipsis_width = ellipsis.width();
-        let available_width = max_width.saturating_sub(ellipsis_width);
-
-        let mut result = String::new();
-        let mut current_width = 0;
-
-        for ch in path.chars().rev() {
-            let ch_width = ch.width().unwrap_or(1);
-            if current_width + ch_width > available_width {
-                break;
-            }
-            result.insert(0, ch);
-            current_width += ch_width;
-        }
-
-        format!("{}{}", ellipsis, result)
     }
 }
 
@@ -683,7 +608,7 @@ impl Widget for Panel<'_> {
         let title_max_width = (area.width as usize)
             .saturating_sub(4)
             .saturating_sub(if show_tab_count { count_width + 1 } else { 0 });
-        let display_title = self.truncate_path(self.title, title_max_width.max(1));
+        let display_title = path_display::truncate_path(self.title, title_max_width.max(1));
         let mut title_spans = vec![Span::styled(
             format!(" {} ", display_title),
             self.title_style(),

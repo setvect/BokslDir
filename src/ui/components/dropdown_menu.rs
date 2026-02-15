@@ -660,6 +660,7 @@ pub fn create_default_menus() -> Vec<Menu> {
             MenuItem::separator(),
             menu_action("toggle_hidden", "숨김 파일 표시"),
             menu_action("mount_points", "마운트 포인트"),
+            menu_action("history_list", "디렉토리 히스토리"),
             MenuItem::submenu(
                 "size_format",
                 "크기 표시 형식",

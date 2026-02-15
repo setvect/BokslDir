@@ -60,6 +60,9 @@ pub enum Action {
     ToggleHidden,
     ShowMountPoints,
     ShowTabList,
+    HistoryBack,
+    HistoryForward,
+    ShowHistoryList,
     SizeFormatAuto,
     SizeFormatBytes,
     // About
@@ -521,6 +524,30 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         command_bar: None,
     },
     ActionDef {
+        action: Action::HistoryBack,
+        id: "history_back",
+        label: "History back",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("Alt+Left"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::HistoryForward,
+        id: "history_forward",
+        label: "History forward",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("Alt+Right"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::ShowHistoryList,
+        id: "history_list",
+        label: "Show history list",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("th"),
+        command_bar: None,
+    },
+    ActionDef {
         action: Action::SizeFormatAuto,
         id: "size_auto",
         label: "Size: Auto",
@@ -600,8 +627,18 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         },
         KeyBinding {
             code: KeyCode::Left,
-            modifiers: None,
+            modifiers: Some(KeyModifiers::NONE),
             action: Action::GoToParent,
+        },
+        KeyBinding {
+            code: KeyCode::Left,
+            modifiers: Some(KeyModifiers::ALT),
+            action: Action::HistoryBack,
+        },
+        KeyBinding {
+            code: KeyCode::Right,
+            modifiers: Some(KeyModifiers::ALT),
+            action: Action::HistoryForward,
         },
         KeyBinding {
             code: KeyCode::Char('l'),
@@ -815,6 +852,10 @@ mod tests {
         assert_eq!(Action::from_id("quit"), Some(Action::Quit));
         assert_eq!(Action::from_id("tab_new"), Some(Action::TabNew));
         assert_eq!(Action::from_id("tab_list"), Some(Action::ShowTabList));
+        assert_eq!(
+            Action::from_id("history_list"),
+            Some(Action::ShowHistoryList)
+        );
         assert_eq!(Action::from_id("nonexistent"), None);
     }
 
@@ -859,6 +900,18 @@ mod tests {
         assert_eq!(
             find_action(KeyModifiers::CONTROL, KeyCode::Char('r')),
             Some(Action::Refresh)
+        );
+    }
+
+    #[test]
+    fn test_find_action_alt_history_keys() {
+        assert_eq!(
+            find_action(KeyModifiers::ALT, KeyCode::Left),
+            Some(Action::HistoryBack)
+        );
+        assert_eq!(
+            find_action(KeyModifiers::ALT, KeyCode::Right),
+            Some(Action::HistoryForward)
         );
     }
 

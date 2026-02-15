@@ -12,9 +12,24 @@ use crate::ui::{
     ThemeManager,
 };
 use crate::utils::error::Result;
+use serde::{Deserialize, Serialize};
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedPanelHistory {
+    entries: Vec<PathBuf>,
+    index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedHistories {
+    version: u32,
+    left: PersistedPanelHistory,
+    right: PersistedPanelHistory,
+}
 
 /// 파일 크기 표시 형식
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -66,6 +81,7 @@ pub struct App {
 
 impl App {
     const MAX_TABS_PER_PANEL: usize = 5;
+    const HISTORY_STORE_VERSION: u32 = 1;
 
     pub fn new() -> Result<Self> {
         let current_dir = env::current_dir().unwrap_or_else(|_| {
@@ -92,7 +108,7 @@ impl App {
         let mut right_panel = PanelState::new(current_dir);
         right_panel.refresh(&filesystem)?;
 
-        Ok(Self {
+        let mut app = Self {
             should_quit: false,
             layout: LayoutManager::new(),
             left_tabs: PanelTabs::new(left_panel),
@@ -109,12 +125,115 @@ impl App {
             icon_mode: crate::ui::components::panel::IconMode::default(),
             size_format: SizeFormat::default(),
             ime_status: crate::system::get_current_ime(),
-        })
+        };
+        app.load_persisted_histories();
+        Ok(app)
     }
 
     /// 종료
     pub fn quit(&mut self) {
+        let _ = self.save_persisted_histories();
         self.should_quit = true;
+    }
+
+    fn history_store_path() -> Option<PathBuf> {
+        if let Ok(custom) = env::var("BOKSLDIR_HISTORY_FILE") {
+            let trimmed = custom.trim();
+            if !trimmed.is_empty() {
+                return Some(PathBuf::from(trimmed));
+            }
+        }
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".boksldir").join("history.toml"))
+    }
+
+    fn encode_histories(
+        left_entries: &[PathBuf],
+        left_index: usize,
+        right_entries: &[PathBuf],
+        right_index: usize,
+    ) -> std::result::Result<String, toml::ser::Error> {
+        let payload = PersistedHistories {
+            version: Self::HISTORY_STORE_VERSION,
+            left: PersistedPanelHistory {
+                entries: left_entries.to_vec(),
+                index: left_index,
+            },
+            right: PersistedPanelHistory {
+                entries: right_entries.to_vec(),
+                index: right_index,
+            },
+        };
+        toml::to_string_pretty(&payload)
+    }
+
+    fn decode_histories(data: &str) -> Option<((Vec<PathBuf>, usize), (Vec<PathBuf>, usize))> {
+        let parsed: PersistedHistories = toml::from_str(data).ok()?;
+        if parsed.version != Self::HISTORY_STORE_VERSION {
+            return None;
+        }
+        Some((
+            (parsed.left.entries, parsed.left.index),
+            (parsed.right.entries, parsed.right.index),
+        ))
+    }
+
+    fn save_persisted_histories(&self) -> std::io::Result<()> {
+        let Some(path) = Self::history_store_path() else {
+            return Ok(());
+        };
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let left = self.left_tabs.active();
+        let right = self.right_tabs.active();
+        let data = Self::encode_histories(
+            &left.history_entries,
+            left.history_index,
+            &right.history_entries,
+            right.history_index,
+        )
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        fs::write(path, data)
+    }
+
+    fn apply_loaded_history(
+        &mut self,
+        panel_kind: ActivePanel,
+        entries: Vec<PathBuf>,
+        _index: usize,
+    ) {
+        let panel = match panel_kind {
+            ActivePanel::Left => self.left_tabs.active_mut(),
+            ActivePanel::Right => self.right_tabs.active_mut(),
+        };
+
+        let fallback = panel.current_path.clone();
+        let mut valid_entries: Vec<PathBuf> = entries
+            .into_iter()
+            .filter(|p| p.exists() && p.is_dir())
+            .collect();
+        if valid_entries.is_empty() {
+            valid_entries.push(fallback.clone());
+        }
+
+        panel.history_entries = valid_entries;
+        panel.history_index = panel.history_entries.len().saturating_sub(1);
+        panel.record_history(fallback);
+    }
+
+    fn load_persisted_histories(&mut self) {
+        let Some(path) = Self::history_store_path() else {
+            return;
+        };
+        if let Ok(data) = fs::read_to_string(&path) {
+            if let Some((left, right)) = Self::decode_histories(&data) {
+                self.apply_loaded_history(ActivePanel::Left, left.0, left.1);
+                self.apply_loaded_history(ActivePanel::Right, right.0, right.1);
+            }
+        }
     }
 
     /// 종료 상태 확인
@@ -430,6 +549,9 @@ impl App {
             Action::ToggleHidden => self.toggle_hidden(),
             Action::ShowMountPoints => self.show_mount_points(),
             Action::ShowTabList => self.show_tab_list(),
+            Action::HistoryBack => self.history_back(),
+            Action::HistoryForward => self.history_forward(),
+            Action::ShowHistoryList => self.show_history_list(),
             Action::SizeFormatAuto => {
                 self.size_format = SizeFormat::Auto;
                 self.set_toast("Size format: Auto");
@@ -599,6 +721,57 @@ impl App {
         self.adjust_scroll_offset();
     }
 
+    /// 활성 패널 경로 변경 공통 처리
+    ///
+    /// `record_in_history`가 true이면 이동 성공 시 히스토리에 기록합니다.
+    fn change_active_dir(
+        &mut self,
+        path: PathBuf,
+        record_in_history: bool,
+        focus_name: Option<&str>,
+    ) -> bool {
+        let path_for_history = path.clone();
+        let result = match self.active_panel() {
+            ActivePanel::Left => {
+                if let Some(name) = focus_name {
+                    self.left_tabs.active_mut().change_directory_and_focus(
+                        path,
+                        Some(name),
+                        &self.filesystem,
+                    )
+                } else {
+                    self.left_tabs
+                        .active_mut()
+                        .change_directory(path, &self.filesystem)
+                }
+            }
+            ActivePanel::Right => {
+                if let Some(name) = focus_name {
+                    self.right_tabs.active_mut().change_directory_and_focus(
+                        path,
+                        Some(name),
+                        &self.filesystem,
+                    )
+                } else {
+                    self.right_tabs
+                        .active_mut()
+                        .change_directory(path, &self.filesystem)
+                }
+            }
+        };
+
+        if result.is_ok() && record_in_history {
+            self.active_panel_state_mut()
+                .record_history(path_for_history);
+        }
+
+        if result.is_ok() {
+            let _ = self.save_persisted_histories();
+        }
+
+        result.is_ok()
+    }
+
     /// 상위 디렉토리로 이동 (h / Left)
     pub fn go_to_parent(&mut self) {
         let panel = self.active_panel_state();
@@ -610,23 +783,7 @@ impl App {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .map(|s| s.to_string());
-
-            match self.active_panel() {
-                ActivePanel::Left => {
-                    let _ = self.left_tabs.active_mut().change_directory_and_focus(
-                        parent_path,
-                        current_dir_name.as_deref(),
-                        &self.filesystem,
-                    );
-                }
-                ActivePanel::Right => {
-                    let _ = self.right_tabs.active_mut().change_directory_and_focus(
-                        parent_path,
-                        current_dir_name.as_deref(),
-                        &self.filesystem,
-                    );
-                }
-            }
+            let _ = self.change_active_dir(parent_path, true, current_dir_name.as_deref());
         }
     }
 
@@ -849,42 +1006,13 @@ impl App {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .map(|s| s.to_string());
-
-            match self.active_panel() {
-                ActivePanel::Left => {
-                    let _ = self.left_tabs.active_mut().change_directory_and_focus(
-                        parent_path,
-                        current_dir_name.as_deref(),
-                        &self.filesystem,
-                    );
-                }
-                ActivePanel::Right => {
-                    let _ = self.right_tabs.active_mut().change_directory_and_focus(
-                        parent_path,
-                        current_dir_name.as_deref(),
-                        &self.filesystem,
-                    );
-                }
-            }
+            let _ = self.change_active_dir(parent_path, true, current_dir_name.as_deref());
         }
     }
 
     /// 디렉토리 항목 진입
     fn enter_directory(&mut self, path: PathBuf) {
-        match self.active_panel() {
-            ActivePanel::Left => {
-                let _ = self
-                    .left_tabs
-                    .active_mut()
-                    .change_directory(path, &self.filesystem);
-            }
-            ActivePanel::Right => {
-                let _ = self
-                    .right_tabs
-                    .active_mut()
-                    .change_directory(path, &self.filesystem);
-            }
-        }
+        let _ = self.change_active_dir(path, true, None);
     }
 
     /// Enter 키 처리: 디렉토리 진입 또는 상위 디렉토리 이동
@@ -2054,6 +2182,20 @@ impl App {
         self.dialog = Some(DialogKind::tab_list(items, selected_index));
     }
 
+    /// 활성 패널 디렉토리 히스토리 목록 표시 (최신순)
+    pub fn show_history_list(&mut self) {
+        let items = self.active_panel_state().history_items_latest_first();
+        if items.is_empty() {
+            self.dialog = Some(DialogKind::message("History", "No history entries."));
+            return;
+        }
+        let selected_index = items
+            .iter()
+            .position(|(_, _, is_current)| *is_current)
+            .unwrap_or(0);
+        self.dialog = Some(DialogKind::history_list(items, selected_index));
+    }
+
     /// 탭 목록 다이얼로그에서 선택 이동 (아래)
     pub fn tab_list_move_down(&mut self) {
         if let Some(DialogKind::TabList {
@@ -2089,23 +2231,111 @@ impl App {
         }
     }
 
-    /// 마운트 포인트로 이동
-    pub fn go_to_mount_point(&mut self, path: std::path::PathBuf) {
-        match self.active_panel() {
-            ActivePanel::Left => {
-                let _ = self
-                    .left_tabs
-                    .active_mut()
-                    .change_directory(path, &self.filesystem);
-            }
-            ActivePanel::Right => {
-                let _ = self
-                    .right_tabs
-                    .active_mut()
-                    .change_directory(path, &self.filesystem);
+    /// 히스토리 목록 다이얼로그에서 선택 이동 (아래)
+    pub fn history_list_move_down(&mut self) {
+        if let Some(DialogKind::HistoryList {
+            items,
+            selected_index,
+        }) = &mut self.dialog
+        {
+            if *selected_index + 1 < items.len() {
+                *selected_index += 1;
             }
         }
-        self.dialog = None;
+    }
+
+    /// 히스토리 목록 다이얼로그에서 선택 이동 (위)
+    pub fn history_list_move_up(&mut self) {
+        if let Some(DialogKind::HistoryList { selected_index, .. }) = &mut self.dialog {
+            if *selected_index > 0 {
+                *selected_index -= 1;
+            }
+        }
+    }
+
+    /// 히스토리 목록 다이얼로그에서 선택 확인
+    pub fn history_list_confirm(&mut self) {
+        let (selected_index, item_len) = if let Some(DialogKind::HistoryList {
+            items,
+            selected_index,
+        }) = &self.dialog
+        {
+            (*selected_index, items.len())
+        } else {
+            return;
+        };
+
+        if item_len == 0 || selected_index >= item_len {
+            return;
+        }
+
+        let target_index = item_len - 1 - selected_index;
+        let (target_path, old_index) = {
+            let panel = self.active_panel_state_mut();
+            let old = panel.history_index;
+            (panel.history_jump_to(target_index), old)
+        };
+
+        if let Some(path) = target_path {
+            if self.change_active_dir(path, false, None) {
+                self.dialog = None;
+            } else {
+                self.active_panel_state_mut().history_index = old_index;
+                self.set_toast("Failed to open history path");
+            }
+        }
+    }
+
+    /// 현재 패널 히스토리 전체 삭제 (현재 경로만 유지)
+    pub fn history_list_clear_all(&mut self) {
+        self.active_panel_state_mut().clear_history_to_current();
+        let items = self.active_panel_state().history_items_latest_first();
+        self.dialog = Some(DialogKind::history_list(items, 0));
+        let _ = self.save_persisted_histories();
+        self.set_toast("History cleared");
+    }
+
+    /// 히스토리 뒤로 이동 (Alt+Left)
+    pub fn history_back(&mut self) {
+        let (target_path, old_index) = {
+            let panel = self.active_panel_state_mut();
+            let old = panel.history_index;
+            (panel.history_back_target(), old)
+        };
+
+        if let Some(path) = target_path {
+            if !self.change_active_dir(path, false, None) {
+                self.active_panel_state_mut().history_index = old_index;
+                self.set_toast("History back failed");
+            }
+        } else {
+            self.set_toast("No back history");
+        }
+    }
+
+    /// 히스토리 앞으로 이동 (Alt+Right)
+    pub fn history_forward(&mut self) {
+        let (target_path, old_index) = {
+            let panel = self.active_panel_state_mut();
+            let old = panel.history_index;
+            (panel.history_forward_target(), old)
+        };
+
+        if let Some(path) = target_path {
+            if !self.change_active_dir(path, false, None) {
+                self.active_panel_state_mut().history_index = old_index;
+                self.set_toast("History forward failed");
+            }
+        } else {
+            self.set_toast("No forward history");
+        }
+    }
+
+    /// 마운트 포인트로 이동
+    pub fn go_to_mount_point(&mut self, path: std::path::PathBuf) {
+        if self.change_active_dir(path, true, None) {
+            self.dialog = None;
+        }
     }
 
     /// 마운트 포인트 다이얼로그에서 선택 이동 (아래)
@@ -2808,5 +3038,203 @@ mod tests {
 
         assert_eq!(app.left_tabs.active_index(), 0);
         assert!(app.dialog.is_none());
+    }
+
+    #[test]
+    fn test_directory_navigation_records_history() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().to_path_buf();
+        let child = root.join("child");
+        fs::create_dir_all(&child).unwrap();
+
+        app.go_to_mount_point(root.clone());
+        assert_eq!(app.active_panel_state().current_path, root);
+
+        let fs = FileSystem::new();
+        let _ = app.active_panel_state_mut().refresh(&fs);
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.name == "child")
+            .unwrap();
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+        app.enter_selected();
+
+        assert_eq!(app.active_panel_state().current_path, child);
+        let history = &app.active_panel_state().history_entries;
+        assert!(history.contains(&root));
+        assert!(history.contains(&app.active_panel_state().current_path));
+    }
+
+    #[test]
+    fn test_history_back_forward_index_based_navigation() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let p1 = temp.path().join("p1");
+        let p2 = temp.path().join("p2");
+        let p3 = temp.path().join("p3");
+        fs::create_dir_all(&p1).unwrap();
+        fs::create_dir_all(&p2).unwrap();
+        fs::create_dir_all(&p3).unwrap();
+
+        app.go_to_mount_point(p1.clone());
+        app.go_to_mount_point(p2.clone());
+        app.go_to_mount_point(p3.clone());
+        assert_eq!(app.active_panel_state().current_path, p3);
+
+        app.history_back();
+        assert_eq!(app.active_panel_state().current_path, p2);
+        app.history_back();
+        assert_eq!(app.active_panel_state().current_path, p1);
+        app.history_forward();
+        assert_eq!(app.active_panel_state().current_path, p2);
+    }
+
+    #[test]
+    fn test_history_list_default_selection_and_confirm() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let p1 = temp.path().join("p1");
+        let p2 = temp.path().join("p2");
+        let p3 = temp.path().join("p3");
+        fs::create_dir_all(&p1).unwrap();
+        fs::create_dir_all(&p2).unwrap();
+        fs::create_dir_all(&p3).unwrap();
+
+        app.go_to_mount_point(p1.clone());
+        app.go_to_mount_point(p2.clone());
+        app.go_to_mount_point(p3.clone());
+        app.history_back();
+        assert_eq!(app.active_panel_state().current_path, p2);
+
+        app.show_history_list();
+        if let Some(DialogKind::HistoryList {
+            items,
+            selected_index,
+        }) = &app.dialog
+        {
+            assert_eq!(*selected_index, 1);
+            assert!(items[*selected_index].2);
+        } else {
+            panic!("history list dialog not shown");
+        }
+
+        // 최신 항목(p3) 선택 후 이동
+        app.history_list_move_up();
+        app.history_list_confirm();
+        assert_eq!(app.active_panel_state().current_path, p3);
+        assert!(app.dialog.is_none());
+    }
+
+    #[test]
+    fn test_history_is_independent_per_tab() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let a = temp.path().join("a");
+        let b = temp.path().join("b");
+        let c = temp.path().join("c");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        fs::create_dir_all(&c).unwrap();
+
+        app.go_to_mount_point(a.clone());
+        app.new_tab_active_panel();
+        app.go_to_mount_point(b.clone());
+        app.go_to_mount_point(c.clone());
+        assert_eq!(app.active_panel_state().current_path, c);
+
+        app.prev_tab_active_panel();
+        assert_eq!(app.active_panel_state().current_path, a);
+        app.history_back();
+        assert_ne!(app.active_panel_state().current_path, b);
+
+        app.next_tab_active_panel();
+        assert_eq!(app.active_panel_state().current_path, c);
+        app.history_back();
+        assert_eq!(app.active_panel_state().current_path, b);
+    }
+
+    #[test]
+    fn test_history_list_clear_all_keeps_current_only() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let p1 = temp.path().join("p1");
+        let p2 = temp.path().join("p2");
+        fs::create_dir_all(&p1).unwrap();
+        fs::create_dir_all(&p2).unwrap();
+
+        app.go_to_mount_point(p1);
+        app.go_to_mount_point(p2.clone());
+        assert!(app.active_panel_state().history_entries.len() >= 2);
+
+        app.show_history_list();
+        app.history_list_clear_all();
+
+        assert_eq!(app.active_panel_state().history_entries, vec![p2.clone()]);
+        assert_eq!(app.active_panel_state().history_index, 0);
+        if let Some(DialogKind::HistoryList {
+            items,
+            selected_index,
+        }) = &app.dialog
+        {
+            assert_eq!(*selected_index, 0);
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].1, p2);
+            assert!(items[0].2);
+        } else {
+            panic!("history list dialog not shown");
+        }
+    }
+
+    #[test]
+    fn test_history_persistence_encode_decode_roundtrip() {
+        let left_entries = vec![
+            PathBuf::from("/a"),
+            PathBuf::from("/b"),
+            PathBuf::from("/c"),
+        ];
+        let right_entries = vec![PathBuf::from("/x"), PathBuf::from("/y")];
+
+        let text = App::encode_histories(&left_entries, 2, &right_entries, 1).unwrap();
+        let decoded = App::decode_histories(&text).unwrap();
+
+        assert_eq!(decoded.0 .0, left_entries);
+        assert_eq!(decoded.0 .1, 2);
+        assert_eq!(decoded.1 .0, right_entries);
+        assert_eq!(decoded.1 .1, 1);
+    }
+
+    #[test]
+    fn test_apply_loaded_history_keeps_non_consecutive_duplicates() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let a = temp.path().join("a");
+        let b = temp.path().join("b");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+
+        app.apply_loaded_history(
+            ActivePanel::Left,
+            vec![a.clone(), b.clone(), a.clone(), b.clone(), a.clone()],
+            3,
+        );
+
+        let history = &app.left_active_panel_state().history_entries;
+        assert_eq!(history.len(), 6);
+        assert_eq!(history[0], a);
+        assert_eq!(history[1], b);
+        assert_eq!(history[2], a);
+        assert_eq!(history[3], b);
+        assert_eq!(history[4], a);
+        assert_eq!(history[5], PathBuf::from("."));
+        assert_eq!(app.left_active_panel_state().history_index, 5);
+        assert_eq!(
+            app.left_active_panel_state().current_path,
+            PathBuf::from(".")
+        );
     }
 }

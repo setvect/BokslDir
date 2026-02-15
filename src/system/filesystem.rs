@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::models::file_entry::{FileEntry, FileType};
+use crate::models::operation::{FlattenedEntryKind, FlattenedFile};
 use crate::utils::error::{BokslDirError, Result};
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
@@ -59,8 +60,8 @@ impl FileSystem {
 
             let entry_path = entry.path();
 
-            // 메타데이터 가져오기 (심볼릭 링크는 symlink_metadata 사용)
-            let Ok(metadata) = entry.metadata() else {
+            // 링크 자체 메타데이터
+            let Ok(link_metadata) = fs::symlink_metadata(&entry_path) else {
                 continue;
             };
 
@@ -68,18 +69,35 @@ impl FileSystem {
             let name = entry.file_name().to_string_lossy().to_string();
 
             // 파일 타입 판단
-            let file_type = self.get_file_type(&entry_path, &metadata);
+            let file_type = self.get_file_type(&entry_path, &link_metadata);
 
-            // 크기 (디렉토리는 0)
-            let size = if metadata.is_dir() { 0 } else { metadata.len() };
+            // 표시용 메타데이터 (symlink는 대상 메타데이터 우선)
+            let display_metadata = if file_type == FileType::Symlink {
+                fs::metadata(&entry_path).ok().unwrap_or(link_metadata)
+            } else {
+                link_metadata
+            };
+
+            // 크기 (디렉토리/symlink 디렉토리는 0)
+            let size = match file_type {
+                FileType::Directory => 0,
+                FileType::Symlink => {
+                    if display_metadata.is_file() {
+                        display_metadata.len()
+                    } else {
+                        0
+                    }
+                }
+                _ => display_metadata.len(),
+            };
 
             // 수정 시간
-            let modified = metadata
+            let modified = display_metadata
                 .modified()
                 .unwrap_or_else(|_| std::time::SystemTime::now());
 
             // 권한 (Unix 계열에서만)
-            let permissions = Some(metadata.permissions());
+            let permissions = Some(display_metadata.permissions());
 
             // 숨김 파일 여부
             let is_hidden = self.is_hidden(&entry_path);
@@ -425,10 +443,15 @@ impl FileSystem {
         let mut total_files = 0usize;
 
         for path in paths {
-            if path.is_file() {
-                total_bytes += path.metadata().map(|m| m.len()).unwrap_or(0);
+            let metadata = fs::symlink_metadata(path).map_err(BokslDirError::Io)?;
+
+            if metadata.file_type().is_symlink() {
+                total_bytes += self.symlink_target_file_size(path);
                 total_files += 1;
-            } else if path.is_dir() {
+            } else if metadata.is_file() {
+                total_bytes += metadata.len();
+                total_files += 1;
+            } else if metadata.is_dir() {
                 let (bytes, files) = self.calculate_directory_size(path)?;
                 total_bytes += bytes;
                 total_files += files;
@@ -446,11 +469,15 @@ impl FileSystem {
         for entry in fs::read_dir(path).map_err(BokslDirError::Io)? {
             let entry = entry.map_err(BokslDirError::Io)?;
             let entry_path = entry.path();
+            let metadata = fs::symlink_metadata(&entry_path).map_err(BokslDirError::Io)?;
 
-            if entry_path.is_file() {
-                total_bytes += entry_path.metadata().map(|m| m.len()).unwrap_or(0);
+            if metadata.file_type().is_symlink() {
+                total_bytes += self.symlink_target_file_size(&entry_path);
                 total_files += 1;
-            } else if entry_path.is_dir() {
+            } else if metadata.is_file() {
+                total_bytes += metadata.len();
+                total_files += 1;
+            } else if metadata.is_dir() {
                 let (bytes, files) = self.calculate_directory_size(&entry_path)?;
                 total_bytes += bytes;
                 total_files += files;
@@ -595,23 +622,45 @@ impl FileSystem {
 
     /// 소스 목록을 평탄화하여 개별 파일 목록 생성
     ///
-    /// 디렉토리는 재귀적으로 탐색하여 모든 파일을 포함합니다.
-    /// 반환값: Vec<(source_path, dest_path, size)>
+    /// 디렉토리는 재귀적으로 탐색하며 디렉토리 엔트리도 포함합니다.
     pub fn flatten_sources(
         &self,
         sources: &[std::path::PathBuf],
         dest_dir: &Path,
-    ) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf, u64)>> {
+    ) -> Result<Vec<FlattenedFile>> {
         let mut result = Vec::new();
 
         for source in sources {
             let file_name = source.file_name().unwrap_or_default();
             let dest_base = dest_dir.join(file_name);
+            let metadata = fs::symlink_metadata(source).map_err(BokslDirError::Io)?;
 
-            if source.is_file() {
-                let size = source.metadata().map(|m| m.len()).unwrap_or(0);
-                result.push((source.clone(), dest_base, size));
-            } else if source.is_dir() {
+            if metadata.file_type().is_symlink() {
+                let entry_kind = self.classify_symlink_entry_kind(source);
+                result.push(FlattenedFile {
+                    entry_kind,
+                    source: source.clone(),
+                    dest: dest_base,
+                    size: if entry_kind == FlattenedEntryKind::SymlinkFile {
+                        self.symlink_target_file_size(source)
+                    } else {
+                        0
+                    },
+                });
+            } else if metadata.is_file() {
+                result.push(FlattenedFile {
+                    entry_kind: FlattenedEntryKind::File,
+                    source: source.clone(),
+                    dest: dest_base,
+                    size: metadata.len(),
+                });
+            } else if metadata.is_dir() {
+                result.push(FlattenedFile {
+                    entry_kind: FlattenedEntryKind::Directory,
+                    source: source.clone(),
+                    dest: dest_base.clone(),
+                    size: 0,
+                });
                 self.flatten_directory(source, source, &dest_base, &mut result)?;
             }
         }
@@ -625,25 +674,77 @@ impl FileSystem {
         base_source: &Path,
         current_source: &Path,
         dest_base: &Path,
-        result: &mut Vec<(std::path::PathBuf, std::path::PathBuf, u64)>,
+        result: &mut Vec<FlattenedFile>,
     ) -> Result<()> {
         for entry in fs::read_dir(current_source).map_err(BokslDirError::Io)? {
             let entry = entry.map_err(BokslDirError::Io)?;
             let entry_path = entry.path();
+            let metadata = fs::symlink_metadata(&entry_path).map_err(BokslDirError::Io)?;
 
             // 상대 경로 계산
-            let relative = entry_path.strip_prefix(base_source).unwrap_or(&entry_path);
-            let dest_path = dest_base.join(relative);
+            let relative = entry_path
+                .strip_prefix(base_source)
+                .unwrap_or(&entry_path)
+                .to_path_buf();
+            let dest_path = dest_base.join(&relative);
 
-            if entry_path.is_file() {
-                let size = entry_path.metadata().map(|m| m.len()).unwrap_or(0);
-                result.push((entry_path, dest_path, size));
-            } else if entry_path.is_dir() {
+            if metadata.file_type().is_symlink() {
+                let entry_kind = self.classify_symlink_entry_kind(&entry_path);
+                result.push(FlattenedFile {
+                    entry_kind,
+                    source: entry_path.clone(),
+                    dest: dest_path,
+                    size: if entry_kind == FlattenedEntryKind::SymlinkFile {
+                        self.symlink_target_file_size(&entry_path)
+                    } else {
+                        0
+                    },
+                });
+            } else if metadata.is_file() {
+                result.push(FlattenedFile {
+                    entry_kind: FlattenedEntryKind::File,
+                    source: entry_path,
+                    dest: dest_path,
+                    size: metadata.len(),
+                });
+            } else if metadata.is_dir() {
+                result.push(FlattenedFile {
+                    entry_kind: FlattenedEntryKind::Directory,
+                    source: entry_path.clone(),
+                    dest: dest_path.clone(),
+                    size: 0,
+                });
                 self.flatten_directory(base_source, &entry_path, dest_base, result)?;
             }
         }
 
         Ok(())
+    }
+
+    fn symlink_target_file_size(&self, path: &Path) -> u64 {
+        fs::metadata(path)
+            .map(|m| if m.is_file() { m.len() } else { 0 })
+            .unwrap_or(0)
+    }
+
+    fn classify_symlink_entry_kind(&self, path: &Path) -> FlattenedEntryKind {
+        match fs::metadata(path) {
+            Ok(metadata) if metadata.is_dir() => FlattenedEntryKind::SymlinkDirectory,
+            _ => FlattenedEntryKind::SymlinkFile,
+        }
+    }
+
+    pub fn collect_move_cleanup_dirs(&self, flattened: &[FlattenedFile]) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = flattened
+            .iter()
+            .filter(|f| f.entry_kind == FlattenedEntryKind::Directory)
+            .map(|f| f.source.clone())
+            .collect();
+
+        dirs.sort();
+        dirs.dedup();
+        dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+        dirs
     }
 }
 
@@ -656,9 +757,14 @@ impl Default for FileSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::operation::FlattenedEntryKind;
     use std::fs::{self, File};
     use std::io::Write;
     use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[cfg(unix)]
+    use std::os::unix::fs as unix_fs;
 
     #[test]
     fn test_filesystem_creation() {
@@ -781,5 +887,123 @@ mod tests {
 
         // 정리
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_flatten_sources_keeps_empty_directories() {
+        let fs = FileSystem::new();
+        let temp = TempDir::new().unwrap();
+        let source_root = temp.path().join("src");
+        let empty_dir = source_root.join("empty");
+        let nested_dir = source_root.join("nested");
+        let nested_file = nested_dir.join("file.txt");
+        let dest_root = temp.path().join("dest");
+
+        fs::create_dir_all(&empty_dir).unwrap();
+        fs::create_dir_all(&nested_dir).unwrap();
+        fs::write(&nested_file, "hello").unwrap();
+        fs::create_dir_all(&dest_root).unwrap();
+
+        let flattened = fs
+            .flatten_sources(std::slice::from_ref(&source_root), &dest_root)
+            .unwrap();
+
+        let src_name = source_root.file_name().unwrap();
+        let expected_src_dir = dest_root.join(src_name);
+        let expected_empty_dir = expected_src_dir.join("empty");
+        let expected_file = expected_src_dir.join("nested").join("file.txt");
+
+        assert!(flattened.iter().any(|f| {
+            f.entry_kind == FlattenedEntryKind::Directory && f.dest == expected_src_dir
+        }));
+        assert!(flattened.iter().any(|f| {
+            f.entry_kind == FlattenedEntryKind::Directory && f.dest == expected_empty_dir
+        }));
+        assert!(flattened
+            .iter()
+            .any(|f| f.entry_kind == FlattenedEntryKind::File && f.dest == expected_file));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_read_directory_detects_symlink_type() {
+        let fs = FileSystem::new();
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+        let target = dir.join("target.txt");
+        let link = dir.join("target_link");
+
+        fs::write(&target, "link target").unwrap();
+        unix_fs::symlink(&target, &link).unwrap();
+
+        let entries = fs.read_directory(dir).unwrap();
+        let symlink_entry = entries
+            .iter()
+            .find(|entry| entry.name == "target_link")
+            .expect("symlink entry not found");
+        assert_eq!(symlink_entry.file_type, FileType::Symlink);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_flatten_sources_classifies_symlink_directory() {
+        let fs = FileSystem::new();
+        let temp = TempDir::new().unwrap();
+        let source_root = temp.path().join("src");
+        let target_dir = temp.path().join("target_dir");
+        let link_to_dir = source_root.join("dir_link");
+        let dest_root = temp.path().join("dest");
+
+        fs::create_dir_all(&source_root).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+        unix_fs::symlink(&target_dir, &link_to_dir).unwrap();
+        fs::create_dir_all(&dest_root).unwrap();
+
+        let flattened = fs
+            .flatten_sources(std::slice::from_ref(&source_root), &dest_root)
+            .unwrap();
+
+        let entry = flattened
+            .iter()
+            .find(|f| f.source == link_to_dir)
+            .expect("symlink directory should be flattened");
+        assert_eq!(entry.entry_kind, FlattenedEntryKind::SymlinkDirectory);
+        assert_eq!(entry.size, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_flatten_sources_does_not_recurse_into_symlink_dirs() {
+        let fs = FileSystem::new();
+        let temp = TempDir::new().unwrap();
+        let source_root = temp.path().join("src");
+        let local_file = source_root.join("local.txt");
+        let external_dir = temp.path().join("external");
+        let external_file = external_dir.join("outside.txt");
+        let link_to_external = source_root.join("external_link");
+        let dest_root = temp.path().join("dest");
+
+        fs::create_dir_all(&source_root).unwrap();
+        fs::write(&local_file, "local").unwrap();
+        fs::create_dir_all(&external_dir).unwrap();
+        fs::write(&external_file, "outside").unwrap();
+        unix_fs::symlink(&external_dir, &link_to_external).unwrap();
+        fs::create_dir_all(&dest_root).unwrap();
+
+        let flattened = fs
+            .flatten_sources(std::slice::from_ref(&source_root), &dest_root)
+            .unwrap();
+
+        let src_name = source_root.file_name().unwrap();
+        let base_dest = dest_root.join(src_name);
+        let expected_link_dest = base_dest.join("external_link");
+        let outside_dest = base_dest.join("external_link").join("outside.txt");
+
+        assert!(flattened.iter().any(|f| {
+            f.entry_kind == FlattenedEntryKind::SymlinkDirectory
+                && f.source == link_to_external
+                && f.dest == expected_link_dest
+        }));
+        assert!(!flattened.iter().any(|f| f.dest == outside_dest));
     }
 }

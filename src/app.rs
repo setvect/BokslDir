@@ -2,7 +2,8 @@
 
 use crate::core::actions::Action;
 use crate::models::operation::{
-    ConflictResolution, FlattenedFile, OperationState, OperationType, PendingOperation,
+    ConflictResolution, FlattenedEntryKind, FlattenedFile, OperationState, OperationType,
+    PendingOperation,
 };
 use crate::models::panel_state::{SortBy, SortOrder};
 use crate::models::{PanelState, PanelTabs};
@@ -203,14 +204,13 @@ impl App {
         &mut self,
         panel_kind: ActivePanel,
         entries: Vec<PathBuf>,
-        _index: usize,
+        index: usize,
     ) {
-        let panel = match panel_kind {
-            ActivePanel::Left => self.left_tabs.active_mut(),
-            ActivePanel::Right => self.right_tabs.active_mut(),
+        let fallback = match panel_kind {
+            ActivePanel::Left => self.left_tabs.active().current_path.clone(),
+            ActivePanel::Right => self.right_tabs.active().current_path.clone(),
         };
 
-        let fallback = panel.current_path.clone();
         let mut valid_entries: Vec<PathBuf> = entries
             .into_iter()
             .filter(|p| p.exists() && p.is_dir())
@@ -219,9 +219,23 @@ impl App {
             valid_entries.push(fallback.clone());
         }
 
-        panel.history_entries = valid_entries;
-        panel.history_index = panel.history_entries.len().saturating_sub(1);
-        panel.record_history(fallback);
+        let clamped_index = index.min(valid_entries.len().saturating_sub(1));
+        let restore_path = valid_entries[clamped_index].clone();
+
+        match panel_kind {
+            ActivePanel::Left => {
+                let panel = self.left_tabs.active_mut();
+                panel.history_entries = valid_entries;
+                panel.history_index = clamped_index;
+                let _ = panel.change_directory(restore_path, &self.filesystem);
+            }
+            ActivePanel::Right => {
+                let panel = self.right_tabs.active_mut();
+                panel.history_entries = valid_entries;
+                panel.history_index = clamped_index;
+                let _ = panel.change_directory(restore_path, &self.filesystem);
+            }
+        }
     }
 
     fn load_persisted_histories(&mut self) {
@@ -1277,26 +1291,205 @@ impl App {
         pending: &mut PendingOperation,
         dest_path: &std::path::Path,
     ) {
-        let flattened = match self.filesystem.flatten_sources(&pending.sources, dest_path) {
-            Ok(files) => files
-                .into_iter()
-                .map(|(source, dest, size)| FlattenedFile { source, dest, size })
-                .collect::<Vec<_>>(),
-            Err(e) => {
-                self.dialog = Some(DialogKind::error(
-                    "Error",
-                    format!("Failed to scan files: {}", e),
-                ));
-                return;
-            }
-        };
+        let flattened: Vec<FlattenedFile> =
+            match self.filesystem.flatten_sources(&pending.sources, dest_path) {
+                Ok(files) => files,
+                Err(e) => {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!("Failed to scan files: {}", e),
+                    ));
+                    return;
+                }
+            };
 
+        // 디렉토리는 size=0, 파일/링크는 size 누적
         let total_bytes: u64 = flattened.iter().map(|f| f.size).sum();
         let total_files = flattened.len();
+
+        if pending.operation_type == OperationType::Move {
+            pending.set_move_cleanup_dirs(self.filesystem.collect_move_cleanup_dirs(&flattened));
+        } else {
+            pending.set_move_cleanup_dirs(Vec::new());
+        }
 
         pending.set_flattened_files(flattened);
         pending.start_processing(total_bytes, total_files);
         self.dialog = Some(DialogKind::progress(pending.progress.clone()));
+    }
+
+    fn remove_existing_path(path: &std::path::Path) {
+        if path.is_dir() {
+            let _ = std::fs::remove_dir_all(path);
+        } else {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// 단일 파일/디렉토리 엔트리 처리 + 결과 기록
+    fn execute_single_file_operation(
+        &self,
+        pending: &mut PendingOperation,
+        file_entry: &FlattenedFile,
+        file_name: &str,
+    ) {
+        if let Some(parent) = file_entry.dest.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let result = match file_entry.entry_kind {
+            FlattenedEntryKind::Directory => std::fs::create_dir_all(&file_entry.dest)
+                .map(|_| 0)
+                .map_err(crate::utils::error::BokslDirError::Io),
+            FlattenedEntryKind::File | FlattenedEntryKind::SymlinkFile => {
+                match pending.operation_type {
+                    OperationType::Copy => self
+                        .filesystem
+                        .copy_file(&file_entry.source, &file_entry.dest),
+                    OperationType::Move => self
+                        .filesystem
+                        .move_file(&file_entry.source, &file_entry.dest),
+                    OperationType::Delete => unreachable!("Delete uses process_next_delete"),
+                }
+            }
+            FlattenedEntryKind::SymlinkDirectory => {
+                let message = "Directory symlink is not supported for copy/move";
+                match pending.operation_type {
+                    OperationType::Copy => Err(crate::utils::error::BokslDirError::CopyFailed {
+                        src: file_entry.source.clone(),
+                        dest: file_entry.dest.clone(),
+                        reason: message.to_string(),
+                    }),
+                    OperationType::Move => Err(crate::utils::error::BokslDirError::MoveFailed {
+                        src: file_entry.source.clone(),
+                        dest: file_entry.dest.clone(),
+                        reason: message.to_string(),
+                    }),
+                    OperationType::Delete => unreachable!("Delete uses process_next_delete"),
+                }
+            }
+        };
+
+        match result {
+            Ok(bytes) => pending.files_completed(bytes, 1),
+            Err(e) => {
+                pending.add_error(format!("{}: {}", file_name, e));
+                pending.file_skipped();
+            }
+        }
+
+        pending.current_index += 1;
+    }
+
+    fn resolve_conflict(
+        &mut self,
+        pending: &mut PendingOperation,
+        source: &std::path::Path,
+        dest_path: &std::path::Path,
+    ) -> bool {
+        let skip_all = pending
+            .conflict_resolution
+            .is_some_and(|r| r == ConflictResolution::SkipAll);
+        let overwrite_all = pending
+            .conflict_resolution
+            .is_some_and(|r| r == ConflictResolution::OverwriteAll);
+
+        if skip_all {
+            pending.file_skipped();
+            pending.current_index += 1;
+            return false;
+        }
+        if !overwrite_all {
+            pending.state = OperationState::WaitingConflict;
+            self.dialog = Some(DialogKind::conflict(
+                source.to_path_buf(),
+                dest_path.to_path_buf(),
+            ));
+            return false;
+        }
+        // overwrite_all이면 기존 경로를 삭제
+        Self::remove_existing_path(dest_path);
+        true
+    }
+
+    fn should_resolve_conflict(file_entry: &FlattenedFile) -> bool {
+        match file_entry.entry_kind {
+            FlattenedEntryKind::Directory => file_entry.dest.exists() && !file_entry.dest.is_dir(),
+            FlattenedEntryKind::File
+            | FlattenedEntryKind::SymlinkFile
+            | FlattenedEntryKind::SymlinkDirectory => file_entry.dest.exists(),
+        }
+    }
+
+    fn cleanup_moved_directories(&self, pending: &mut PendingOperation) {
+        if pending.operation_type != OperationType::Move {
+            return;
+        }
+
+        for dir in pending.move_cleanup_dirs.clone() {
+            if let Err(e) = std::fs::remove_dir(&dir) {
+                use std::io::ErrorKind;
+                if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::DirectoryNotEmpty) {
+                    continue;
+                }
+                pending.add_error(format!(
+                    "Failed to cleanup source directory {}: {}",
+                    dir.display(),
+                    e
+                ));
+            }
+        }
+    }
+
+    /// 다음 파일 처리 (메인 루프에서 호출)
+    pub fn process_next_file(&mut self) {
+        let Some(mut pending) = self.pending_operation.take() else {
+            self.close_dialog();
+            return;
+        };
+
+        if pending.state != OperationState::Processing {
+            self.pending_operation = Some(pending);
+            return;
+        }
+
+        if pending.is_all_processed() {
+            self.finish_operation(pending);
+            return;
+        }
+
+        let file_entry = pending.flattened_files[pending.current_index].clone();
+        let source = file_entry.source.clone();
+        let dest_path = file_entry.dest.clone();
+
+        let file_name = source
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        pending.set_current_file(&file_name);
+        self.dialog = Some(DialogKind::progress(pending.progress.clone()));
+
+        if file_entry.entry_kind != FlattenedEntryKind::Directory && source == dest_path {
+            pending.add_error(format!("Source and destination are the same: {:?}", source));
+            pending.file_skipped();
+            pending.current_index += 1;
+            self.pending_operation = Some(pending);
+            return;
+        }
+
+        if Self::should_resolve_conflict(&file_entry)
+            && !self.resolve_conflict(&mut pending, &source, &dest_path)
+        {
+            self.pending_operation = Some(pending);
+            return;
+        }
+
+        self.execute_single_file_operation(&mut pending, &file_entry, &file_name);
+
+        self.dialog = Some(DialogKind::progress(pending.progress.clone()));
+        self.pending_operation = Some(pending);
     }
 
     /// 입력 다이얼로그에서 확인 처리
@@ -1331,119 +1524,10 @@ impl App {
             .is_some_and(|p| p.state == OperationState::Processing)
     }
 
-    /// 대상 파일 존재 시 충돌 해결 방법에 따라 처리.
-    /// true 반환 시 파일 복사/이동 진행, false 반환 시 건너뛰기 또는 대기.
-    fn resolve_conflict(
-        &mut self,
-        pending: &mut PendingOperation,
-        source: &std::path::Path,
-        dest_path: &std::path::Path,
-    ) -> bool {
-        let skip_all = pending
-            .conflict_resolution
-            .is_some_and(|r| r == ConflictResolution::SkipAll);
-        let overwrite_all = pending
-            .conflict_resolution
-            .is_some_and(|r| r == ConflictResolution::OverwriteAll);
-
-        if skip_all {
-            pending.file_skipped();
-            pending.current_index += 1;
-            return false;
-        }
-        if !overwrite_all {
-            pending.state = OperationState::WaitingConflict;
-            self.dialog = Some(DialogKind::conflict(
-                source.to_path_buf(),
-                dest_path.to_path_buf(),
-            ));
-            return false;
-        }
-        // overwrite_all이면 대상을 먼저 삭제
-        let _ = std::fs::remove_file(dest_path);
-        true
-    }
-
-    /// 단일 파일 복사/이동 실행 + 결과 기록
-    fn execute_single_file_operation(
-        &self,
-        pending: &mut PendingOperation,
-        source: &std::path::Path,
-        dest_path: &std::path::Path,
-        file_name: &str,
-    ) {
-        if let Some(parent) = dest_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-
-        let result = match pending.operation_type {
-            OperationType::Copy => self.filesystem.copy_file(source, dest_path),
-            OperationType::Move => self.filesystem.move_file(source, dest_path),
-            OperationType::Delete => unreachable!("Delete uses process_next_delete"),
-        };
-
-        match result {
-            Ok(bytes) => pending.files_completed(bytes, 1),
-            Err(e) => {
-                pending.add_error(format!("{}: {}", file_name, e));
-                pending.file_skipped();
-            }
-        }
-
-        pending.current_index += 1;
-    }
-
-    /// 다음 파일 처리 (메인 루프에서 호출)
-    pub fn process_next_file(&mut self) {
-        let Some(mut pending) = self.pending_operation.take() else {
-            self.close_dialog();
-            return;
-        };
-
-        if pending.state != OperationState::Processing {
-            self.pending_operation = Some(pending);
-            return;
-        }
-
-        if pending.is_all_processed() {
-            self.finish_operation(pending);
-            return;
-        }
-
-        let file_entry = pending.flattened_files[pending.current_index].clone();
-        let source = file_entry.source;
-        let dest_path = file_entry.dest;
-
-        let file_name = source
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        pending.set_current_file(&file_name);
-        self.dialog = Some(DialogKind::progress(pending.progress.clone()));
-
-        if source == dest_path {
-            pending.add_error(format!("Source and destination are the same: {:?}", source));
-            pending.file_skipped();
-            pending.current_index += 1;
-            self.pending_operation = Some(pending);
-            return;
-        }
-
-        if dest_path.exists() && !self.resolve_conflict(&mut pending, &source, &dest_path) {
-            self.pending_operation = Some(pending);
-            return;
-        }
-
-        self.execute_single_file_operation(&mut pending, &source, &dest_path, &file_name);
-
-        self.dialog = Some(DialogKind::progress(pending.progress.clone()));
-        self.pending_operation = Some(pending);
-    }
-
     /// 작업 완료 처리
-    fn finish_operation(&mut self, pending: PendingOperation) {
+    fn finish_operation(&mut self, mut pending: PendingOperation) {
+        self.cleanup_moved_directories(&mut pending);
+
         // 패널 새로고침
         self.refresh_both_panels();
 
@@ -2819,6 +2903,9 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    #[cfg(unix)]
+    use std::os::unix::fs as unix_fs;
+
     fn make_test_app() -> App {
         let current_dir = std::path::PathBuf::from(".");
         App {
@@ -2839,6 +2926,15 @@ mod tests {
             size_format: SizeFormat::default(),
             ime_status: ImeStatus::Unknown,
         }
+    }
+
+    fn run_file_operation_until_done(app: &mut App) {
+        let mut guard = 0usize;
+        while app.pending_operation.is_some() && guard < 10_000 {
+            app.process_next_file();
+            guard += 1;
+        }
+        assert!(guard < 10_000, "operation loop guard exceeded");
     }
 
     /// 재귀 경로 검사 테스트: 디렉토리를 자기 자신 내부로 복사
@@ -3224,17 +3320,103 @@ mod tests {
         );
 
         let history = &app.left_active_panel_state().history_entries;
-        assert_eq!(history.len(), 6);
+        assert_eq!(history.len(), 5);
         assert_eq!(history[0], a);
         assert_eq!(history[1], b);
         assert_eq!(history[2], a);
         assert_eq!(history[3], b);
         assert_eq!(history[4], a);
-        assert_eq!(history[5], PathBuf::from("."));
-        assert_eq!(app.left_active_panel_state().history_index, 5);
-        assert_eq!(
-            app.left_active_panel_state().current_path,
-            PathBuf::from(".")
+        assert_eq!(app.left_active_panel_state().history_index, 3);
+        assert_eq!(app.left_active_panel_state().current_path, b);
+    }
+
+    #[test]
+    fn test_apply_loaded_history_clamps_index() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let a = temp.path().join("a");
+        let b = temp.path().join("b");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+
+        app.apply_loaded_history(ActivePanel::Left, vec![a.clone(), b.clone()], 99);
+
+        let panel = app.left_active_panel_state();
+        assert_eq!(panel.history_entries, vec![a, b.clone()]);
+        assert_eq!(panel.history_index, 1);
+        assert_eq!(panel.current_path, b);
+    }
+
+    #[test]
+    fn test_move_operation_removes_source_directories_when_successful() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let src_root = temp.path().join("src_root");
+        let empty_dir = src_root.join("empty");
+        let nested_dir = src_root.join("nested");
+        let nested_file = nested_dir.join("data.txt");
+        let dest_root = temp.path().join("dest_root");
+
+        fs::create_dir_all(&empty_dir).unwrap();
+        fs::create_dir_all(&nested_dir).unwrap();
+        fs::write(&nested_file, "payload").unwrap();
+        fs::create_dir_all(&dest_root).unwrap();
+
+        let mut pending = PendingOperation::new(
+            OperationType::Move,
+            vec![src_root.clone()],
+            dest_root.clone(),
         );
+        app.prepare_and_start_operation(&mut pending, &dest_root);
+        app.pending_operation = Some(pending);
+
+        run_file_operation_until_done(&mut app);
+
+        let moved_root = dest_root.join("src_root");
+        assert!(!src_root.exists());
+        assert!(moved_root.join("empty").is_dir());
+        assert!(moved_root.join("nested").is_dir());
+        assert_eq!(
+            fs::read_to_string(moved_root.join("nested").join("data.txt")).unwrap(),
+            "payload"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_copy_or_move_symlink_directory_fails_explicitly_and_continues() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let src_root = temp.path().join("src_root");
+        let target_dir = temp.path().join("target_dir");
+        let dir_link = src_root.join("dir_link");
+        let regular_file = src_root.join("regular.txt");
+        let dest_root = temp.path().join("dest_root");
+
+        fs::create_dir_all(&src_root).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("hidden.txt"), "target").unwrap();
+        fs::write(&regular_file, "regular").unwrap();
+        unix_fs::symlink(&target_dir, &dir_link).unwrap();
+        fs::create_dir_all(&dest_root).unwrap();
+
+        let mut pending = PendingOperation::new(
+            OperationType::Copy,
+            vec![dir_link.clone(), regular_file.clone()],
+            dest_root.clone(),
+        );
+        app.prepare_and_start_operation(&mut pending, &dest_root);
+        app.pending_operation = Some(pending);
+
+        run_file_operation_until_done(&mut app);
+
+        let dest_regular = dest_root.join("regular.txt");
+        assert_eq!(fs::read_to_string(dest_regular).unwrap(), "regular");
+
+        let error_text = match &app.dialog {
+            Some(DialogKind::Error { message, .. }) => message.clone(),
+            other => panic!("expected error dialog, got {:?}", other),
+        };
+        assert!(error_text.contains("Directory symlink is not supported"));
     }
 }

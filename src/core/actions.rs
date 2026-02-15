@@ -6,6 +6,7 @@
 
 use crate::ui::components::command_bar::CommandItem;
 use crossterm::event::{KeyCode, KeyModifiers};
+use std::sync::LazyLock;
 
 /// 모든 가능한 액션의 열거
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -574,8 +575,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
     },
 ];
 
-/// 키 바인딩 목록 생성
-pub fn key_bindings() -> Vec<KeyBinding> {
+fn build_key_bindings() -> Vec<KeyBinding> {
     vec![
         // 종료
         KeyBinding {
@@ -770,9 +770,16 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     ]
 }
 
+static KEY_BINDINGS: LazyLock<Vec<KeyBinding>> = LazyLock::new(build_key_bindings);
+
+/// 키 바인딩 목록 조회 (1회 초기화 후 재사용)
+pub fn key_bindings() -> &'static [KeyBinding] {
+    KEY_BINDINGS.as_slice()
+}
+
 /// 키 입력으로 액션 조회
 pub fn find_action(modifiers: KeyModifiers, code: KeyCode) -> Option<Action> {
-    for binding in &key_bindings() {
+    for binding in key_bindings() {
         let code_matches = binding.code == code;
         let mod_matches = match binding.modifiers {
             None => true, // any modifier

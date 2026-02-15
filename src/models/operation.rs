@@ -8,8 +8,23 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 /// 평탄화된 파일 정보 (개별 파일 단위 처리용)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlattenedEntryKind {
+    /// 일반 파일
+    File,
+    /// 디렉토리 (대상 생성용)
+    Directory,
+    /// 파일을 가리키는 심볼릭 링크 (재귀하지 않음)
+    SymlinkFile,
+    /// 디렉토리를 가리키는 심볼릭 링크 (재귀하지 않음)
+    SymlinkDirectory,
+}
+
+/// 평탄화된 파일 정보 (개별 엔트리 단위 처리용)
 #[derive(Debug, Clone)]
 pub struct FlattenedFile {
+    /// 엔트리 타입
+    pub entry_kind: FlattenedEntryKind,
     /// 원본 파일 전체 경로
     pub source: PathBuf,
     /// 대상 파일 전체 경로
@@ -196,6 +211,8 @@ pub struct PendingOperation {
     pub dest_dir: PathBuf,
     /// 평탄화된 파일 목록 (개별 파일 단위)
     pub flattened_files: Vec<FlattenedFile>,
+    /// Move 후처리 시 삭제할 원본 디렉토리 목록 (깊은 경로 우선)
+    pub move_cleanup_dirs: Vec<PathBuf>,
     /// 충돌 해결 방법 (OverwriteAll/SkipAll 시 사용)
     pub conflict_resolution: Option<ConflictResolution>,
     /// 현재 처리 중인 인덱스 (flattened_files 인덱스)
@@ -219,6 +236,7 @@ impl PendingOperation {
             sources,
             dest_dir,
             flattened_files: Vec::new(),
+            move_cleanup_dirs: Vec::new(),
             conflict_resolution: None,
             current_index: 0,
             state: OperationState::Pending,
@@ -268,6 +286,11 @@ impl PendingOperation {
     /// 평탄화된 파일 목록 설정
     pub fn set_flattened_files(&mut self, files: Vec<FlattenedFile>) {
         self.flattened_files = files;
+    }
+
+    /// Move 후처리용 디렉토리 목록 설정
+    pub fn set_move_cleanup_dirs(&mut self, dirs: Vec<PathBuf>) {
+        self.move_cleanup_dirs = dirs;
     }
 }
 
@@ -320,5 +343,19 @@ mod tests {
         assert_eq!(pending.sources.len(), 2);
         assert_eq!(pending.dest_dir, dest);
         assert!(pending.conflict_resolution.is_none());
+    }
+
+    #[test]
+    fn test_flattened_entry_kind_equality() {
+        assert_eq!(FlattenedEntryKind::File, FlattenedEntryKind::File);
+        assert_ne!(FlattenedEntryKind::File, FlattenedEntryKind::Directory);
+        assert_ne!(
+            FlattenedEntryKind::Directory,
+            FlattenedEntryKind::SymlinkFile
+        );
+        assert_ne!(
+            FlattenedEntryKind::SymlinkFile,
+            FlattenedEntryKind::SymlinkDirectory
+        );
     }
 }

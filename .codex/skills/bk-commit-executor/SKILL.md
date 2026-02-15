@@ -1,5 +1,5 @@
 ---
-name: commit-executor
+name: bk-commit-executor
 description: Execute safe git commits end-to-end including staging, pre-checks (status, staged scope, basic quality gates), and non-interactive commit commands. Use when user asks to actually run commit (e.g. "지금 커밋해줘", "변경사항 스테이징하고 커밋해줘").
 allowed-tools: Bash(git status *), Bash(git diff *), Bash(git add *), Bash(git commit *)
 ---

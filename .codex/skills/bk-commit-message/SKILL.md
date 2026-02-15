@@ -1,5 +1,5 @@
 ---
-name: commit-message
+name: bk-commit-message
 description: Generate conventional commit messages from staged or unstaged git changes. Use when user asks to create/improve commit text (e.g. "커밋 메시지 만들어줘", "컨벤셔널 커밋으로 써줘").
 allowed-tools: Bash(git status *), Bash(git diff *)
 ---

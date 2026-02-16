@@ -23,6 +23,15 @@ const DIALOG_H_PADDING: u16 = 2;
 /// 다이얼로그 내부 상단 패딩 (border 아래 여백)
 const DIALOG_V_PADDING: u16 = 1;
 
+/// 입력 다이얼로그 목적
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputPurpose {
+    /// 복사/이동 대상 경로 입력
+    OperationDestination,
+    /// 경로 직접 이동
+    GoToPath,
+}
+
 /// 다이얼로그 종류
 #[derive(Debug, Clone)]
 pub enum DialogKind {
@@ -33,6 +42,11 @@ pub enum DialogKind {
         value: String,
         cursor_pos: usize,
         selected_button: usize, // 0: OK, 1: Cancel
+        purpose: InputPurpose,
+        base_path: PathBuf,
+        completion_candidates: Vec<String>,
+        completion_index: Option<usize>,
+        ghost_suffix: String,
     },
     /// 확인 다이얼로그 (Yes/No)
     Confirm {
@@ -127,6 +141,16 @@ impl DialogKind {
         prompt: impl Into<String>,
         initial: impl Into<String>,
     ) -> Self {
+        Self::operation_path_input(title, prompt, initial, PathBuf::from("."))
+    }
+
+    /// 파일 작업 대상 경로 입력 다이얼로그 생성
+    pub fn operation_path_input(
+        title: impl Into<String>,
+        prompt: impl Into<String>,
+        initial: impl Into<String>,
+        base_path: PathBuf,
+    ) -> Self {
         let value: String = initial.into();
         let cursor_pos = value.len();
         DialogKind::Input {
@@ -135,6 +159,29 @@ impl DialogKind {
             value,
             cursor_pos,
             selected_button: 0, // OK 기본 선택
+            purpose: InputPurpose::OperationDestination,
+            base_path,
+            completion_candidates: Vec::new(),
+            completion_index: None,
+            ghost_suffix: String::new(),
+        }
+    }
+
+    /// 경로 직접 이동 입력 다이얼로그 생성
+    pub fn go_to_path_input(initial: impl Into<String>, base_path: PathBuf) -> Self {
+        let value: String = initial.into();
+        let cursor_pos = value.len();
+        DialogKind::Input {
+            title: "Go to Path".to_string(),
+            prompt: "Path:".to_string(),
+            value,
+            cursor_pos,
+            selected_button: 0,
+            purpose: InputPurpose::GoToPath,
+            base_path,
+            completion_candidates: Vec::new(),
+            completion_index: None,
+            ghost_suffix: String::new(),
         }
     }
 
@@ -393,8 +440,12 @@ impl<'a> Dialog<'a> {
         let sh = screen.height;
 
         let (width, height) = match self.kind {
-            DialogKind::Input { .. }
-            | DialogKind::MkdirInput { .. }
+            DialogKind::Input { .. } => {
+                let w = ((sw as f32 * 0.72) as u16).clamp(56, 110);
+                let h = 12u16;
+                (w, h)
+            }
+            DialogKind::MkdirInput { .. }
             | DialogKind::RenameInput { .. }
             | DialogKind::BookmarkRenameInput { .. }
             | DialogKind::FilterInput { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 7u16),
@@ -503,6 +554,9 @@ impl<'a> Dialog<'a> {
         title: &str,
         prompt: &str,
         value: &str,
+        ghost_suffix: &str,
+        completion_candidates: &[String],
+        completion_index: Option<usize>,
         cursor_pos: usize,
         selected_button: usize,
     ) {
@@ -584,12 +638,43 @@ impl<'a> Dialog<'a> {
         let value_style = Style::default().fg(self.fg_color).bg(self.input_bg);
         buf.set_string(inner.x + 1, input_y, display_value, value_style);
 
+        // Ghost text 미리보기
+        let mut ghost_starts_at: Option<u16> = None;
+        if !ghost_suffix.is_empty() {
+            let text_width = UnicodeWidthStr::width(display_value).min(max_display);
+            let ghost_start_x = inner.x + 1 + text_width as u16;
+            let remaining = max_display.saturating_sub(text_width);
+            if remaining > 0 {
+                let mut ghost_visible = String::new();
+                let mut width_sum = 0usize;
+                for ch in ghost_suffix.chars() {
+                    let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if width_sum + cw > remaining {
+                        break;
+                    }
+                    ghost_visible.push(ch);
+                    width_sum += cw;
+                }
+                if !ghost_visible.is_empty() {
+                    let ghost_style = Style::default()
+                        .fg(self.border_color)
+                        .bg(self.input_bg)
+                        .add_modifier(Modifier::DIM);
+                    ghost_starts_at = Some(ghost_start_x);
+                    buf.set_string(ghost_start_x, input_y, ghost_visible, ghost_style);
+                }
+            }
+        }
+
         // 커서 표시
         let cursor_x = inner.x + 1 + cursor_display_col as u16;
         if cursor_x < inner.x + input_width - 1 {
             if let Some(cell) = buf.cell_mut((cursor_x, input_y)) {
                 if cursor_pos < value.len() {
                     // 문자가 있는 위치: 반전 스타일
+                    cell.set_style(Style::default().fg(self.input_bg).bg(self.fg_color));
+                } else if ghost_starts_at.is_some_and(|x| cursor_x == x) {
+                    // ghost 첫 글자를 유지하면서 커서 강조 스타일만 적용
                     cell.set_style(Style::default().fg(self.input_bg).bg(self.fg_color));
                 } else {
                     // 문자열 끝: 블록 커서 문자 표시
@@ -599,8 +684,71 @@ impl<'a> Dialog<'a> {
             }
         }
 
+        // 자동완성 목록 (표시 가능한 높이만 렌더, 선택 항목 기준 스크롤)
+        if inner.height >= 5 {
+            let title_y = inner.y + 2;
+            let list_y = inner.y + 3;
+            let button_y = area.y + area.height.saturating_sub(2);
+            let visible_rows = button_y.saturating_sub(list_y) as usize;
+            let total_candidates = completion_candidates.len();
+            let selected = if total_candidates == 0 {
+                0usize
+            } else {
+                completion_index.unwrap_or(0).min(total_candidates - 1)
+            };
+            let selected_display = if total_candidates == 0 {
+                0
+            } else {
+                selected + 1
+            };
+
+            let title_style = Style::default()
+                .fg(self.border_color)
+                .bg(self.bg_color)
+                .add_modifier(Modifier::DIM);
+            let title = format!("Suggestions ({}/{})", selected_display, total_candidates);
+            buf.set_string(inner.x, title_y, title, title_style);
+
+            if visible_rows > 0 {
+                if completion_candidates.is_empty() {
+                    let none_style = Style::default()
+                        .fg(self.border_color)
+                        .bg(self.bg_color)
+                        .add_modifier(Modifier::DIM);
+                    buf.set_string(inner.x, list_y, "No suggestions", none_style);
+                } else {
+                    let mut scroll = 0usize;
+                    if selected >= visible_rows {
+                        scroll = selected + 1 - visible_rows;
+                    }
+
+                    for (row, candidate) in completion_candidates
+                        .iter()
+                        .enumerate()
+                        .skip(scroll)
+                        .take(visible_rows)
+                    {
+                        let y = list_y + (row - scroll) as u16;
+                        let marker = if row == selected { "> " } else { "  " };
+                        let content_width =
+                            inner.width.saturating_sub(marker.width() as u16) as usize;
+                        let text = path_display::truncate_middle(candidate, content_width);
+                        let line = format!("{}{}", marker, text);
+                        let style = if row == selected {
+                            Style::default()
+                                .fg(self.button_selected_fg)
+                                .bg(self.button_selected_bg)
+                        } else {
+                            Style::default().fg(self.fg_color).bg(self.bg_color)
+                        };
+                        buf.set_string(inner.x, y, line, style);
+                    }
+                }
+            }
+        }
+
         // 버튼
-        let button_y = inner.y + 3;
+        let button_y = area.y + area.height.saturating_sub(2);
         let ok_width = self.render_button(buf, inner.x, button_y, "OK", selected_button == 0);
         self.render_button(
             buf,
@@ -1478,6 +1626,10 @@ impl Widget for Dialog<'_> {
                 value,
                 cursor_pos,
                 selected_button,
+                completion_candidates,
+                completion_index,
+                ghost_suffix,
+                ..
             } => {
                 self.render_input(
                     buf,
@@ -1485,6 +1637,9 @@ impl Widget for Dialog<'_> {
                     title,
                     prompt,
                     value,
+                    ghost_suffix,
+                    completion_candidates,
+                    *completion_index,
                     *cursor_pos,
                     *selected_button,
                 );
@@ -1531,6 +1686,9 @@ impl Widget for Dialog<'_> {
                     "New Directory",
                     "Directory name:",
                     value,
+                    "",
+                    &[],
+                    None,
                     *cursor_pos,
                     *selected_button,
                 );
@@ -1547,6 +1705,9 @@ impl Widget for Dialog<'_> {
                     "Rename",
                     "New name:",
                     value,
+                    "",
+                    &[],
+                    None,
                     *cursor_pos,
                     *selected_button,
                 );
@@ -1563,6 +1724,9 @@ impl Widget for Dialog<'_> {
                     "Bookmark Rename",
                     "New bookmark name:",
                     value,
+                    "",
+                    &[],
+                    None,
                     *cursor_pos,
                     *selected_button,
                 );
@@ -1578,6 +1742,9 @@ impl Widget for Dialog<'_> {
                     "Filter",
                     "Pattern (supports * ?):",
                     value,
+                    "",
+                    &[],
+                    None,
                     *cursor_pos,
                     *selected_button,
                 );
@@ -1648,15 +1815,163 @@ mod tests {
                 value,
                 cursor_pos,
                 selected_button,
+                purpose,
+                base_path,
+                completion_candidates,
+                completion_index,
+                ghost_suffix,
             } => {
                 assert_eq!(title, "Copy");
                 assert_eq!(prompt, "Copy to:");
                 assert_eq!(value, "/home/user");
                 assert_eq!(cursor_pos, 10);
                 assert_eq!(selected_button, 0);
+                assert_eq!(purpose, InputPurpose::OperationDestination);
+                assert_eq!(base_path, PathBuf::from("."));
+                assert!(completion_candidates.is_empty());
+                assert!(completion_index.is_none());
+                assert!(ghost_suffix.is_empty());
             }
             _ => panic!("Expected Input dialog"),
         }
+    }
+
+    #[test]
+    fn test_go_to_path_input_creation() {
+        let dialog = DialogKind::go_to_path_input("/tmp", PathBuf::from("/tmp"));
+        match dialog {
+            DialogKind::Input {
+                title,
+                prompt,
+                value,
+                purpose,
+                base_path,
+                completion_candidates,
+                completion_index,
+                ghost_suffix,
+                ..
+            } => {
+                assert_eq!(title, "Go to Path");
+                assert_eq!(prompt, "Path:");
+                assert_eq!(value, "/tmp");
+                assert_eq!(purpose, InputPurpose::GoToPath);
+                assert_eq!(base_path, PathBuf::from("/tmp"));
+                assert!(completion_candidates.is_empty());
+                assert!(completion_index.is_none());
+                assert!(ghost_suffix.is_empty());
+            }
+            _ => panic!("Expected Input dialog"),
+        }
+    }
+
+    #[test]
+    fn test_input_dialog_responsive_size_clamp() {
+        let dialog_kind = DialogKind::go_to_path_input("", PathBuf::from("."));
+        let dialog = Dialog::new(&dialog_kind);
+
+        let area_small = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+        let area_large = Rect {
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 60,
+        };
+
+        let sized_small = dialog.calculate_area(area_small);
+        assert_eq!(sized_small.width, 57);
+        assert_eq!(sized_small.height, 12);
+
+        let sized_large = dialog.calculate_area(area_large);
+        assert_eq!(sized_large.width, 110);
+        assert_eq!(sized_large.height, 12);
+    }
+
+    #[test]
+    fn test_ghost_first_char_not_overwritten_by_cursor() {
+        let mut kind = DialogKind::go_to_path_input("/Users/boksl/", PathBuf::from("/Users/boksl"));
+        if let DialogKind::Input {
+            ghost_suffix,
+            completion_candidates,
+            completion_index,
+            ..
+        } = &mut kind
+        {
+            *ghost_suffix = "IdeaProjects".to_string();
+            *completion_candidates = vec!["/Users/boksl/IdeaProjects".to_string()];
+            *completion_index = Some(0);
+        }
+
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 24,
+        };
+        let mut buf = Buffer::empty(area);
+        Dialog::new(&kind).render(area, &mut buf);
+
+        let mut has_i = false;
+        for y in 0..area.height {
+            for x in 0..area.width {
+                if buf.cell((x, y)).is_some_and(|cell| cell.symbol() == "I") {
+                    has_i = true;
+                    break;
+                }
+            }
+            if has_i {
+                break;
+            }
+        }
+        assert!(has_i, "ghost first character should remain visible");
+    }
+
+    #[test]
+    fn test_suggestions_title_shows_selected_and_total_count() {
+        let mut kind = DialogKind::go_to_path_input("/Users/boksl/", PathBuf::from("/Users/boksl"));
+        if let DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        } = &mut kind
+        {
+            *completion_candidates = vec![
+                "/Users/boksl/IdeaProjects".to_string(),
+                "/Users/boksl/Downloads".to_string(),
+            ];
+            *completion_index = Some(1);
+        }
+
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 24,
+        };
+        let mut buf = Buffer::empty(area);
+        Dialog::new(&kind).render(area, &mut buf);
+
+        let mut found_title = false;
+        for y in 0..area.height {
+            let mut line = String::new();
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    line.push_str(cell.symbol());
+                }
+            }
+            if line.contains("Suggestions (2/2)") {
+                found_title = true;
+                break;
+            }
+        }
+        assert!(
+            found_title,
+            "suggestions title should show selected/total count"
+        );
     }
 
     #[test]

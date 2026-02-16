@@ -9,7 +9,7 @@ pub mod warning;
 
 // Re-export components for convenience
 pub use command_bar::CommandBar;
-pub use dialog::{Dialog, DialogKind};
+pub use dialog::{Dialog, DialogKind, InputPurpose};
 pub use dropdown_menu::{create_default_menus, DropdownMenu, Menu, MenuState};
 pub use menu_bar::MenuBar;
 pub use panel::{Panel, PanelStatus};

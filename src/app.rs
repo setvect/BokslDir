@@ -9,14 +9,15 @@ use crate::models::panel_state::{SortBy, SortOrder};
 use crate::models::{PanelState, PanelTabs};
 use crate::system::{FileSystem, ImeStatus};
 use crate::ui::{
-    create_default_menus, ActivePanel, DialogKind, LayoutManager, LayoutMode, Menu, MenuState,
-    ThemeManager,
+    create_default_menus, ActivePanel, DialogKind, InputPurpose, LayoutManager, LayoutMode, Menu,
+    MenuState, ThemeManager,
 };
 use crate::utils::error::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -683,6 +684,7 @@ impl App {
             // View (Phase 5.3)
             Action::ToggleHidden => self.toggle_hidden(),
             Action::ShowMountPoints => self.show_mount_points(),
+            Action::GoToPath => self.start_go_to_path(),
             Action::ShowTabList => self.show_tab_list(),
             Action::HistoryBack => self.history_back(),
             Action::HistoryForward => self.history_forward(),
@@ -1356,6 +1358,14 @@ impl App {
         self.start_file_operation(OperationType::Move);
     }
 
+    /// 경로 직접 이동 시작 (gp)
+    pub fn start_go_to_path(&mut self) {
+        let base_path = self.active_panel_state().current_path.clone();
+        let initial = base_path.to_string_lossy().to_string();
+        self.dialog = Some(DialogKind::go_to_path_input(initial, base_path));
+        self.update_input_completion_state();
+    }
+
     /// 파일 작업 시작 (공통)
     fn start_file_operation(&mut self, operation_type: OperationType) {
         let sources = self.get_operation_sources();
@@ -1374,12 +1384,305 @@ impl App {
         let dest_path = dest_dir.to_string_lossy().to_string();
 
         // 대기 작업 저장
-        self.pending_operation = Some(PendingOperation::new(operation_type, sources, dest_dir));
+        self.pending_operation = Some(PendingOperation::new(
+            operation_type,
+            sources,
+            dest_dir.clone(),
+        ));
 
         // 입력 다이얼로그 표시
         let title = operation_type.name();
         let prompt = format!("{} to:", title);
-        self.dialog = Some(DialogKind::input(title, prompt, dest_path));
+        self.dialog = Some(DialogKind::operation_path_input(
+            title, prompt, dest_path, dest_dir,
+        ));
+        self.update_input_completion_state();
+    }
+
+    fn home_dir() -> Option<PathBuf> {
+        env::var_os("HOME").map(PathBuf::from)
+    }
+
+    fn split_path_input(value: &str) -> (&str, &str) {
+        if let Some((idx, _)) = value
+            .char_indices()
+            .rev()
+            .find(|(_, c)| std::path::is_separator(*c))
+        {
+            (&value[..=idx], &value[idx + 1..])
+        } else {
+            ("", value)
+        }
+    }
+
+    fn input_parent_context(&self, value: &str, base_path: &Path) -> (PathBuf, String, String) {
+        if value == "~" {
+            if let Some(home) = Self::home_dir() {
+                return (
+                    home,
+                    format!("~{}", std::path::MAIN_SEPARATOR),
+                    String::new(),
+                );
+            }
+        }
+
+        let (raw_parent, raw_partial) = Self::split_path_input(value);
+        if raw_parent.is_empty() {
+            (
+                base_path.to_path_buf(),
+                String::new(),
+                raw_partial.to_string(),
+            )
+        } else {
+            (
+                self.resolve_input_path(raw_parent, base_path),
+                raw_parent.to_string(),
+                raw_partial.to_string(),
+            )
+        }
+    }
+
+    fn first_segment_candidate(
+        path: &Path,
+        parent_path: &Path,
+        display_prefix: &str,
+        partial: &str,
+    ) -> Option<String> {
+        if !path.is_dir() {
+            return None;
+        }
+        let rest = path.strip_prefix(parent_path).ok()?;
+        let first_segment = rest.components().find_map(|c| match c {
+            Component::Normal(name) => Some(name.to_string_lossy().to_string()),
+            _ => None,
+        })?;
+        if !first_segment.starts_with(partial) {
+            return None;
+        }
+        Some(format!("{}{}", display_prefix, first_segment))
+    }
+
+    fn history_completion_candidates(&self, value: &str, base_path: &Path) -> Vec<String> {
+        let (parent_path, display_prefix, partial) = self.input_parent_context(value, base_path);
+        self.active_panel_state()
+            .history_entries
+            .iter()
+            .rev()
+            .filter_map(|path| {
+                Self::first_segment_candidate(path, &parent_path, &display_prefix, &partial)
+            })
+            .collect()
+    }
+
+    fn filesystem_completion_candidates(&self, value: &str, base_path: &Path) -> Vec<String> {
+        let (dir_path, display_prefix, partial) = self.input_parent_context(value, base_path);
+
+        let mut candidates: Vec<String> = fs::read_dir(dir_path)
+            .ok()
+            .into_iter()
+            .flat_map(|iter| iter.flatten())
+            .filter_map(|entry| {
+                let path = entry.path();
+                if !path.is_dir() {
+                    return None;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !partial.is_empty() && !name.starts_with(&partial) {
+                    return None;
+                }
+                Some(format!("{}{}", display_prefix, name))
+            })
+            .collect();
+        candidates.sort_unstable();
+        candidates
+    }
+
+    fn collect_input_completion_candidates(&self, value: &str, base_path: &Path) -> Vec<String> {
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+
+        for candidate in self
+            .history_completion_candidates(value, base_path)
+            .into_iter()
+            .chain(self.filesystem_completion_candidates(value, base_path))
+        {
+            if seen.insert(candidate.clone()) {
+                candidates.push(candidate);
+            }
+        }
+
+        candidates
+    }
+
+    fn selected_input_completion(&self) -> Option<String> {
+        match &self.dialog {
+            Some(DialogKind::Input {
+                completion_candidates,
+                completion_index: Some(idx),
+                ..
+            }) => completion_candidates.get(*idx).cloned(),
+            _ => None,
+        }
+    }
+
+    fn update_input_completion_state(&mut self) {
+        let (value, cursor_pos, base_path) = match &self.dialog {
+            Some(DialogKind::Input {
+                value,
+                cursor_pos,
+                base_path,
+                ..
+            }) => (value.clone(), *cursor_pos, base_path.clone()),
+            _ => return,
+        };
+
+        let completion_candidates = self.collect_input_completion_candidates(&value, &base_path);
+        let completion_index = if completion_candidates.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+        let selected_completion = completion_index.and_then(|idx| completion_candidates.get(idx));
+        let ghost_suffix = if cursor_pos == value.len() {
+            selected_completion
+                .and_then(|candidate| candidate.strip_prefix(&value))
+                .unwrap_or("")
+                .to_string()
+        } else {
+            String::new()
+        };
+
+        if let Some(DialogKind::Input {
+            completion_candidates: candidates,
+            completion_index: selected_idx,
+            ghost_suffix: ghost,
+            ..
+        }) = &mut self.dialog
+        {
+            *candidates = completion_candidates;
+            *selected_idx = completion_index;
+            *ghost = ghost_suffix;
+        }
+    }
+
+    /// 경로 입력 다이얼로그: 현재 선택 추천 적용
+    pub fn dialog_input_apply_selected_completion(&mut self) {
+        let Some(candidate) = self.selected_input_completion() else {
+            return;
+        };
+
+        if let Some(DialogKind::Input {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *value != candidate {
+                *value = candidate;
+                *cursor_pos = value.len();
+            }
+        }
+        self.update_input_completion_state();
+    }
+
+    /// 경로 입력 다이얼로그: 다음 추천으로 순환 + 즉시 적용
+    pub fn dialog_input_cycle_completion_next(&mut self) {
+        let needs_seed = matches!(
+            &self.dialog,
+            Some(DialogKind::Input {
+                completion_candidates,
+                ..
+            }) if completion_candidates.is_empty()
+        );
+        if needs_seed {
+            self.update_input_completion_state();
+        }
+
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            value,
+            cursor_pos,
+            ghost_suffix,
+            ..
+        }) = &mut self.dialog
+        {
+            if completion_candidates.is_empty() {
+                return;
+            }
+            let next = completion_index
+                .map(|idx| (idx + 1) % completion_candidates.len())
+                .unwrap_or(0);
+            *completion_index = Some(next);
+            *value = completion_candidates[next].clone();
+            *cursor_pos = value.len();
+            *ghost_suffix = String::new();
+        }
+    }
+
+    /// 경로 입력 다이얼로그: 이전 추천으로 순환 + 즉시 적용
+    pub fn dialog_input_cycle_completion_prev(&mut self) {
+        let needs_seed = matches!(
+            &self.dialog,
+            Some(DialogKind::Input {
+                completion_candidates,
+                ..
+            }) if completion_candidates.is_empty()
+        );
+        if needs_seed {
+            self.update_input_completion_state();
+        }
+
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            value,
+            cursor_pos,
+            ghost_suffix,
+            ..
+        }) = &mut self.dialog
+        {
+            if completion_candidates.is_empty() {
+                return;
+            }
+            let prev = completion_index
+                .map(|idx| {
+                    if idx == 0 {
+                        completion_candidates.len() - 1
+                    } else {
+                        idx - 1
+                    }
+                })
+                .unwrap_or(0);
+            *completion_index = Some(prev);
+            *value = completion_candidates[prev].clone();
+            *cursor_pos = value.len();
+            *ghost_suffix = String::new();
+        }
+    }
+
+    fn resolve_input_path(&self, input: &str, base_path: &Path) -> PathBuf {
+        let expanded = if input == "~" {
+            Self::home_dir().unwrap_or_else(|| PathBuf::from(input))
+        } else if let Some(rest) = input.strip_prefix("~/") {
+            if let Some(home) = Self::home_dir() {
+                home.join(rest)
+            } else {
+                PathBuf::from(input)
+            }
+        } else if let Some(rest) = input.strip_prefix("~\\") {
+            if let Some(home) = Self::home_dir() {
+                home.join(rest)
+            } else {
+                PathBuf::from(input)
+            }
+        } else {
+            PathBuf::from(input)
+        };
+
+        if expanded.is_absolute() {
+            expanded
+        } else {
+            base_path.join(expanded)
+        }
     }
 
     /// 대상 경로 검증 (존재/디렉토리/재귀 검사). 실패 시 에러 메시지 반환.
@@ -1617,27 +1920,67 @@ impl App {
 
     /// 입력 다이얼로그에서 확인 처리
     pub fn confirm_input_dialog(&mut self, dest_path_str: String) {
-        let Some(mut pending) = self.pending_operation.take() else {
+        let Some(DialogKind::Input {
+            purpose, base_path, ..
+        }) = &self.dialog
+        else {
             self.close_dialog();
             return;
         };
 
-        let dest_path = PathBuf::from(&dest_path_str);
+        let purpose = *purpose;
+        let base_path = base_path.clone();
+        let resolved_path = self.resolve_input_path(&dest_path_str, &base_path);
+        let resolved_path_str = resolved_path.to_string_lossy().to_string();
 
-        if let Err(error_msg) = Self::validate_operation_destination(
-            &pending.sources,
-            pending.operation_type,
-            &dest_path,
-            &dest_path_str,
-        ) {
-            self.dialog = Some(DialogKind::error("Error", error_msg));
-            self.pending_operation = Some(pending);
-            return;
+        match purpose {
+            InputPurpose::OperationDestination => {
+                let Some(mut pending) = self.pending_operation.take() else {
+                    self.close_dialog();
+                    return;
+                };
+
+                if let Err(error_msg) = Self::validate_operation_destination(
+                    &pending.sources,
+                    pending.operation_type,
+                    &resolved_path,
+                    &resolved_path_str,
+                ) {
+                    self.dialog = Some(DialogKind::error("Error", error_msg));
+                    self.pending_operation = Some(pending);
+                    return;
+                }
+
+                pending.dest_dir = resolved_path.clone();
+                self.prepare_and_start_operation(&mut pending, &resolved_path);
+                self.pending_operation = Some(pending);
+            }
+            InputPurpose::GoToPath => {
+                if !resolved_path.exists() {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!("Destination path does not exist:\n{}", resolved_path_str),
+                    ));
+                    return;
+                }
+                if !resolved_path.is_dir() {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!("Destination is not a directory:\n{}", resolved_path_str),
+                    ));
+                    return;
+                }
+
+                if self.change_active_dir(resolved_path, true, None) {
+                    self.close_dialog();
+                } else {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!("Failed to open path:\n{}", resolved_path_str),
+                    ));
+                }
+            }
         }
-
-        pending.dest_dir = dest_path.clone();
-        self.prepare_and_start_operation(&mut pending, &dest_path);
-        self.pending_operation = Some(pending);
     }
 
     /// 진행 중인 작업 여부 확인
@@ -3123,6 +3466,7 @@ impl App {
             value.insert(*cursor_pos, c);
             *cursor_pos += c.len_utf8();
         }
+        self.update_input_completion_state();
     }
 
     /// 입력 다이얼로그: 백스페이스
@@ -3141,6 +3485,7 @@ impl App {
                 *cursor_pos = prev;
             }
         }
+        self.update_input_completion_state();
     }
 
     /// 입력 다이얼로그: Delete
@@ -3153,6 +3498,7 @@ impl App {
                 value.remove(*cursor_pos);
             }
         }
+        self.update_input_completion_state();
     }
 
     /// 입력 다이얼로그: 커서 왼쪽
@@ -3169,6 +3515,7 @@ impl App {
                     .unwrap_or(0);
             }
         }
+        self.update_input_completion_state();
     }
 
     /// 입력 다이얼로그: 커서 오른쪽
@@ -3185,6 +3532,7 @@ impl App {
                     .unwrap_or(value.len());
             }
         }
+        self.update_input_completion_state();
     }
 
     /// 입력 다이얼로그: Home
@@ -3192,6 +3540,7 @@ impl App {
         if let Some(DialogKind::Input { cursor_pos, .. }) = &mut self.dialog {
             *cursor_pos = 0;
         }
+        self.update_input_completion_state();
     }
 
     /// 입력 다이얼로그: End
@@ -3202,6 +3551,7 @@ impl App {
         {
             *cursor_pos = value.len();
         }
+        self.update_input_completion_state();
     }
 
     /// 입력 다이얼로그: 버튼 선택 변경 (Tab)
@@ -3700,6 +4050,187 @@ mod tests {
         } else {
             panic!("history list dialog not shown");
         }
+    }
+
+    #[test]
+    fn test_dialog_input_completion_prefers_active_tab_history() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let history_dir = base.join("docs_history").join("nested");
+        let fs_dir = base.join("docs_fs");
+        fs::create_dir_all(&history_dir).unwrap();
+        fs::create_dir_all(&fs_dir).unwrap();
+
+        app.go_to_mount_point(base.clone());
+        {
+            let panel = app.active_panel_state_mut();
+            panel.history_entries = vec![base.clone(), history_dir.clone()];
+            panel.history_index = 1;
+        }
+
+        app.dialog = Some(DialogKind::operation_path_input(
+            "Copy",
+            "Copy to:",
+            "doc",
+            base.clone(),
+        ));
+        app.update_input_completion_state();
+
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        }) = &app.dialog
+        {
+            assert_eq!(
+                completion_candidates.first().map(String::as_str),
+                Some("docs_history")
+            );
+            assert_eq!(
+                completion_candidates.get(1).map(String::as_str),
+                Some("docs_fs")
+            );
+            assert_eq!(*completion_index, Some(0));
+        } else {
+            panic!("input dialog not shown");
+        }
+
+        app.dialog_input_apply_selected_completion();
+        if let Some(DialogKind::Input {
+            value, cursor_pos, ..
+        }) = &app.dialog
+        {
+            assert_eq!(value, "docs_history");
+            assert_eq!(*cursor_pos, value.len());
+        } else {
+            panic!("input dialog not shown");
+        }
+
+        app.dialog_input_toggle_button();
+        if let Some(DialogKind::Input {
+            selected_button,
+            value,
+            ..
+        }) = &app.dialog
+        {
+            assert_eq!(*selected_button, 1);
+            assert_eq!(value, "docs_history");
+        } else {
+            panic!("input dialog not shown");
+        }
+    }
+
+    #[test]
+    fn test_dialog_input_cycle_next_prev_applies_completion() {
+        let mut app = make_test_app();
+        app.dialog = Some(DialogKind::go_to_path_input("", PathBuf::from(".")));
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        }) = &mut app.dialog
+        {
+            *completion_candidates = vec!["alpha".to_string(), "beta".to_string()];
+            *completion_index = Some(0);
+        }
+
+        app.dialog_input_cycle_completion_next();
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("beta"));
+
+        app.dialog_input_cycle_completion_prev();
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn test_go_to_path_relative_success() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let child = base.join("child");
+        fs::create_dir_all(&child).unwrap();
+
+        app.go_to_mount_point(base.clone());
+        app.start_go_to_path();
+        app.confirm_input_dialog("child".to_string());
+
+        assert_eq!(app.active_panel_state().current_path, child);
+        assert!(app.dialog.is_none());
+    }
+
+    #[test]
+    fn test_go_to_path_fails_for_non_directory() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let file = base.join("file.txt");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(&file, "data").unwrap();
+
+        app.go_to_mount_point(base);
+        app.start_go_to_path();
+        app.confirm_input_dialog("file.txt".to_string());
+
+        assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+    }
+
+    #[test]
+    fn test_operation_destination_accepts_relative_path_with_base() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let source = base.join("source.txt");
+        let target = base.join("target");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(&source, "payload").unwrap();
+
+        app.pending_operation = Some(PendingOperation::new(
+            OperationType::Copy,
+            vec![source],
+            base.clone(),
+        ));
+        app.dialog = Some(DialogKind::operation_path_input(
+            "Copy",
+            "Copy to:",
+            "target",
+            base.clone(),
+        ));
+
+        app.confirm_input_dialog("target".to_string());
+
+        let pending = app.pending_operation.as_ref().expect("pending operation");
+        assert_eq!(pending.dest_dir, target);
+        assert!(matches!(app.dialog, Some(DialogKind::Progress { .. })));
+    }
+
+    #[test]
+    fn test_operation_destination_accepts_absolute_path() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let source = base.join("source.txt");
+        let target = temp.path().join("target_abs");
+        fs::create_dir_all(&base).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(&source, "payload").unwrap();
+
+        app.pending_operation = Some(PendingOperation::new(
+            OperationType::Copy,
+            vec![source],
+            base.clone(),
+        ));
+        app.dialog = Some(DialogKind::operation_path_input(
+            "Copy",
+            "Copy to:",
+            target.to_string_lossy(),
+            base,
+        ));
+
+        app.confirm_input_dialog(target.to_string_lossy().to_string());
+
+        let pending = app.pending_operation.as_ref().expect("pending operation");
+        assert_eq!(pending.dest_dir, target);
+        assert!(matches!(app.dialog, Some(DialogKind::Progress { .. })));
     }
 
     #[test]

@@ -60,6 +60,7 @@ pub enum Action {
     // View (Phase 5.3)
     ToggleHidden,
     ShowMountPoints,
+    GoToPath,
     ShowTabList,
     HistoryBack,
     HistoryForward,
@@ -519,6 +520,14 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         command_bar: None,
     },
     ActionDef {
+        action: Action::GoToPath,
+        id: "goto_path",
+        label: "Go to path",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("gp"),
+        command_bar: None,
+    },
+    ActionDef {
         action: Action::ShowTabList,
         id: "tab_list",
         label: "Show tab list",
@@ -882,6 +891,7 @@ mod tests {
         assert_eq!(Action::from_id("quit"), Some(Action::Quit));
         assert_eq!(Action::from_id("tab_new"), Some(Action::TabNew));
         assert_eq!(Action::from_id("tab_list"), Some(Action::ShowTabList));
+        assert_eq!(Action::from_id("goto_path"), Some(Action::GoToPath));
         assert_eq!(
             Action::from_id("history_list"),
             Some(Action::ShowHistoryList)
@@ -989,6 +999,7 @@ mod tests {
     fn test_get_shortcut_display() {
         assert_eq!(get_shortcut_display("copy"), Some("y"));
         assert_eq!(get_shortcut_display("quit"), Some("q"));
+        assert_eq!(get_shortcut_display("goto_path"), Some("gp"));
         assert_eq!(get_shortcut_display("theme_dark"), None);
     }
 

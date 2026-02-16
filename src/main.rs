@@ -145,6 +145,10 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
                 app.execute_action(Action::ShowMountPoints);
                 return;
             }
+            ('g', KeyCode::Char('p')) => {
+                app.execute_action(Action::GoToPath);
+                return;
+            }
             ('s', KeyCode::Char('n')) => {
                 app.execute_action(Action::SortByName);
                 return;
@@ -302,6 +306,17 @@ fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCod
         // 버튼 전환 (Tab / Shift+Tab)
         (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
             app.dialog_input_toggle_button();
+        }
+        // 선택 추천 적용
+        (KeyModifiers::NONE, KeyCode::Right) | (KeyModifiers::CONTROL, KeyCode::Char(' ')) => {
+            app.dialog_input_apply_selected_completion();
+        }
+        // 추천 순환 + 즉시 완성
+        (KeyModifiers::NONE, KeyCode::Down) => {
+            app.dialog_input_cycle_completion_next();
+        }
+        (KeyModifiers::NONE, KeyCode::Up) => {
+            app.dialog_input_cycle_completion_prev();
         }
         // 문자 입력
         (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
@@ -728,6 +743,16 @@ mod tests {
     }
 
     #[test]
+    fn test_g_p_sequence_opens_go_to_path_dialog() {
+        let mut app = App::new_for_test();
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('g'));
+        assert_eq!(app.pending_key, Some('g'));
+
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('p'));
+        assert!(matches!(app.dialog, Some(DialogKind::Input { .. })));
+    }
+
+    #[test]
     fn test_bookmark_list_dialog_key_navigation_and_rename() {
         let mut app = App::new_for_test();
         app.dialog = Some(DialogKind::bookmark_list(
@@ -750,6 +775,75 @@ mod tests {
             app.dialog,
             Some(DialogKind::BookmarkRenameInput { .. })
         ));
+    }
+
+    #[test]
+    fn test_input_dialog_tab_toggles_buttons() {
+        let mut app = App::new_for_test();
+        app.start_go_to_path();
+        assert_eq!(app.get_dialog_input_selected_button(), Some(0));
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Tab, "");
+        assert_eq!(app.get_dialog_input_selected_button(), Some(1));
+    }
+
+    #[test]
+    fn test_input_dialog_right_applies_selected_completion() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "",
+            std::path::PathBuf::from("."),
+        ));
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        }) = &mut app.dialog
+        {
+            *completion_candidates = vec!["docs".to_string(), "downloads".to_string()];
+            *completion_index = Some(0);
+        }
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Right, "");
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("docs"));
+    }
+
+    #[test]
+    fn test_input_dialog_up_down_cycles_completion() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "",
+            std::path::PathBuf::from("."),
+        ));
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        }) = &mut app.dialog
+        {
+            *completion_candidates = vec!["alpha".to_string(), "beta".to_string()];
+            *completion_index = Some(0);
+        }
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Down, "");
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("beta"));
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Up, "");
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn test_input_dialog_j_k_stays_text_input() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "",
+            std::path::PathBuf::from("."),
+        ));
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('j'), "");
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('k'), "");
+
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("jk"));
     }
 }
 

@@ -78,6 +78,16 @@ pub fn truncate_path_buf(path: &Path, max_width: usize) -> String {
     truncate_path(&path.to_string_lossy(), max_width)
 }
 
+/// 문자열을 Unicode 폭 기준으로 target_width까지 우측 공백 패딩한다.
+pub fn pad_right_to_width(text: &str, target_width: usize) -> String {
+    let current_width = text.width();
+    if current_width >= target_width {
+        return text.to_string();
+    }
+
+    format!("{}{}", text, " ".repeat(target_width - current_width))
+}
+
 fn shorten_home(path: &str) -> String {
     let home_dir = std::env::var("HOME").unwrap_or_default();
     if home_dir.is_empty() {
@@ -172,5 +182,27 @@ mod tests {
         assert!(truncated.contains("/.../"));
         assert!(truncated.ends_with("/node_modules"));
         assert!(truncated.width() <= 30);
+    }
+
+    #[test]
+    fn test_pad_right_to_width_ascii() {
+        let padded = pad_right_to_width("abc", 5);
+        assert_eq!(padded, "abc  ");
+        assert_eq!(padded.width(), 5);
+    }
+
+    #[test]
+    fn test_pad_right_to_width_with_korean() {
+        let padded = pad_right_to_width("가a", 4);
+        assert_eq!(padded, "가a ");
+        assert_eq!(padded.width(), 4);
+    }
+
+    #[test]
+    fn test_pad_right_to_width_keeps_original_when_target_is_smaller() {
+        let original = "가나다";
+        let padded = pad_right_to_width(original, 2);
+        assert_eq!(padded, original);
+        assert_eq!(padded.width(), original.width());
     }
 }

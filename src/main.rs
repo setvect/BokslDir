@@ -181,6 +181,10 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
                 app.execute_action(Action::ShowHistoryList);
                 return;
             }
+            ('t', KeyCode::Char('b')) => {
+                app.execute_action(Action::ShowBookmarkList);
+                return;
+            }
             _ => {} // 잘못된 시퀀스, fall through
         }
     }
@@ -265,6 +269,12 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         }
         DialogKind::HistoryList { .. } => {
             handle_history_list_dialog_keys(app, code);
+        }
+        DialogKind::BookmarkList { .. } => {
+            handle_bookmark_list_dialog_keys(app, code);
+        }
+        DialogKind::BookmarkRenameInput { .. } => {
+            handle_bookmark_rename_input_dialog_keys(app, modifiers, code);
         }
     }
 }
@@ -558,6 +568,61 @@ fn handle_history_list_dialog_keys(app: &mut App, code: KeyCode) {
     }
 }
 
+/// 북마크 목록 다이얼로그 키 처리
+fn handle_bookmark_list_dialog_keys(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.close_dialog();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.bookmark_list_move_down();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.bookmark_list_move_up();
+        }
+        KeyCode::Enter | KeyCode::Char('l') => {
+            app.bookmark_list_confirm();
+        }
+        KeyCode::Char('r') => {
+            app.start_bookmark_rename_selected();
+        }
+        KeyCode::Char('d') => {
+            app.bookmark_list_delete_selected();
+        }
+        _ => {}
+    }
+}
+
+/// 북마크 이름 변경 입력 다이얼로그 키 처리
+fn handle_bookmark_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    match (modifiers, code) {
+        (_, KeyCode::Enter) => {
+            let selected_button = app.get_bookmark_rename_selected_button().unwrap_or(0);
+            if selected_button == 0 {
+                if let Some((value, bookmark_index)) = app.get_bookmark_rename_input_value() {
+                    app.confirm_bookmark_rename(value, bookmark_index);
+                }
+            } else {
+                app.show_bookmark_list();
+            }
+        }
+        (_, KeyCode::Esc) => app.show_bookmark_list(),
+        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            app.dialog_bookmark_rename_toggle_button();
+        }
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            app.dialog_bookmark_rename_input_char(c);
+        }
+        (_, KeyCode::Backspace) => app.dialog_bookmark_rename_input_backspace(),
+        (_, KeyCode::Delete) => app.dialog_bookmark_rename_input_delete(),
+        (_, KeyCode::Left) => app.dialog_bookmark_rename_input_left(),
+        (_, KeyCode::Right) => app.dialog_bookmark_rename_input_right(),
+        (_, KeyCode::Home) => app.dialog_bookmark_rename_input_home(),
+        (_, KeyCode::End) => app.dialog_bookmark_rename_input_end(),
+        _ => {}
+    }
+}
+
 /// 필터 입력 다이얼로그 키 처리
 fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     match (modifiers, code) {
@@ -642,6 +707,49 @@ fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
         (_, KeyCode::F(10)) => app.quit(),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_t_b_sequence_opens_bookmark_flow() {
+        let mut app = App::new_for_test();
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('t'));
+        assert_eq!(app.pending_key, Some('t'));
+
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('b'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::BookmarkList { .. }) | Some(DialogKind::Message { .. })
+        ));
+    }
+
+    #[test]
+    fn test_bookmark_list_dialog_key_navigation_and_rename() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::bookmark_list(
+            vec![
+                ("A".to_string(), std::path::PathBuf::from("/a")),
+                ("B".to_string(), std::path::PathBuf::from("/b")),
+            ],
+            0,
+        ));
+
+        handle_bookmark_list_dialog_keys(&mut app, KeyCode::Char('j'));
+        if let Some(DialogKind::BookmarkList { selected_index, .. }) = &app.dialog {
+            assert_eq!(*selected_index, 1);
+        } else {
+            panic!("bookmark list dialog not shown");
+        }
+
+        handle_bookmark_list_dialog_keys(&mut app, KeyCode::Char('r'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::BookmarkRenameInput { .. })
+        ));
     }
 }
 

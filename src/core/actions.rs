@@ -64,6 +64,8 @@ pub enum Action {
     HistoryBack,
     HistoryForward,
     ShowHistoryList,
+    AddBookmark,
+    ShowBookmarkList,
     SizeFormatAuto,
     SizeFormatBytes,
     // About
@@ -549,6 +551,22 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         command_bar: None,
     },
     ActionDef {
+        action: Action::AddBookmark,
+        id: "bookmark_add",
+        label: "Add bookmark",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("Ctrl+B"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::ShowBookmarkList,
+        id: "bookmark_list",
+        label: "Show bookmark list",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("tb"),
+        command_bar: None,
+    },
+    ActionDef {
         action: Action::SizeFormatAuto,
         id: "size_auto",
         label: "Size: Auto",
@@ -767,6 +785,11 @@ fn build_key_bindings() -> Vec<KeyBinding> {
             modifiers: Some(KeyModifiers::CONTROL),
             action: Action::Refresh,
         },
+        KeyBinding {
+            code: KeyCode::Char('b'),
+            modifiers: Some(KeyModifiers::CONTROL),
+            action: Action::AddBookmark,
+        },
     ]
 }
 
@@ -863,6 +886,11 @@ mod tests {
             Action::from_id("history_list"),
             Some(Action::ShowHistoryList)
         );
+        assert_eq!(Action::from_id("bookmark_add"), Some(Action::AddBookmark));
+        assert_eq!(
+            Action::from_id("bookmark_list"),
+            Some(Action::ShowBookmarkList)
+        );
         assert_eq!(Action::from_id("nonexistent"), None);
     }
 
@@ -907,6 +935,10 @@ mod tests {
         assert_eq!(
             find_action(KeyModifiers::CONTROL, KeyCode::Char('r')),
             Some(Action::Refresh)
+        );
+        assert_eq!(
+            find_action(KeyModifiers::CONTROL, KeyCode::Char('b')),
+            Some(Action::AddBookmark)
         );
     }
 

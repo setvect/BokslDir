@@ -32,6 +32,18 @@ struct PersistedHistories {
     right: PersistedPanelHistory,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PersistedBookmark {
+    name: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedBookmarks {
+    version: u32,
+    bookmarks: Vec<PersistedBookmark>,
+}
+
 /// 파일 크기 표시 형식
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SizeFormat {
@@ -78,11 +90,16 @@ pub struct App {
     pub size_format: SizeFormat,
     /// 현재 IME 상태
     pub ime_status: ImeStatus,
+    /// 전역 북마크 목록
+    bookmarks: Vec<PersistedBookmark>,
+    /// 테스트에서 북마크 저장 경로를 격리하기 위한 override
+    bookmarks_store_override: Option<PathBuf>,
 }
 
 impl App {
     const MAX_TABS_PER_PANEL: usize = 5;
     const HISTORY_STORE_VERSION: u32 = 1;
+    const BOOKMARK_STORE_VERSION: u32 = 1;
 
     pub fn new() -> Result<Self> {
         let current_dir = env::current_dir().unwrap_or_else(|_| {
@@ -126,14 +143,53 @@ impl App {
             icon_mode: crate::ui::components::panel::IconMode::default(),
             size_format: SizeFormat::default(),
             ime_status: crate::system::get_current_ime(),
+            bookmarks: Vec::new(),
+            bookmarks_store_override: None,
         };
         app.load_persisted_histories();
+        app.load_persisted_bookmarks();
         Ok(app)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test() -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static TEST_APP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let current_dir = std::path::PathBuf::from(".");
+        let suffix = TEST_APP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let bookmarks_store_override = std::env::temp_dir().join(format!(
+            "boksldir-test-bookmarks-{}-{}.toml",
+            std::process::id(),
+            suffix
+        ));
+
+        Self {
+            should_quit: false,
+            layout: LayoutManager::new(),
+            left_tabs: PanelTabs::new(PanelState::new(current_dir.clone())),
+            right_tabs: PanelTabs::new(PanelState::new(current_dir)),
+            filesystem: FileSystem::new(),
+            menus: create_default_menus(),
+            menu_state: MenuState::new(),
+            theme_manager: ThemeManager::new(),
+            dialog: None,
+            pending_operation: None,
+            pending_key: None,
+            pending_key_time: None,
+            toast_message: None,
+            icon_mode: crate::ui::components::panel::IconMode::default(),
+            size_format: SizeFormat::default(),
+            ime_status: ImeStatus::Unknown,
+            bookmarks: Vec::new(),
+            bookmarks_store_override: Some(bookmarks_store_override),
+        }
     }
 
     /// 종료
     pub fn quit(&mut self) {
         let _ = self.save_persisted_histories();
+        let _ = self.save_persisted_bookmarks();
         self.should_quit = true;
     }
 
@@ -246,6 +302,71 @@ impl App {
             if let Some((left, right)) = Self::decode_histories(&data) {
                 self.apply_loaded_history(ActivePanel::Left, left.0, left.1);
                 self.apply_loaded_history(ActivePanel::Right, right.0, right.1);
+            }
+        }
+    }
+
+    fn resolve_bookmarks_store_path(&self) -> Option<PathBuf> {
+        if let Some(path) = &self.bookmarks_store_override {
+            return Some(path.clone());
+        }
+        if let Ok(custom) = env::var("BOKSLDIR_BOOKMARKS_FILE") {
+            let trimmed = custom.trim();
+            if !trimmed.is_empty() {
+                return Some(PathBuf::from(trimmed));
+            }
+        }
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".boksldir").join("bookmarks.toml"))
+    }
+
+    fn encode_bookmarks(
+        bookmarks: &[PersistedBookmark],
+    ) -> std::result::Result<String, toml::ser::Error> {
+        let payload = PersistedBookmarks {
+            version: Self::BOOKMARK_STORE_VERSION,
+            bookmarks: bookmarks.to_vec(),
+        };
+        toml::to_string_pretty(&payload)
+    }
+
+    fn decode_bookmarks(data: &str) -> Option<Vec<PersistedBookmark>> {
+        let parsed: PersistedBookmarks = toml::from_str(data).ok()?;
+        if parsed.version != Self::BOOKMARK_STORE_VERSION {
+            return None;
+        }
+        Some(parsed.bookmarks)
+    }
+
+    fn save_persisted_bookmarks(&self) -> std::io::Result<()> {
+        let Some(path) = self.resolve_bookmarks_store_path() else {
+            return Ok(());
+        };
+        self.save_persisted_bookmarks_to_path(&path)
+    }
+
+    fn save_persisted_bookmarks_to_path(&self, path: &std::path::Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let data = Self::encode_bookmarks(&self.bookmarks)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        fs::write(path, data)
+    }
+
+    fn load_persisted_bookmarks(&mut self) {
+        let Some(path) = self.resolve_bookmarks_store_path() else {
+            return;
+        };
+        self.load_persisted_bookmarks_from_path(&path);
+    }
+
+    fn load_persisted_bookmarks_from_path(&mut self, path: &std::path::Path) {
+        if let Ok(data) = fs::read_to_string(path) {
+            if let Some(bookmarks) = Self::decode_bookmarks(&data) {
+                self.bookmarks = bookmarks;
             }
         }
     }
@@ -566,6 +687,8 @@ impl App {
             Action::HistoryBack => self.history_back(),
             Action::HistoryForward => self.history_forward(),
             Action::ShowHistoryList => self.show_history_list(),
+            Action::AddBookmark => self.add_bookmark_current_dir(),
+            Action::ShowBookmarkList => self.show_bookmark_list(),
             Action::SizeFormatAuto => {
                 self.size_format = SizeFormat::Auto;
                 self.set_toast("Size format: Auto");
@@ -2227,6 +2350,122 @@ impl App {
         }
     }
 
+    pub fn dialog_bookmark_rename_input_char(&mut self, c: char) {
+        if let Some(DialogKind::BookmarkRenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            value.insert(*cursor_pos, c);
+            *cursor_pos += c.len_utf8();
+        }
+    }
+
+    pub fn dialog_bookmark_rename_input_backspace(&mut self) {
+        if let Some(DialogKind::BookmarkRenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                let prev = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                value.remove(prev);
+                *cursor_pos = prev;
+            }
+        }
+    }
+
+    pub fn dialog_bookmark_rename_input_delete(&mut self) {
+        if let Some(DialogKind::BookmarkRenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos < value.len() {
+                value.remove(*cursor_pos);
+            }
+        }
+    }
+
+    pub fn dialog_bookmark_rename_input_left(&mut self) {
+        if let Some(DialogKind::BookmarkRenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos > 0 {
+                *cursor_pos = value[..*cursor_pos]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+            }
+        }
+    }
+
+    pub fn dialog_bookmark_rename_input_right(&mut self) {
+        if let Some(DialogKind::BookmarkRenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            if *cursor_pos < value.len() {
+                *cursor_pos = value[*cursor_pos..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| *cursor_pos + i)
+                    .unwrap_or(value.len());
+            }
+        }
+    }
+
+    pub fn dialog_bookmark_rename_input_home(&mut self) {
+        if let Some(DialogKind::BookmarkRenameInput { cursor_pos, .. }) = &mut self.dialog {
+            *cursor_pos = 0;
+        }
+    }
+
+    pub fn dialog_bookmark_rename_input_end(&mut self) {
+        if let Some(DialogKind::BookmarkRenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            *cursor_pos = value.len();
+        }
+    }
+
+    pub fn dialog_bookmark_rename_toggle_button(&mut self) {
+        if let Some(DialogKind::BookmarkRenameInput {
+            selected_button, ..
+        }) = &mut self.dialog
+        {
+            *selected_button = if *selected_button == 0 { 1 } else { 0 };
+        }
+    }
+
+    pub fn get_bookmark_rename_input_value(&self) -> Option<(String, usize)> {
+        if let Some(DialogKind::BookmarkRenameInput {
+            value,
+            bookmark_index,
+            ..
+        }) = &self.dialog
+        {
+            Some((value.clone(), *bookmark_index))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_bookmark_rename_selected_button(&self) -> Option<usize> {
+        if let Some(DialogKind::BookmarkRenameInput {
+            selected_button, ..
+        }) = &self.dialog
+        {
+            Some(*selected_button)
+        } else {
+            None
+        }
+    }
+
     // === 숨김 파일 토글 (Phase 5.3) ===
 
     /// 숨김 파일 표시/숨김 토글 (양쪽 패널 동시)
@@ -2278,6 +2517,199 @@ impl App {
             .position(|(_, _, is_current)| *is_current)
             .unwrap_or(0);
         self.dialog = Some(DialogKind::history_list(items, selected_index));
+    }
+
+    fn make_unique_bookmark_name(
+        &self,
+        desired_name: &str,
+        exclude_index: Option<usize>,
+    ) -> String {
+        let desired = desired_name.trim();
+        let base = if desired.is_empty() {
+            "bookmark"
+        } else {
+            desired
+        };
+        if !self
+            .bookmarks
+            .iter()
+            .enumerate()
+            .any(|(idx, b)| Some(idx) != exclude_index && b.name.eq_ignore_ascii_case(base))
+        {
+            return base.to_string();
+        }
+
+        for n in 2.. {
+            let candidate = format!("{} ({})", base, n);
+            if !self.bookmarks.iter().enumerate().any(|(idx, b)| {
+                Some(idx) != exclude_index && b.name.eq_ignore_ascii_case(&candidate)
+            }) {
+                return candidate;
+            }
+        }
+
+        base.to_string()
+    }
+
+    fn bookmark_items(&self) -> Vec<(String, PathBuf)> {
+        self.bookmarks
+            .iter()
+            .map(|b| (b.name.clone(), b.path.clone()))
+            .collect()
+    }
+
+    pub fn add_bookmark_current_dir(&mut self) {
+        let current_path = self.active_panel_state().current_path.clone();
+        if self.bookmarks.iter().any(|b| b.path == current_path) {
+            self.set_toast("Bookmark already exists");
+            return;
+        }
+
+        let default_name = current_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                if current_path.parent().is_none() {
+                    "/".to_string()
+                } else {
+                    current_path.to_string_lossy().to_string()
+                }
+            });
+        let name = self.make_unique_bookmark_name(&default_name, None);
+        self.bookmarks.push(PersistedBookmark {
+            name: name.clone(),
+            path: current_path,
+        });
+        let _ = self.save_persisted_bookmarks();
+        self.set_toast(&format!("Bookmark added: {}", name));
+    }
+
+    pub fn show_bookmark_list(&mut self) {
+        if self.bookmarks.is_empty() {
+            self.dialog = Some(DialogKind::message("Bookmarks", "No bookmarks."));
+            return;
+        }
+
+        let current_path = self.active_panel_state().current_path.clone();
+        let items = self.bookmark_items();
+        let selected_index = items
+            .iter()
+            .position(|(_, path)| *path == current_path)
+            .unwrap_or(0);
+        self.dialog = Some(DialogKind::bookmark_list(items, selected_index));
+    }
+
+    pub fn bookmark_list_move_down(&mut self) {
+        if let Some(DialogKind::BookmarkList {
+            items,
+            selected_index,
+        }) = &mut self.dialog
+        {
+            if *selected_index + 1 < items.len() {
+                *selected_index += 1;
+            }
+        }
+    }
+
+    pub fn bookmark_list_move_up(&mut self) {
+        if let Some(DialogKind::BookmarkList { selected_index, .. }) = &mut self.dialog {
+            if *selected_index > 0 {
+                *selected_index -= 1;
+            }
+        }
+    }
+
+    pub fn bookmark_list_confirm(&mut self) {
+        let (selected_index, item_len) = if let Some(DialogKind::BookmarkList {
+            items,
+            selected_index,
+        }) = &self.dialog
+        {
+            (*selected_index, items.len())
+        } else {
+            return;
+        };
+
+        if item_len == 0 || selected_index >= item_len {
+            return;
+        }
+
+        let Some(bookmark) = self.bookmarks.get(selected_index).cloned() else {
+            return;
+        };
+
+        if self.change_active_dir(bookmark.path, true, None) {
+            self.dialog = None;
+        } else {
+            self.set_toast("Failed to open bookmark path");
+        }
+    }
+
+    pub fn bookmark_list_delete_selected(&mut self) {
+        let selected_index =
+            if let Some(DialogKind::BookmarkList { selected_index, .. }) = &self.dialog {
+                *selected_index
+            } else {
+                return;
+            };
+
+        if selected_index >= self.bookmarks.len() {
+            return;
+        }
+
+        self.bookmarks.remove(selected_index);
+        let _ = self.save_persisted_bookmarks();
+
+        if self.bookmarks.is_empty() {
+            self.dialog = None;
+            self.set_toast("Bookmark deleted");
+            return;
+        }
+
+        let new_index = selected_index.min(self.bookmarks.len().saturating_sub(1));
+        self.dialog = Some(DialogKind::bookmark_list(self.bookmark_items(), new_index));
+        self.set_toast("Bookmark deleted");
+    }
+
+    pub fn start_bookmark_rename_selected(&mut self) {
+        let (selected_index, item_name) = if let Some(DialogKind::BookmarkList {
+            items,
+            selected_index,
+        }) = &self.dialog
+        {
+            if items.is_empty() || *selected_index >= items.len() {
+                return;
+            }
+            (*selected_index, items[*selected_index].0.clone())
+        } else {
+            return;
+        };
+
+        self.dialog = Some(DialogKind::bookmark_rename_input(item_name, selected_index));
+    }
+
+    pub fn confirm_bookmark_rename(&mut self, new_name: String, bookmark_index: usize) {
+        if bookmark_index >= self.bookmarks.len() {
+            self.dialog = None;
+            return;
+        }
+
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            self.set_toast("Bookmark name cannot be empty");
+            return;
+        }
+
+        let unique = self.make_unique_bookmark_name(trimmed, Some(bookmark_index));
+        self.bookmarks[bookmark_index].name = unique;
+        let _ = self.save_persisted_bookmarks();
+        self.dialog = Some(DialogKind::bookmark_list(
+            self.bookmark_items(),
+            bookmark_index.min(self.bookmarks.len().saturating_sub(1)),
+        ));
+        self.set_toast("Bookmark renamed");
     }
 
     /// 탭 목록 다이얼로그에서 선택 이동 (아래)
@@ -2892,6 +3324,8 @@ impl Default for App {
                 icon_mode: crate::ui::components::panel::IconMode::default(),
                 size_format: SizeFormat::default(),
                 ime_status: ImeStatus::Unknown,
+                bookmarks: Vec::new(),
+                bookmarks_store_override: None,
             }
         })
     }
@@ -2907,25 +3341,7 @@ mod tests {
     use std::os::unix::fs as unix_fs;
 
     fn make_test_app() -> App {
-        let current_dir = std::path::PathBuf::from(".");
-        App {
-            should_quit: false,
-            layout: LayoutManager::new(),
-            left_tabs: PanelTabs::new(PanelState::new(current_dir.clone())),
-            right_tabs: PanelTabs::new(PanelState::new(current_dir)),
-            filesystem: FileSystem::new(),
-            menus: create_default_menus(),
-            menu_state: MenuState::new(),
-            theme_manager: ThemeManager::new(),
-            dialog: None,
-            pending_operation: None,
-            pending_key: None,
-            pending_key_time: None,
-            toast_message: None,
-            icon_mode: crate::ui::components::panel::IconMode::default(),
-            size_format: SizeFormat::default(),
-            ime_status: ImeStatus::Unknown,
-        }
+        App::new_for_test()
     }
 
     fn run_file_operation_until_done(app: &mut App) {
@@ -3345,6 +3761,172 @@ mod tests {
         assert_eq!(panel.history_entries, vec![a, b.clone()]);
         assert_eq!(panel.history_index, 1);
         assert_eq!(panel.current_path, b);
+    }
+
+    #[test]
+    fn test_add_bookmark_stores_current_path_and_prevents_duplicate_path() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let p1 = temp.path().join("p1");
+        fs::create_dir_all(&p1).unwrap();
+
+        app.go_to_mount_point(p1.clone());
+        app.add_bookmark_current_dir();
+        assert_eq!(app.bookmarks.len(), 1);
+        assert_eq!(app.bookmarks[0].path, p1);
+
+        app.add_bookmark_current_dir();
+        assert_eq!(app.bookmarks.len(), 1);
+        assert_eq!(app.toast_display(), Some("Bookmark already exists"));
+    }
+
+    #[test]
+    fn test_add_bookmark_assigns_unique_name_suffix() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let p1 = root.join("same");
+        let p2 = root.join("x").join("same");
+        fs::create_dir_all(&p1).unwrap();
+        fs::create_dir_all(&p2).unwrap();
+
+        app.go_to_mount_point(p1);
+        app.add_bookmark_current_dir();
+        app.go_to_mount_point(p2);
+        app.add_bookmark_current_dir();
+
+        assert_eq!(app.bookmarks.len(), 2);
+        assert_eq!(app.bookmarks[0].name, "same");
+        assert_eq!(app.bookmarks[1].name, "same (2)");
+    }
+
+    #[test]
+    fn test_bookmark_list_confirm_moves_to_selected_path() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let p1 = temp.path().join("p1");
+        let p2 = temp.path().join("p2");
+        fs::create_dir_all(&p1).unwrap();
+        fs::create_dir_all(&p2).unwrap();
+
+        app.go_to_mount_point(p1.clone());
+        app.add_bookmark_current_dir();
+        app.go_to_mount_point(p2.clone());
+        app.add_bookmark_current_dir();
+
+        app.go_to_mount_point(p1);
+        app.show_bookmark_list();
+        app.bookmark_list_move_down();
+        app.bookmark_list_confirm();
+
+        assert_eq!(app.active_panel_state().current_path, p2);
+        assert!(app.dialog.is_none());
+    }
+
+    #[test]
+    fn test_bookmark_delete_reindexes_and_closes_on_last_delete() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let p1 = temp.path().join("p1");
+        let p2 = temp.path().join("p2");
+        fs::create_dir_all(&p1).unwrap();
+        fs::create_dir_all(&p2).unwrap();
+
+        app.go_to_mount_point(p1);
+        app.add_bookmark_current_dir();
+        app.go_to_mount_point(p2);
+        app.add_bookmark_current_dir();
+
+        app.show_bookmark_list();
+        app.bookmark_list_move_down();
+        app.bookmark_list_delete_selected();
+        assert_eq!(app.bookmarks.len(), 1);
+        if let Some(DialogKind::BookmarkList {
+            items,
+            selected_index,
+        }) = &app.dialog
+        {
+            assert_eq!(items.len(), 1);
+            assert_eq!(*selected_index, 0);
+        } else {
+            panic!("bookmark list dialog not shown");
+        }
+
+        app.bookmark_list_delete_selected();
+        assert!(app.bookmarks.is_empty());
+        assert!(app.dialog.is_none());
+    }
+
+    #[test]
+    fn test_bookmark_rename_validates_and_applies_unique_suffix() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let p1 = temp.path().join("p1");
+        let p2 = temp.path().join("p2");
+        fs::create_dir_all(&p1).unwrap();
+        fs::create_dir_all(&p2).unwrap();
+
+        app.bookmarks = vec![
+            PersistedBookmark {
+                name: "Work".to_string(),
+                path: p1,
+            },
+            PersistedBookmark {
+                name: "Notes".to_string(),
+                path: p2,
+            },
+        ];
+
+        app.confirm_bookmark_rename("   ".to_string(), 0);
+        assert_eq!(app.bookmarks[0].name, "Work");
+        assert_eq!(app.toast_display(), Some("Bookmark name cannot be empty"));
+
+        app.confirm_bookmark_rename("Notes".to_string(), 0);
+        assert_eq!(app.bookmarks[0].name, "Notes (2)");
+        if let Some(DialogKind::BookmarkList { selected_index, .. }) = &app.dialog {
+            assert_eq!(*selected_index, 0);
+        } else {
+            panic!("bookmark list dialog not shown");
+        }
+    }
+
+    #[test]
+    fn test_bookmark_persistence_encode_decode_roundtrip() {
+        let bookmarks = vec![
+            PersistedBookmark {
+                name: "A".to_string(),
+                path: PathBuf::from("/a"),
+            },
+            PersistedBookmark {
+                name: "B".to_string(),
+                path: PathBuf::from("/b"),
+            },
+        ];
+
+        let text = App::encode_bookmarks(&bookmarks).unwrap();
+        let decoded = App::decode_bookmarks(&text).unwrap();
+        assert_eq!(decoded, bookmarks);
+    }
+
+    #[test]
+    fn test_load_persisted_bookmarks_restores_state() {
+        let temp = TempDir::new().unwrap();
+        let bookmarks_file = temp.path().join("bookmarks.toml");
+
+        let mut app = make_test_app();
+        app.bookmarks = vec![PersistedBookmark {
+            name: "Temp".to_string(),
+            path: PathBuf::from("/tmp"),
+        }];
+        app.save_persisted_bookmarks_to_path(&bookmarks_file)
+            .unwrap();
+
+        let mut loaded = make_test_app();
+        loaded.bookmarks.clear();
+        loaded.load_persisted_bookmarks_from_path(&bookmarks_file);
+        assert_eq!(loaded.bookmarks.len(), 1);
+        assert_eq!(loaded.bookmarks[0].name, "Temp");
+        assert_eq!(loaded.bookmarks[0].path, PathBuf::from("/tmp"));
     }
 
     #[test]

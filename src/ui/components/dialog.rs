@@ -96,6 +96,18 @@ pub enum DialogKind {
         items: Vec<(String, std::path::PathBuf, bool)>,
         selected_index: usize,
     },
+    /// 북마크 목록 선택 다이얼로그 (Phase 6.3)
+    BookmarkList {
+        items: Vec<(String, std::path::PathBuf)>,
+        selected_index: usize,
+    },
+    /// 북마크 이름 변경 입력 다이얼로그 (Phase 6.3)
+    BookmarkRenameInput {
+        value: String,
+        cursor_pos: usize,
+        selected_button: usize, // 0: OK, 1: Cancel
+        bookmark_index: usize,
+    },
     /// 파일 속성 다이얼로그
     Properties {
         name: String,
@@ -234,6 +246,26 @@ impl DialogKind {
         }
     }
 
+    /// 북마크 목록 선택 다이얼로그
+    pub fn bookmark_list(items: Vec<(String, std::path::PathBuf)>, selected_index: usize) -> Self {
+        DialogKind::BookmarkList {
+            items,
+            selected_index,
+        }
+    }
+
+    /// 북마크 이름 변경 입력 다이얼로그
+    pub fn bookmark_rename_input(value: impl Into<String>, bookmark_index: usize) -> Self {
+        let value: String = value.into();
+        let cursor_pos = value.len();
+        DialogKind::BookmarkRenameInput {
+            value,
+            cursor_pos,
+            selected_button: 0,
+            bookmark_index,
+        }
+    }
+
     /// 단축키 도움말 다이얼로그
     pub fn help() -> Self {
         DialogKind::Help { scroll_offset: 0 }
@@ -364,6 +396,7 @@ impl<'a> Dialog<'a> {
             DialogKind::Input { .. }
             | DialogKind::MkdirInput { .. }
             | DialogKind::RenameInput { .. }
+            | DialogKind::BookmarkRenameInput { .. }
             | DialogKind::FilterInput { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 7u16),
             DialogKind::Confirm { .. } => (40u16.min(sw.saturating_sub(4)).max(25), 8u16),
             DialogKind::Conflict { .. } => (55u16.min(sw.saturating_sub(4)).max(35), 15u16),
@@ -398,6 +431,12 @@ impl<'a> Dialog<'a> {
                 (w, h)
             }
             DialogKind::HistoryList { items, .. } => {
+                let list_lines = items.len().min(12) as u16;
+                let w = 70u16.min(sw.saturating_sub(4)).max(40);
+                let h = (4 + list_lines).min(sh.saturating_sub(4)).max(8);
+                (w, h)
+            }
+            DialogKind::BookmarkList { items, .. } => {
                 let list_lines = items.len().min(12) as u16;
                 let w = 70u16.min(sw.saturating_sub(4)).max(40);
                 let h = (4 + list_lines).min(sh.saturating_sub(4)).max(8);
@@ -1196,6 +1235,84 @@ impl<'a> Dialog<'a> {
         );
     }
 
+    fn render_bookmark_list(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        items: &[(String, std::path::PathBuf)],
+        selected_index: usize,
+    ) {
+        let block = Block::default()
+            .title(" Bookmarks ")
+            .title_style(
+                Style::default()
+                    .fg(self.title_color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        block.render(area, buf);
+
+        let inner = Rect {
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(3),
+        };
+
+        let normal_style = Style::default().fg(self.fg_color);
+        let selected_style = Style::default()
+            .fg(self.button_selected_fg)
+            .bg(self.button_selected_bg);
+
+        let visible_height = inner.height as usize;
+        let scroll = if selected_index >= visible_height {
+            selected_index - visible_height + 1
+        } else {
+            0
+        };
+
+        for (i, (name, path)) in items.iter().skip(scroll).enumerate() {
+            if i >= visible_height {
+                break;
+            }
+            let actual_index = scroll + i;
+            let style = if actual_index == selected_index {
+                selected_style
+            } else {
+                normal_style
+            };
+
+            let y = inner.y + i as u16;
+            let prefix = format!(" {}: ", actual_index + 1);
+            let path_text = path.to_string_lossy();
+            let content = format!("{}{}", name, if path_text.is_empty() { "" } else { " - " });
+            let content_width = UnicodeWidthStr::width(content.as_str());
+            let total_width = inner.width as usize;
+            let path_width =
+                total_width.saturating_sub(UnicodeWidthStr::width(prefix.as_str()) + content_width);
+            let truncated_path = path_display::truncate_middle(&path_text, path_width);
+            let label = format!("{}{}{}", prefix, content, truncated_path);
+            let display = if UnicodeWidthStr::width(label.as_str()) > total_width {
+                path_display::truncate_middle(&label, total_width)
+            } else {
+                path_display::pad_right_to_width(&label, total_width)
+            };
+            buf.set_string(inner.x, y, &display, style);
+        }
+
+        let hint = " j/k:Move  Enter:Go  r:Rename  d:Delete  Esc:Close ";
+        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint_y = area.y + area.height - 1;
+        buf.set_string(
+            hint_x,
+            hint_y,
+            hint,
+            Style::default().fg(Color::Rgb(100, 100, 100)),
+        );
+    }
+
     fn render_help(&self, buf: &mut Buffer, area: Rect, scroll_offset: usize) {
         // 테두리
         let block = Block::default()
@@ -1434,6 +1551,22 @@ impl Widget for Dialog<'_> {
                     *selected_button,
                 );
             }
+            DialogKind::BookmarkRenameInput {
+                value,
+                cursor_pos,
+                selected_button,
+                ..
+            } => {
+                self.render_input(
+                    buf,
+                    dialog_area,
+                    "Bookmark Rename",
+                    "New bookmark name:",
+                    value,
+                    *cursor_pos,
+                    *selected_button,
+                );
+            }
             DialogKind::FilterInput {
                 value,
                 cursor_pos,
@@ -1466,6 +1599,12 @@ impl Widget for Dialog<'_> {
                 selected_index,
             } => {
                 self.render_history_list(buf, dialog_area, items, *selected_index);
+            }
+            DialogKind::BookmarkList {
+                items,
+                selected_index,
+            } => {
+                self.render_bookmark_list(buf, dialog_area, items, *selected_index);
             }
             DialogKind::Help { scroll_offset } => {
                 self.render_help(buf, dialog_area, *scroll_offset);

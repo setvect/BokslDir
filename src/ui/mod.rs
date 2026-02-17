@@ -1,7 +1,6 @@
 // UI Layer
 pub mod components;
 pub mod layout;
-pub mod renderer;
 pub mod theme;
 
 // Re-export layout types for convenience

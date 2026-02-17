@@ -166,7 +166,17 @@ impl PanelState {
 
     /// 선택된 항목 반환
     pub fn selected_entry(&self) -> Option<&FileEntry> {
-        self.entries.get(self.selected_index)
+        let has_parent = self.current_path.parent().is_some();
+        if has_parent && self.selected_index == 0 {
+            return None;
+        }
+
+        let entry_index = if has_parent {
+            self.selected_index.saturating_sub(1)
+        } else {
+            self.selected_index
+        };
+        self.entries.get(entry_index)
     }
 
     /// 파일 개수 반환
@@ -510,6 +520,41 @@ mod tests {
 
         // 숨김 파일 표시할 때 더 많은 파일이 있어야 함 (보통의 경우)
         assert!(total_count >= visible_count);
+    }
+
+    #[test]
+    fn test_selected_entry_returns_none_for_parent_row() {
+        let mut state = PanelState::new(PathBuf::from("/tmp/child"));
+        state.entries = vec![create_test_entry("file1.txt")];
+        state.selected_index = 0;
+
+        assert!(state.selected_entry().is_none());
+    }
+
+    #[test]
+    fn test_selected_entry_applies_parent_offset_for_file_row() {
+        let mut state = PanelState::new(PathBuf::from("/tmp/child"));
+        state.entries = vec![
+            create_test_entry("file1.txt"),
+            create_test_entry("file2.txt"),
+        ];
+        state.selected_index = 2;
+
+        let selected = state.selected_entry().expect("entry should exist");
+        assert_eq!(selected.name, "file2.txt");
+    }
+
+    #[test]
+    fn test_selected_entry_without_parent_keeps_direct_indexing() {
+        let mut state = PanelState::new(PathBuf::from("/"));
+        state.entries = vec![
+            create_test_entry("file1.txt"),
+            create_test_entry("file2.txt"),
+        ];
+        state.selected_index = 1;
+
+        let selected = state.selected_entry().expect("entry should exist");
+        assert_eq!(selected.name, "file2.txt");
     }
 
     fn create_test_entry(name: &str) -> FileEntry {

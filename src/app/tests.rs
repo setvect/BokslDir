@@ -33,11 +33,26 @@ fn run_archive_operation_until_done(app: &mut App) {
     assert!(guard < 10_000, "archive operation loop guard exceeded");
 }
 
+fn child_path(base: &std::path::Path, name: &str) -> std::path::PathBuf {
+    base.join(name)
+}
+
+fn create_dirs(base: &std::path::Path, names: &[&str]) -> Vec<std::path::PathBuf> {
+    names
+        .iter()
+        .map(|name| {
+            let path = child_path(base, name);
+            fs::create_dir_all(&path).unwrap();
+            path
+        })
+        .collect()
+}
+
 /// 재귀 경로 검사 테스트: 디렉토리를 자기 자신 내부로 복사
 #[test]
 fn test_is_recursive_path_into_self() {
     let temp = TempDir::new().unwrap();
-    let parent = temp.path().join("parent");
+    let parent = child_path(temp.path(), "parent");
     let child = parent.join("child");
 
     fs::create_dir_all(&child).unwrap();
@@ -50,11 +65,9 @@ fn test_is_recursive_path_into_self() {
 #[test]
 fn test_is_recursive_path_different_dirs() {
     let temp = TempDir::new().unwrap();
-    let dir_a = temp.path().join("dir_a");
-    let dir_b = temp.path().join("dir_b");
-
-    fs::create_dir_all(&dir_a).unwrap();
-    fs::create_dir_all(&dir_b).unwrap();
+    let dirs = create_dirs(temp.path(), &["dir_a", "dir_b"]);
+    let dir_a = dirs[0].clone();
+    let dir_b = dirs[1].clone();
 
     // dir_a -> dir_b 는 재귀 아님
     assert!(!App::is_recursive_path(&dir_a, &dir_b));
@@ -64,8 +77,8 @@ fn test_is_recursive_path_different_dirs() {
 #[test]
 fn test_is_recursive_path_file_not_checked() {
     let temp = TempDir::new().unwrap();
-    let file = temp.path().join("file.txt");
-    let dest = temp.path().join("dest");
+    let file = child_path(temp.path(), "file.txt");
+    let dest = child_path(temp.path(), "dest");
 
     fs::write(&file, "test").unwrap();
     fs::create_dir_all(&dest).unwrap();
@@ -78,11 +91,9 @@ fn test_is_recursive_path_file_not_checked() {
 #[test]
 fn test_is_recursive_path_sibling_dirs() {
     let temp = TempDir::new().unwrap();
-    let parent = temp.path().join("parent");
-    let sibling = temp.path().join("sibling");
-
-    fs::create_dir_all(&parent).unwrap();
-    fs::create_dir_all(&sibling).unwrap();
+    let dirs = create_dirs(temp.path(), &["parent", "sibling"]);
+    let parent = dirs[0].clone();
+    let sibling = dirs[1].clone();
 
     // parent -> sibling 은 재귀 아님
     assert!(!App::is_recursive_path(&parent, &sibling));
@@ -92,9 +103,7 @@ fn test_is_recursive_path_sibling_dirs() {
 #[test]
 fn test_is_recursive_path_same_dir() {
     let temp = TempDir::new().unwrap();
-    let dir = temp.path().join("dir");
-
-    fs::create_dir_all(&dir).unwrap();
+    let dir = create_dirs(temp.path(), &["dir"])[0].clone();
 
     // dir -> dir 자체도 재귀로 간주
     assert!(App::is_recursive_path(&dir, &dir));
@@ -104,7 +113,7 @@ fn test_is_recursive_path_same_dir() {
 #[test]
 fn test_check_recursive_operation_detects_recursive() {
     let temp = TempDir::new().unwrap();
-    let parent = temp.path().join("parent");
+    let parent = child_path(temp.path(), "parent");
     let child = parent.join("child");
 
     fs::create_dir_all(&child).unwrap();
@@ -120,11 +129,9 @@ fn test_check_recursive_operation_detects_recursive() {
 #[test]
 fn test_check_recursive_operation_allows_valid() {
     let temp = TempDir::new().unwrap();
-    let source = temp.path().join("source");
-    let dest = temp.path().join("dest");
-
-    fs::create_dir_all(&source).unwrap();
-    fs::create_dir_all(&dest).unwrap();
+    let dirs = create_dirs(temp.path(), &["source", "dest"]);
+    let source = dirs[0].clone();
+    let dest = dirs[1].clone();
 
     let sources = vec![source];
     let result = App::check_recursive_operation(&sources, OperationType::Copy, &dest);
@@ -136,11 +143,11 @@ fn test_check_recursive_operation_allows_valid() {
 #[test]
 fn test_check_recursive_operation_multiple_sources() {
     let temp = TempDir::new().unwrap();
-    let ok_dir = temp.path().join("ok");
-    let bad_dir = temp.path().join("bad");
+    let dirs = create_dirs(temp.path(), &["ok", "bad"]);
+    let ok_dir = dirs[0].clone();
+    let bad_dir = dirs[1].clone();
     let dest = bad_dir.join("child");
 
-    fs::create_dir_all(&ok_dir).unwrap();
     fs::create_dir_all(&dest).unwrap();
 
     let sources = vec![ok_dir, bad_dir.clone()];

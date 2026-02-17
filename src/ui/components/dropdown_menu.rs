@@ -12,6 +12,7 @@ use ratatui::{
     text::Span,
     widgets::{Block, Borders, Clear, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 /// 메뉴 항목 종류
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -374,6 +375,9 @@ impl<'a> Default for DropdownMenu<'a> {
 }
 
 impl<'a> DropdownMenu<'a> {
+    const MIN_MENU_WIDTH: u16 = 15;
+    const MIN_SUBMENU_WIDTH: u16 = 12;
+
     pub fn new(menu: &'a Menu, state: &'a MenuState) -> Self {
         Self {
             menu,
@@ -400,41 +404,57 @@ impl<'a> DropdownMenu<'a> {
             .menu
             .items
             .iter()
-            .map(|item| item.label.chars().count())
+            .map(|item| UnicodeWidthStr::width(item.label.as_str()))
             .max()
             .unwrap_or(0);
 
-        let max_shortcut = self
+        let max_right = self
             .menu
             .items
             .iter()
-            .filter_map(|item| item.shortcut.as_ref())
-            .map(|s| s.chars().count())
+            .map(|item| {
+                if item.has_submenu() {
+                    UnicodeWidthStr::width("▶")
+                } else {
+                    item.shortcut
+                        .as_ref()
+                        .map(|s| UnicodeWidthStr::width(s.as_str()))
+                        .unwrap_or(0)
+                }
+            })
             .max()
             .unwrap_or(0);
 
         // 레이블 + 간격 + 단축키 + 서브메뉴 화살표 + 패딩
-        let width = max_label + 2 + max_shortcut + 2 + 2;
-        (width as u16).max(15)
+        let width = max_label + 2 + max_right + 2 + 2;
+        (width as u16).max(Self::MIN_MENU_WIDTH)
     }
 
     /// 서브메뉴의 너비 계산
     fn calculate_submenu_width(&self, submenu: &[MenuItem]) -> u16 {
         let max_label = submenu
             .iter()
-            .map(|item| item.label.chars().count())
+            .map(|item| UnicodeWidthStr::width(item.label.as_str()))
             .max()
             .unwrap_or(0);
 
-        let max_shortcut = submenu
+        let max_right = submenu
             .iter()
-            .filter_map(|item| item.shortcut.as_ref())
-            .map(|s| s.chars().count())
+            .map(|item| {
+                if item.has_submenu() {
+                    UnicodeWidthStr::width("▶")
+                } else {
+                    item.shortcut
+                        .as_ref()
+                        .map(|s| UnicodeWidthStr::width(s.as_str()))
+                        .unwrap_or(0)
+                }
+            })
             .max()
             .unwrap_or(0);
 
-        let width = max_label + 2 + max_shortcut + 2;
-        (width as u16).max(12)
+        let width = max_label + 2 + max_right + 2;
+        (width as u16).max(Self::MIN_SUBMENU_WIDTH)
     }
 
     /// 메뉴 항목 렌더링
@@ -493,12 +513,13 @@ impl<'a> DropdownMenu<'a> {
             } else {
                 Style::default().fg(self.shortcut_color).bg(bg)
             };
-            let right_x = area.x + width - right_text.chars().count() as u16 - 1;
+            let right_width = UnicodeWidthStr::width(right_text.as_str()) as u16;
+            let right_x = area.x + width - right_width - 1;
             buf.set_span(
                 right_x,
                 area.y,
                 &Span::styled(&right_text, right_style),
-                right_text.chars().count() as u16,
+                right_width,
             );
         }
     }
@@ -755,5 +776,41 @@ mod tests {
         let menus = create_default_menus();
         assert_eq!(menus.len(), 5);
         assert_eq!(menus[0].title, "파일(F)");
+    }
+
+    #[test]
+    fn test_calculate_width_uses_unicode_display_width() {
+        let menu = Menu::new("test", "테스트").items(vec![
+            MenuItem::action("open_default", "기본 프로그램으로 열기").shortcut("o"),
+            MenuItem::action("open_terminal_editor", "터미널 에디터로 열기").shortcut("e"),
+        ]);
+        let state = MenuState::new();
+        let dropdown = DropdownMenu::new(&menu, &state);
+
+        let max_label_chars = menu
+            .items
+            .iter()
+            .map(|item| item.label.chars().count())
+            .max()
+            .unwrap_or(0);
+        let max_right_chars = menu
+            .items
+            .iter()
+            .map(|item| {
+                if item.has_submenu() {
+                    "▶".chars().count()
+                } else {
+                    item.shortcut
+                        .as_ref()
+                        .map(|s| s.chars().count())
+                        .unwrap_or(0)
+                }
+            })
+            .max()
+            .unwrap_or(0);
+        let legacy_width = (max_label_chars + 2 + max_right_chars + 2 + 2) as u16;
+
+        // 한글은 display width가 chars().count()보다 커지므로, 실제 계산 폭이 더 커야 함
+        assert!(dropdown.calculate_width() > legacy_width);
     }
 }

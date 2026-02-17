@@ -1,3 +1,6 @@
+use super::text_edit::TextBufferEdit;
+use super::*;
+
 impl App {
     // === 파일 복사/이동 관련 메서드 (Phase 3.2) ===
 
@@ -12,7 +15,7 @@ impl App {
     /// 재귀 복사/이동 검사 (복수 소스)
     ///
     /// 디렉토리를 자기 자신 내부로 복사/이동하려는 경우 에러 메시지 반환
-    fn check_recursive_operation(
+    pub(super) fn check_recursive_operation(
         sources: &[PathBuf],
         operation_type: OperationType,
         dest_path: &std::path::Path,
@@ -33,7 +36,7 @@ impl App {
     }
 
     /// 재귀 경로 검사 (정적 메서드)
-    fn is_recursive_path(source: &std::path::Path, dest: &std::path::Path) -> bool {
+    pub(super) fn is_recursive_path(source: &std::path::Path, dest: &std::path::Path) -> bool {
         if !source.is_dir() {
             return false;
         }
@@ -162,7 +165,7 @@ impl App {
         self.archive_flow = Some(ArchiveFlowContext::CreatePending { sources });
     }
 
-    fn default_multi_archive_name(current_dir: &Path) -> String {
+    pub(super) fn default_multi_archive_name(current_dir: &Path) -> String {
         if current_dir.parent().is_none() {
             return "archive.zip".to_string();
         }
@@ -176,7 +179,7 @@ impl App {
         }
     }
 
-    fn next_unique_archive_path(base_dir: &Path, desired_filename: &str) -> PathBuf {
+    pub(super) fn next_unique_archive_path(base_dir: &Path, desired_filename: &str) -> PathBuf {
         let desired = Path::new(desired_filename);
         let stem = desired
             .file_stem()
@@ -247,7 +250,7 @@ impl App {
         self.update_input_completion_state();
     }
 
-    fn detect_single_root_dir(entries: &[ArchiveEntry]) -> Option<String> {
+    pub(super) fn detect_single_root_dir(entries: &[ArchiveEntry]) -> Option<String> {
         use std::collections::BTreeSet;
 
         let mut top_levels = BTreeSet::new();
@@ -281,7 +284,7 @@ impl App {
         }
     }
 
-    fn auto_extract_base_name(archive_path: &Path) -> String {
+    pub(super) fn auto_extract_base_name(archive_path: &Path) -> String {
         let file_name = archive_path
             .file_name()
             .and_then(OsStr::to_str)
@@ -309,7 +312,7 @@ impl App {
             .to_string()
     }
 
-    fn next_unique_extract_dir(base_dir: &Path, desired_name: &str) -> PathBuf {
+    pub(super) fn next_unique_extract_dir(base_dir: &Path, desired_name: &str) -> PathBuf {
         let seed = desired_name.trim();
         let base_name = if seed.is_empty() { "archive" } else { seed };
         let mut index = 0usize;
@@ -327,7 +330,7 @@ impl App {
         }
     }
 
-    fn build_auto_extract_request(
+    pub(super) fn build_auto_extract_request(
         archive_path: &Path,
         base_dir: &Path,
         password: Option<&str>,
@@ -416,7 +419,7 @@ impl App {
         }
     }
 
-    fn show_archive_extract_conflict_dialog(
+    pub(super) fn show_archive_extract_conflict_dialog(
         &mut self,
         request: ArchiveExtractRequest,
         conflicts: Vec<String>,
@@ -439,7 +442,7 @@ impl App {
         self.start_archive_extract_worker(request);
     }
 
-    fn prepare_archive_extract_request(&mut self, request: ArchiveExtractRequest) {
+    pub(super) fn prepare_archive_extract_request(&mut self, request: ArchiveExtractRequest) {
         match list_extract_conflicts(
             &request.archive_path,
             &request.dest_dir,
@@ -513,32 +516,32 @@ impl App {
         }
     }
 
-    fn panel_state_by_slot_mut(&mut self, slot: PanelSlot) -> &mut PanelState {
+    pub(super) fn panel_state_by_slot_mut(&mut self, slot: PanelSlot) -> &mut PanelState {
         match slot {
             PanelSlot::Left => self.left_tabs.active_mut(),
             PanelSlot::Right => self.right_tabs.active_mut(),
         }
     }
 
-    fn panel_state_by_slot(&self, slot: PanelSlot) -> &PanelState {
+    pub(super) fn panel_state_by_slot(&self, slot: PanelSlot) -> &PanelState {
         match slot {
             PanelSlot::Left => self.left_tabs.active(),
             PanelSlot::Right => self.right_tabs.active(),
         }
     }
 
-    fn is_active_panel_archive_view(&self) -> bool {
+    pub(super) fn is_active_panel_archive_view(&self) -> bool {
         self.archive_panel_view
             .as_ref()
             .is_some_and(|v| v.panel == PanelSlot::from(self.active_panel()))
     }
 
-    fn normalize_archive_entry_path(path: &str) -> String {
+    pub(super) fn normalize_archive_entry_path(path: &str) -> String {
         let trimmed = path.replace('\\', "/");
         trimmed.trim_matches('/').to_string()
     }
 
-    fn build_archive_panel_entries(
+    pub(super) fn build_archive_panel_entries(
         all_entries: &[ArchiveEntry],
         current_dir: &str,
     ) -> Vec<crate::models::file_entry::FileEntry> {
@@ -623,7 +626,7 @@ impl App {
         entries
     }
 
-    fn apply_archive_view_to_panel(&mut self, view: &ArchivePanelView) {
+    pub(super) fn apply_archive_view_to_panel(&mut self, view: &ArchivePanelView) {
         let display_path = if view.current_dir.is_empty() {
             format!("{}::/", view.archive_path.display())
         } else {
@@ -638,7 +641,7 @@ impl App {
         panel.scroll_offset = 0;
     }
 
-    fn enter_archive_panel_view(
+    pub(super) fn enter_archive_panel_view(
         &mut self,
         archive_path: &Path,
         password: Option<&str>,
@@ -663,7 +666,7 @@ impl App {
         Ok(())
     }
 
-    fn archive_view_go_parent(&mut self) -> bool {
+    pub(super) fn archive_view_go_parent(&mut self) -> bool {
         let active = PanelSlot::from(self.active_panel());
         let Some(mut view) = self.archive_panel_view.clone() else {
             return false;
@@ -706,7 +709,7 @@ impl App {
         true
     }
 
-    fn archive_view_enter_selected(&mut self) -> bool {
+    pub(super) fn archive_view_enter_selected(&mut self) -> bool {
         let active = PanelSlot::from(self.active_panel());
         let Some(mut view) = self.archive_panel_view.clone() else {
             return false;
@@ -732,7 +735,7 @@ impl App {
         true
     }
 
-    fn start_archive_copy_dialog(&mut self) {
+    pub(super) fn start_archive_copy_dialog(&mut self) {
         let Some(view) = self.archive_panel_view.clone() else {
             return;
         };
@@ -776,7 +779,7 @@ impl App {
         self.update_input_completion_state();
     }
 
-    fn copy_from_archive_view_to_dest(
+    pub(super) fn copy_from_archive_view_to_dest(
         &mut self,
         view: &ArchivePanelView,
         selected_entries: &[FileEntry],
@@ -848,13 +851,13 @@ impl App {
         self.pending_operation = Some(pending);
     }
 
-    fn cleanup_archive_copy_temp_dir(&mut self) {
+    pub(super) fn cleanup_archive_copy_temp_dir(&mut self) {
         if let Some(path) = self.archive_copy_temp_dir.take() {
             let _ = std::fs::remove_dir_all(path);
         }
     }
 
-    fn open_archive_preview_list(
+    pub(super) fn open_archive_preview_list(
         &mut self,
         archive_path: &Path,
         password: Option<&str>,
@@ -897,7 +900,7 @@ impl App {
     }
 
     /// 파일 작업 시작 (공통)
-    fn start_file_operation(&mut self, operation_type: OperationType) {
+    pub(super) fn start_file_operation(&mut self, operation_type: OperationType) {
         let sources = self.get_operation_sources();
 
         // 작업할 파일이 없으면 종료
@@ -929,11 +932,11 @@ impl App {
         self.update_input_completion_state();
     }
 
-    fn home_dir() -> Option<PathBuf> {
+    pub(super) fn home_dir() -> Option<PathBuf> {
         env::var_os("HOME").map(PathBuf::from)
     }
 
-    fn split_path_input(value: &str) -> (&str, &str) {
+    pub(super) fn split_path_input(value: &str) -> (&str, &str) {
         if let Some((idx, _)) = value
             .char_indices()
             .rev()
@@ -945,7 +948,11 @@ impl App {
         }
     }
 
-    fn input_parent_context(&self, value: &str, base_path: &Path) -> (PathBuf, String, String) {
+    pub(super) fn input_parent_context(
+        &self,
+        value: &str,
+        base_path: &Path,
+    ) -> (PathBuf, String, String) {
         if value == "~" {
             if let Some(home) = Self::home_dir() {
                 return (
@@ -972,7 +979,7 @@ impl App {
         }
     }
 
-    fn first_segment_candidate(
+    pub(super) fn first_segment_candidate(
         path: &Path,
         parent_path: &Path,
         display_prefix: &str,
@@ -992,7 +999,11 @@ impl App {
         Some(format!("{}{}", display_prefix, first_segment))
     }
 
-    fn history_completion_candidates(&self, value: &str, base_path: &Path) -> Vec<String> {
+    pub(super) fn history_completion_candidates(
+        &self,
+        value: &str,
+        base_path: &Path,
+    ) -> Vec<String> {
         let (parent_path, display_prefix, partial) = self.input_parent_context(value, base_path);
         self.active_panel_state()
             .history_entries
@@ -1004,7 +1015,11 @@ impl App {
             .collect()
     }
 
-    fn filesystem_completion_candidates(&self, value: &str, base_path: &Path) -> Vec<String> {
+    pub(super) fn filesystem_completion_candidates(
+        &self,
+        value: &str,
+        base_path: &Path,
+    ) -> Vec<String> {
         let (dir_path, display_prefix, partial) = self.input_parent_context(value, base_path);
 
         let mut candidates: Vec<String> = fs::read_dir(dir_path)
@@ -1027,7 +1042,11 @@ impl App {
         candidates
     }
 
-    fn collect_input_completion_candidates(&self, value: &str, base_path: &Path) -> Vec<String> {
+    pub(super) fn collect_input_completion_candidates(
+        &self,
+        value: &str,
+        base_path: &Path,
+    ) -> Vec<String> {
         let mut candidates = Vec::new();
         let mut seen = HashSet::new();
 
@@ -1044,7 +1063,7 @@ impl App {
         candidates
     }
 
-    fn selected_input_completion(&self) -> Option<String> {
+    pub(super) fn selected_input_completion(&self) -> Option<String> {
         match &self.dialog {
             Some(DialogKind::Input {
                 completion_candidates,
@@ -1055,7 +1074,7 @@ impl App {
         }
     }
 
-    fn update_input_completion_state(&mut self) {
+    pub(super) fn update_input_completion_state(&mut self) {
         let (value, base_path, purpose, mask_input) = match &self.dialog {
             Some(DialogKind::Input {
                 value,
@@ -1180,7 +1199,7 @@ impl App {
         }
     }
 
-    fn resolve_input_path(&self, input: &str, base_path: &Path) -> PathBuf {
+    pub(super) fn resolve_input_path(&self, input: &str, base_path: &Path) -> PathBuf {
         let expanded = if input == "~" {
             Self::home_dir().unwrap_or_else(|| PathBuf::from(input))
         } else if let Some(rest) = input.strip_prefix("~/") {
@@ -1207,7 +1226,7 @@ impl App {
     }
 
     /// 대상 경로 검증 (존재/디렉토리/재귀 검사). 실패 시 에러 메시지 반환.
-    fn validate_operation_destination(
+    pub(super) fn validate_operation_destination(
         sources: &[PathBuf],
         operation_type: OperationType,
         dest_path: &std::path::Path,
@@ -1233,7 +1252,7 @@ impl App {
     }
 
     /// 소스 평탄화 + 크기 계산 + processing 시작
-    fn prepare_and_start_operation(
+    pub(super) fn prepare_and_start_operation(
         &mut self,
         pending: &mut PendingOperation,
         dest_path: &std::path::Path,
@@ -1265,7 +1284,7 @@ impl App {
         self.dialog = Some(DialogKind::progress(pending.progress.clone()));
     }
 
-    fn remove_existing_path(path: &std::path::Path) {
+    pub(super) fn remove_existing_path(path: &std::path::Path) {
         if path.is_dir() {
             let _ = std::fs::remove_dir_all(path);
         } else {
@@ -1274,7 +1293,7 @@ impl App {
     }
 
     /// 단일 파일/디렉토리 엔트리 처리 + 결과 기록
-    fn execute_single_file_operation(
+    pub(super) fn execute_single_file_operation(
         &self,
         pending: &mut PendingOperation,
         file_entry: &FlattenedFile,
@@ -1335,7 +1354,7 @@ impl App {
         pending.current_index += 1;
     }
 
-    fn resolve_conflict(
+    pub(super) fn resolve_conflict(
         &mut self,
         pending: &mut PendingOperation,
         source: &std::path::Path,
@@ -1366,7 +1385,7 @@ impl App {
         true
     }
 
-    fn should_resolve_conflict(file_entry: &FlattenedFile) -> bool {
+    pub(super) fn should_resolve_conflict(file_entry: &FlattenedFile) -> bool {
         match file_entry.entry_kind {
             FlattenedEntryKind::Directory => file_entry.dest.exists() && !file_entry.dest.is_dir(),
             FlattenedEntryKind::File
@@ -1375,7 +1394,7 @@ impl App {
         }
     }
 
-    fn cleanup_moved_directories(&self, pending: &mut PendingOperation) {
+    pub(super) fn cleanup_moved_directories(&self, pending: &mut PendingOperation) {
         if pending.operation_type != OperationType::Move {
             return;
         }
@@ -1643,7 +1662,7 @@ impl App {
         }
     }
 
-    fn start_archive_create_worker(&mut self, request: ArchiveCreateRequest) {
+    pub(super) fn start_archive_create_worker(&mut self, request: ArchiveCreateRequest) {
         let (progress_tx, progress_rx) = mpsc::channel::<ArchiveProgressEvent>();
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let cancel_for_worker = Arc::clone(&cancel_flag);
@@ -1661,7 +1680,7 @@ impl App {
         self.dialog = Some(DialogKind::progress(progress));
     }
 
-    fn start_archive_extract_worker(&mut self, request: ArchiveExtractRequest) {
+    pub(super) fn start_archive_extract_worker(&mut self, request: ArchiveExtractRequest) {
         let (progress_tx, progress_rx) = mpsc::channel::<ArchiveProgressEvent>();
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let cancel_for_worker = Arc::clone(&cancel_flag);
@@ -1790,7 +1809,7 @@ impl App {
         self.finish_archive_operation(kind, result);
     }
 
-    fn finish_archive_operation(
+    pub(super) fn finish_archive_operation(
         &mut self,
         kind: ArchiveWorkerKind,
         join_result: std::result::Result<
@@ -1867,7 +1886,7 @@ impl App {
     }
 
     /// 작업 완료 처리
-    fn finish_operation(&mut self, mut pending: PendingOperation) {
+    pub(super) fn finish_operation(&mut self, mut pending: PendingOperation) {
         self.cleanup_moved_directories(&mut pending);
         self.cleanup_archive_copy_temp_dir();
 
@@ -1915,7 +1934,7 @@ impl App {
     }
 
     /// 대상 파일/디렉토리 삭제 (Overwrite/OverwriteAll 공용)
-    fn remove_existing_dest(&self) {
+    pub(super) fn remove_existing_dest(&self) {
         if let Some(DialogKind::Conflict { dest_path, .. }) = &self.dialog {
             let dest = dest_path.clone();
             if dest.is_dir() {
@@ -1927,7 +1946,7 @@ impl App {
     }
 
     /// 현재 파일 건너뛰기 + 인덱스 증가 (Skip/SkipAll 공용)
-    fn skip_current_file(&mut self) {
+    pub(super) fn skip_current_file(&mut self) {
         if let Some(pending) = self.pending_operation.as_mut() {
             pending.file_skipped();
             pending.current_index += 1;
@@ -2109,7 +2128,7 @@ impl App {
     }
 
     /// 파일/디렉토리 삭제 실행 + 결과 기록
-    fn execute_single_delete(
+    pub(super) fn execute_single_delete(
         &self,
         pending: &mut PendingOperation,
         source: &std::path::Path,
@@ -2284,7 +2303,7 @@ impl App {
         }
     }
 
-    fn focused_open_target(&self) -> std::result::Result<PathBuf, String> {
+    pub(super) fn focused_open_target(&self) -> std::result::Result<PathBuf, String> {
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
         let selected_index = panel.selected_index;
@@ -2310,7 +2329,7 @@ impl App {
         Ok(entry.path.clone())
     }
 
-    fn apply_open_default_app_result(
+    pub(super) fn apply_open_default_app_result(
         &mut self,
         target_path: &Path,
         result: crate::utils::error::Result<()>,
@@ -2361,7 +2380,7 @@ impl App {
         self.apply_open_default_app_result(&target_path, result);
     }
 
-    fn focused_terminal_editor_target(&self) -> std::result::Result<PathBuf, String> {
+    pub(super) fn focused_terminal_editor_target(&self) -> std::result::Result<PathBuf, String> {
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
         let selected_index = panel.selected_index;
@@ -2445,7 +2464,7 @@ impl App {
         }
     }
 
-    fn set_default_terminal_editor(&mut self, editor: &str) {
+    pub(super) fn set_default_terminal_editor(&mut self, editor: &str) {
         self.default_terminal_editor = editor.to_string();
         self.set_toast(&format!("Default editor: {}", editor));
     }
@@ -2505,7 +2524,10 @@ impl App {
     }
 
     /// 디렉토리/파일 크기 문자열 생성
-    fn format_size_display(&self, entry: &crate::models::file_entry::FileEntry) -> String {
+    pub(super) fn format_size_display(
+        &self,
+        entry: &crate::models::file_entry::FileEntry,
+    ) -> String {
         if entry.is_directory() {
             match self
                 .filesystem
@@ -2529,7 +2551,10 @@ impl App {
     }
 
     /// 하위 항목 개수 문자열 생성
-    fn format_children_info(&self, entry: &crate::models::file_entry::FileEntry) -> Option<String> {
+    pub(super) fn format_children_info(
+        &self,
+        entry: &crate::models::file_entry::FileEntry,
+    ) -> Option<String> {
         if !entry.is_directory() {
             return None;
         }
@@ -2596,8 +2621,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            value.insert(*cursor_pos, c);
-            *cursor_pos += c.len_utf8();
+            TextBufferEdit::insert_char(value, cursor_pos, c);
         }
     }
 
@@ -2606,16 +2630,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                // 이전 문자의 바이트 시작 위치 찾기
-                let prev_char_boundary = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                value.remove(prev_char_boundary);
-                *cursor_pos = prev_char_boundary;
-            }
+            TextBufferEdit::backspace(value, cursor_pos);
         }
     }
 
@@ -2624,7 +2639,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            Self::delete_prev_word(value, cursor_pos);
+            TextBufferEdit::delete_prev_word(value, cursor_pos);
         }
     }
 
@@ -2633,9 +2648,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                value.remove(*cursor_pos);
-            }
+            TextBufferEdit::delete(value, cursor_pos);
         }
     }
 
@@ -2644,13 +2657,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                *cursor_pos = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-            }
+            TextBufferEdit::left(value, cursor_pos);
         }
     }
 
@@ -2659,19 +2666,13 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                *cursor_pos = value[*cursor_pos..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| *cursor_pos + i)
-                    .unwrap_or(value.len());
-            }
+            TextBufferEdit::right(value, cursor_pos);
         }
     }
 
     pub fn dialog_mkdir_input_home(&mut self) {
         if let Some(DialogKind::MkdirInput { cursor_pos, .. }) = &mut self.dialog {
-            *cursor_pos = 0;
+            TextBufferEdit::home(cursor_pos);
         }
     }
 
@@ -2680,7 +2681,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            *cursor_pos = value.len();
+            TextBufferEdit::end(value, cursor_pos);
         }
     }
 
@@ -2722,8 +2723,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            value.insert(*cursor_pos, c);
-            *cursor_pos += c.len_utf8();
+            TextBufferEdit::insert_char(value, cursor_pos, c);
         }
     }
 
@@ -2732,15 +2732,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                let prev_char_boundary = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                value.remove(prev_char_boundary);
-                *cursor_pos = prev_char_boundary;
-            }
+            TextBufferEdit::backspace(value, cursor_pos);
         }
     }
 
@@ -2749,7 +2741,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            Self::delete_prev_word(value, cursor_pos);
+            TextBufferEdit::delete_prev_word(value, cursor_pos);
         }
     }
 
@@ -2758,9 +2750,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                value.remove(*cursor_pos);
-            }
+            TextBufferEdit::delete(value, cursor_pos);
         }
     }
 
@@ -2769,13 +2759,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                *cursor_pos = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-            }
+            TextBufferEdit::left(value, cursor_pos);
         }
     }
 
@@ -2784,19 +2768,13 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                *cursor_pos = value[*cursor_pos..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| *cursor_pos + i)
-                    .unwrap_or(value.len());
-            }
+            TextBufferEdit::right(value, cursor_pos);
         }
     }
 
     pub fn dialog_rename_input_home(&mut self) {
         if let Some(DialogKind::RenameInput { cursor_pos, .. }) = &mut self.dialog {
-            *cursor_pos = 0;
+            TextBufferEdit::home(cursor_pos);
         }
     }
 
@@ -2805,7 +2783,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            *cursor_pos = value.len();
+            TextBufferEdit::end(value, cursor_pos);
         }
     }
 
@@ -2847,8 +2825,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            value.insert(*cursor_pos, c);
-            *cursor_pos += c.len_utf8();
+            TextBufferEdit::insert_char(value, cursor_pos, c);
         }
     }
 
@@ -2857,15 +2834,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                let prev = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                value.remove(prev);
-                *cursor_pos = prev;
-            }
+            TextBufferEdit::backspace(value, cursor_pos);
         }
     }
 
@@ -2874,7 +2843,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            Self::delete_prev_word(value, cursor_pos);
+            TextBufferEdit::delete_prev_word(value, cursor_pos);
         }
     }
 
@@ -2883,9 +2852,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                value.remove(*cursor_pos);
-            }
+            TextBufferEdit::delete(value, cursor_pos);
         }
     }
 
@@ -2894,13 +2861,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                *cursor_pos = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-            }
+            TextBufferEdit::left(value, cursor_pos);
         }
     }
 
@@ -2909,19 +2870,13 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                *cursor_pos = value[*cursor_pos..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| *cursor_pos + i)
-                    .unwrap_or(value.len());
-            }
+            TextBufferEdit::right(value, cursor_pos);
         }
     }
 
     pub fn dialog_bookmark_rename_input_home(&mut self) {
         if let Some(DialogKind::BookmarkRenameInput { cursor_pos, .. }) = &mut self.dialog {
-            *cursor_pos = 0;
+            TextBufferEdit::home(cursor_pos);
         }
     }
 
@@ -2930,7 +2885,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            *cursor_pos = value.len();
+            TextBufferEdit::end(value, cursor_pos);
         }
     }
 
@@ -3020,7 +2975,7 @@ impl App {
         self.dialog = Some(DialogKind::history_list(items, selected_index));
     }
 
-    fn make_unique_bookmark_name(
+    pub(super) fn make_unique_bookmark_name(
         &self,
         desired_name: &str,
         exclude_index: Option<usize>,
@@ -3052,7 +3007,7 @@ impl App {
         base.to_string()
     }
 
-    fn bookmark_items(&self) -> Vec<(String, PathBuf)> {
+    pub(super) fn bookmark_items(&self) -> Vec<(String, PathBuf)> {
         self.bookmarks
             .iter()
             .map(|b| (b.name.clone(), b.path.clone()))
@@ -3312,7 +3267,11 @@ impl App {
         self.set_toast("History cleared");
     }
 
-    fn archive_preview_adjust_scroll(selected: usize, scroll: &mut usize, visible_height: usize) {
+    pub(super) fn archive_preview_adjust_scroll(
+        selected: usize,
+        scroll: &mut usize,
+        visible_height: usize,
+    ) {
         if visible_height == 0 {
             *scroll = 0;
             return;
@@ -3577,78 +3536,12 @@ impl App {
 
     // === FilterInput 다이얼로그 입력 처리 ===
 
-    fn prev_char_start(value: &str, cursor_pos: usize) -> usize {
-        value[..cursor_pos]
-            .char_indices()
-            .next_back()
-            .map(|(i, _)| i)
-            .unwrap_or(0)
-    }
-
-    fn is_word_delimiter(ch: char) -> bool {
-        ch.is_whitespace()
-            || matches!(
-                ch,
-                '/' | '\\'
-                    | ':'
-                    | ';'
-                    | ','
-                    | '.'
-                    | '|'
-                    | '('
-                    | ')'
-                    | '['
-                    | ']'
-                    | '{'
-                    | '}'
-                    | '<'
-                    | '>'
-                    | '"'
-                    | '\''
-                    | '`'
-            )
-    }
-
-    fn delete_prev_word(value: &mut String, cursor_pos: &mut usize) {
-        if *cursor_pos == 0 {
-            return;
-        }
-
-        let original = *cursor_pos;
-        let mut pos = original;
-
-        // 1) 커서 왼쪽의 구분자들을 먼저 건너뜀
-        while pos > 0 {
-            let prev = Self::prev_char_start(value, pos);
-            let ch = value[prev..pos].chars().next().unwrap_or_default();
-            if Self::is_word_delimiter(ch) {
-                pos = prev;
-            } else {
-                break;
-            }
-        }
-
-        // 2) 실제 단어 시작까지 이동
-        while pos > 0 {
-            let prev = Self::prev_char_start(value, pos);
-            let ch = value[prev..pos].chars().next().unwrap_or_default();
-            if Self::is_word_delimiter(ch) {
-                break;
-            }
-            pos = prev;
-        }
-
-        value.replace_range(pos..original, "");
-        *cursor_pos = pos;
-    }
-
     pub fn dialog_filter_input_char(&mut self, c: char) {
         let new_value = if let Some(DialogKind::FilterInput {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            value.insert(*cursor_pos, c);
-            *cursor_pos += c.len_utf8();
+            TextBufferEdit::insert_char(value, cursor_pos, c);
             Some(value.clone())
         } else {
             None
@@ -3663,15 +3556,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                let prev = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                value.remove(prev);
-                *cursor_pos = prev;
-            }
+            TextBufferEdit::backspace(value, cursor_pos);
             Some(value.clone())
         } else {
             None
@@ -3686,7 +3571,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            Self::delete_prev_word(value, cursor_pos);
+            TextBufferEdit::delete_prev_word(value, cursor_pos);
             Some(value.clone())
         } else {
             None
@@ -3701,9 +3586,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                value.remove(*cursor_pos);
-            }
+            TextBufferEdit::delete(value, cursor_pos);
             Some(value.clone())
         } else {
             None
@@ -3718,13 +3601,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                *cursor_pos = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-            }
+            TextBufferEdit::left(value, cursor_pos);
         }
     }
 
@@ -3733,19 +3610,13 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                *cursor_pos = value[*cursor_pos..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| *cursor_pos + i)
-                    .unwrap_or(value.len());
-            }
+            TextBufferEdit::right(value, cursor_pos);
         }
     }
 
     pub fn dialog_filter_input_home(&mut self) {
         if let Some(DialogKind::FilterInput { cursor_pos, .. }) = &mut self.dialog {
-            *cursor_pos = 0;
+            TextBufferEdit::home(cursor_pos);
         }
     }
 
@@ -3754,7 +3625,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            *cursor_pos = value.len();
+            TextBufferEdit::end(value, cursor_pos);
         }
     }
 
@@ -3791,5 +3662,4 @@ impl App {
         let _ = self.left_tabs.active_mut().refresh(&self.filesystem);
         let _ = self.right_tabs.active_mut().refresh(&self.filesystem);
     }
-
 }

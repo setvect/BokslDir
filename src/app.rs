@@ -29,6 +29,12 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
+mod controllers;
+mod dialogs;
+mod navigation;
+mod operations;
+mod text_edit;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedPanelHistory {
     entries: Vec<PathBuf>,
@@ -627,10 +633,6 @@ impl App {
         }
     }
 }
-
-include!("app/navigation.rs");
-include!("app/operations.rs");
-include!("app/dialogs.rs");
 
 impl Default for App {
     fn default() -> Self {

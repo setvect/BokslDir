@@ -1,3 +1,7 @@
+use super::controllers;
+use super::text_edit::TextBufferEdit;
+use super::*;
+
 impl App {
     // === 메뉴 관련 메서드 ===
 
@@ -87,79 +91,54 @@ impl App {
             Action::PageDown => self.move_selection_page_down(),
             Action::TabNew => self.new_tab_active_panel(),
             Action::TabClose => self.close_tab_active_panel(),
-            Action::Copy => self.start_copy(),
-            Action::Move => self.start_move(),
-            Action::OpenDefaultApp => self.start_open_default_app(),
-            Action::OpenTerminalEditor => self.start_open_terminal_editor(),
-            Action::Delete => self.start_delete(),
-            Action::PermanentDelete => self.start_permanent_delete(),
-            Action::MakeDirectory => self.start_mkdir(),
-            Action::Rename => self.start_rename(),
-            Action::ShowProperties => self.show_properties(),
-            Action::ArchiveCompress => self.start_archive_compress(),
-            Action::ArchiveExtract => self.start_archive_extract(),
-            Action::ArchiveExtractAuto => self.start_archive_extract_auto(),
-            Action::ArchivePreview => self.start_archive_preview(),
-            Action::ToggleSelection => self.toggle_selection_and_move_down(),
-            Action::InvertSelection => self.invert_selection(),
-            Action::SelectAll => self.select_all(),
-            Action::DeselectAll => self.deselect_all(),
-            Action::ShowHelp => self.show_help(),
-            Action::Refresh => self.refresh_current(),
-            Action::OpenMenu => self.open_menu(),
-            Action::ThemeDark => {
-                self.switch_theme_and_save("dark");
-            }
-            Action::ThemeLight => {
-                self.switch_theme_and_save("light");
-            }
-            Action::ThemeContrast => {
-                self.switch_theme_and_save("high_contrast");
-            }
-            Action::ToggleIconMode => {
-                use crate::ui::components::panel::IconMode;
-                self.icon_mode = match self.icon_mode {
-                    IconMode::Emoji => IconMode::Ascii,
-                    IconMode::Ascii => IconMode::Emoji,
-                };
-            }
-            Action::SetDefaultEditorVi => self.set_default_editor_vi(),
-            Action::SetDefaultEditorVim => self.set_default_editor_vim(),
-            Action::SetDefaultEditorNano => self.set_default_editor_nano(),
-            Action::SetDefaultEditorEmacs => self.set_default_editor_emacs(),
-            Action::SortByName => self.sort_active_panel(SortBy::Name),
-            Action::SortBySize => self.sort_active_panel(SortBy::Size),
-            Action::SortByDate => self.sort_active_panel(SortBy::Modified),
-            Action::SortByExt => self.sort_active_panel(SortBy::Extension),
-            Action::SortAscending => self.toggle_sort_order(),
-            Action::SortDescending => {
-                self.active_panel_state_mut()
-                    .set_sort_order(SortOrder::Descending);
-                self.re_sort_active_panel();
-            }
-            // Filter / Search (Phase 5.2)
-            Action::StartFilter => self.start_filter(),
-            Action::ClearFilter => self.clear_filter(),
-            // View (Phase 5.3)
-            Action::ToggleHidden => self.toggle_hidden(),
-            Action::ShowMountPoints => self.show_mount_points(),
-            Action::GoToPath => self.start_go_to_path(),
-            Action::ShowTabList => self.show_tab_list(),
-            Action::HistoryBack => self.history_back(),
-            Action::HistoryForward => self.history_forward(),
-            Action::ShowHistoryList => self.show_history_list(),
-            Action::AddBookmark => self.add_bookmark_current_dir(),
-            Action::ShowBookmarkList => self.show_bookmark_list(),
-            Action::SizeFormatAuto => {
-                self.size_format = SizeFormat::Auto;
-                self.set_toast("Size format: Auto");
-            }
-            Action::SizeFormatBytes => {
-                self.size_format = SizeFormat::Bytes;
-                self.set_toast("Size format: Bytes");
-            }
-            // 미구현 액션은 무시
-            _ => {}
+            Action::ShowHelp
+            | Action::Refresh
+            | Action::OpenMenu
+            | Action::ThemeDark
+            | Action::ThemeLight
+            | Action::ThemeContrast
+            | Action::ToggleIconMode
+            | Action::SetDefaultEditorVi
+            | Action::SetDefaultEditorVim
+            | Action::SetDefaultEditorNano
+            | Action::SetDefaultEditorEmacs
+            | Action::About => controllers::dialog_controller::execute(self, action),
+            Action::Copy
+            | Action::Move
+            | Action::OpenDefaultApp
+            | Action::OpenTerminalEditor
+            | Action::Delete
+            | Action::PermanentDelete
+            | Action::MakeDirectory
+            | Action::Rename
+            | Action::ShowProperties
+            | Action::ArchiveCompress
+            | Action::ArchiveExtract
+            | Action::ArchiveExtractAuto
+            | Action::ArchivePreview
+            | Action::ToggleSelection
+            | Action::InvertSelection
+            | Action::SelectAll
+            | Action::DeselectAll
+            | Action::SortByName
+            | Action::SortBySize
+            | Action::SortByDate
+            | Action::SortByExt
+            | Action::SortAscending
+            | Action::SortDescending
+            | Action::StartFilter
+            | Action::ClearFilter
+            | Action::ToggleHidden
+            | Action::ShowMountPoints
+            | Action::GoToPath
+            | Action::ShowTabList
+            | Action::HistoryBack
+            | Action::HistoryForward
+            | Action::ShowHistoryList
+            | Action::AddBookmark
+            | Action::ShowBookmarkList
+            | Action::SizeFormatAuto
+            | Action::SizeFormatBytes => controllers::operation_controller::execute(self, action),
         }
     }
 
@@ -173,7 +152,7 @@ impl App {
     // === 정렬 관련 메서드 (Phase 5.1) ===
 
     /// 활성 패널 정렬 기준 변경 (같은 기준이면 순서 토글)
-    fn sort_active_panel(&mut self, sort_by: SortBy) {
+    pub(super) fn sort_active_panel(&mut self, sort_by: SortBy) {
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
 
@@ -208,7 +187,7 @@ impl App {
     }
 
     /// 활성 패널 정렬 순서 토글
-    fn toggle_sort_order(&mut self) {
+    pub(super) fn toggle_sort_order(&mut self) {
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
 
@@ -243,7 +222,7 @@ impl App {
     }
 
     /// 활성 패널 재정렬 (정렬 상태 변경 후 호출)
-    fn re_sort_active_panel(&mut self) {
+    pub(super) fn re_sort_active_panel(&mut self) {
         let panel = self.active_panel_state_mut();
         panel.sort_entries();
         panel.selected_items.clear();
@@ -322,7 +301,7 @@ impl App {
     /// 활성 패널 경로 변경 공통 처리
     ///
     /// `record_in_history`가 true이면 이동 성공 시 히스토리에 기록합니다.
-    fn change_active_dir(
+    pub(super) fn change_active_dir(
         &mut self,
         path: PathBuf,
         record_in_history: bool,
@@ -486,7 +465,12 @@ impl App {
         self.dialog = Some(DialogKind::message(title, message));
     }
 
-    fn format_user_error(action: &str, path: Option<&Path>, error: &str, hint: &str) -> String {
+    pub(super) fn format_user_error(
+        action: &str,
+        path: Option<&Path>,
+        error: &str,
+        hint: &str,
+    ) -> String {
         let mut message = format!("{} failed.", action);
         if let Some(p) = path {
             message.push_str(&format!("\nPath: {}", p.display()));
@@ -498,7 +482,7 @@ impl App {
         message
     }
 
-    fn focus_active_entry_by_name(&mut self, name: &str) -> bool {
+    pub(super) fn focus_active_entry_by_name(&mut self, name: &str) -> bool {
         let (idx_opt, offset) = {
             let panel = self.active_panel_state();
             let has_parent = panel.current_path.parent().is_some();
@@ -598,8 +582,7 @@ impl App {
             ..
         }) = &mut self.dialog
         {
-            search_query.insert(*search_cursor, c);
-            *search_cursor += c.len_utf8();
+            TextBufferEdit::insert_char(search_query, search_cursor, c);
             *scroll_offset = 0;
         }
     }
@@ -612,16 +595,8 @@ impl App {
             ..
         }) = &mut self.dialog
         {
-            if *search_cursor > 0 {
-                let prev = search_query[..*search_cursor]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                search_query.remove(prev);
-                *search_cursor = prev;
-                *scroll_offset = 0;
-            }
+            TextBufferEdit::backspace(search_query, search_cursor);
+            *scroll_offset = 0;
         }
     }
 
@@ -633,7 +608,7 @@ impl App {
             ..
         }) = &mut self.dialog
         {
-            Self::delete_prev_word(search_query, search_cursor);
+            TextBufferEdit::delete_prev_word(search_query, search_cursor);
             *scroll_offset = 0;
         }
     }
@@ -646,10 +621,8 @@ impl App {
             ..
         }) = &mut self.dialog
         {
-            if *search_cursor < search_query.len() {
-                search_query.remove(*search_cursor);
-                *scroll_offset = 0;
-            }
+            TextBufferEdit::delete(search_query, search_cursor);
+            *scroll_offset = 0;
         }
     }
 
@@ -660,13 +633,7 @@ impl App {
             ..
         }) = &mut self.dialog
         {
-            if *search_cursor > 0 {
-                *search_cursor = search_query[..*search_cursor]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-            }
+            TextBufferEdit::left(search_query, search_cursor);
         }
     }
 
@@ -677,19 +644,13 @@ impl App {
             ..
         }) = &mut self.dialog
         {
-            if *search_cursor < search_query.len() {
-                *search_cursor = search_query[*search_cursor..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| *search_cursor + i)
-                    .unwrap_or(search_query.len());
-            }
+            TextBufferEdit::right(search_query, search_cursor);
         }
     }
 
     pub fn dialog_help_cursor_home(&mut self) {
         if let Some(DialogKind::Help { search_cursor, .. }) = &mut self.dialog {
-            *search_cursor = 0;
+            TextBufferEdit::home(search_cursor);
         }
     }
 
@@ -700,12 +661,12 @@ impl App {
             ..
         }) = &mut self.dialog
         {
-            *search_cursor = search_query.len();
+            TextBufferEdit::end(search_query, search_cursor);
         }
     }
 
     /// 최대 인덱스 계산
-    fn get_max_index(&self) -> usize {
+    pub(super) fn get_max_index(&self) -> usize {
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
 
@@ -717,7 +678,7 @@ impl App {
     }
 
     /// 페이지 크기 계산 (화면에 표시되는 항목 수)
-    fn get_page_size(&self) -> usize {
+    pub(super) fn get_page_size(&self) -> usize {
         let panel = self.active_panel_state();
         let (_, terminal_height) = self.layout.terminal_size();
         let panel_inner_height = terminal_height.saturating_sub(4);
@@ -734,7 +695,7 @@ impl App {
     }
 
     /// 스크롤 오프셋을 현재 선택 위치에 맞게 조정
-    fn adjust_scroll_offset(&mut self) {
+    pub(super) fn adjust_scroll_offset(&mut self) {
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
         let selected = panel.selected_index;
@@ -779,7 +740,7 @@ impl App {
     }
 
     /// ".." 선택 시 상위 디렉토리로 이동 + 포커스 복원
-    fn navigate_to_parent(&mut self, current_path: &std::path::Path) {
+    pub(super) fn navigate_to_parent(&mut self, current_path: &std::path::Path) {
         if let Some(parent) = current_path.parent() {
             let parent_path = parent.to_path_buf();
             let current_dir_name = current_path
@@ -791,7 +752,7 @@ impl App {
     }
 
     /// 디렉토리 항목 진입
-    fn enter_directory(&mut self, path: PathBuf) {
+    pub(super) fn enter_directory(&mut self, path: PathBuf) {
         let _ = self.change_active_dir(path, true, None);
     }
 
@@ -881,5 +842,4 @@ impl App {
         let panel_mut = self.active_panel_state_mut();
         panel_mut.deselect_all();
     }
-
 }

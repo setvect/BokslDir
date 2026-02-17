@@ -118,6 +118,13 @@ pub struct KeyBinding {
     pub action: Action,
 }
 
+/// 시퀀스 키 바인딩 정의 (예: `g` + `g`)
+pub struct SequenceBinding {
+    pub prefix: char,
+    pub key: char,
+    pub action: Action,
+}
+
 /// 모든 액션 메타데이터
 pub static ACTION_DEFS: &[ActionDef] = &[
     // Navigation
@@ -166,7 +173,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         id: "go_top",
         label: "Top",
         category: ActionCategory::Navigation,
-        shortcut_display: Some("gg / G"),
+        shortcut_display: Some("gg / Home"),
         command_bar: Some(CommandBarEntry {
             key: "gg/G",
             label: "Top/Bot",
@@ -178,7 +185,7 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         id: "go_bottom",
         label: "Bottom",
         category: ActionCategory::Navigation,
-        shortcut_display: None,
+        shortcut_display: Some("G / End"),
         command_bar: None,
     },
     ActionDef {
@@ -924,6 +931,113 @@ pub fn find_action(modifiers: KeyModifiers, code: KeyCode) -> Option<Action> {
     None
 }
 
+/// 시퀀스 입력(prefix + key)으로 액션 조회
+pub fn find_sequence_action(prefix: char, key: char) -> Option<Action> {
+    sequence_bindings()
+        .iter()
+        .find(|binding| binding.prefix == prefix && binding.key == key)
+        .map(|binding| binding.action)
+}
+
+/// 시퀀스 시작 prefix 여부
+pub fn is_sequence_prefix(c: char) -> bool {
+    sequence_bindings()
+        .iter()
+        .any(|binding| binding.prefix == c)
+}
+
+fn build_sequence_bindings() -> Vec<SequenceBinding> {
+    vec![
+        SequenceBinding {
+            prefix: 'g',
+            key: 'g',
+            action: Action::GoToTop,
+        },
+        SequenceBinding {
+            prefix: 'g',
+            key: 'm',
+            action: Action::ShowMountPoints,
+        },
+        SequenceBinding {
+            prefix: 'g',
+            key: 'p',
+            action: Action::GoToPath,
+        },
+        SequenceBinding {
+            prefix: 's',
+            key: 'n',
+            action: Action::SortByName,
+        },
+        SequenceBinding {
+            prefix: 's',
+            key: 's',
+            action: Action::SortBySize,
+        },
+        SequenceBinding {
+            prefix: 's',
+            key: 'd',
+            action: Action::SortByDate,
+        },
+        SequenceBinding {
+            prefix: 's',
+            key: 'e',
+            action: Action::SortByExt,
+        },
+        SequenceBinding {
+            prefix: 's',
+            key: 'r',
+            action: Action::SortAscending,
+        },
+        SequenceBinding {
+            prefix: 't',
+            key: 'n',
+            action: Action::TabNew,
+        },
+        SequenceBinding {
+            prefix: 't',
+            key: 'x',
+            action: Action::TabClose,
+        },
+        SequenceBinding {
+            prefix: 't',
+            key: 't',
+            action: Action::ShowTabList,
+        },
+        SequenceBinding {
+            prefix: 't',
+            key: 'h',
+            action: Action::ShowHistoryList,
+        },
+        SequenceBinding {
+            prefix: 't',
+            key: 'b',
+            action: Action::ShowBookmarkList,
+        },
+        SequenceBinding {
+            prefix: 'z',
+            key: 'c',
+            action: Action::ArchiveCompress,
+        },
+        SequenceBinding {
+            prefix: 'z',
+            key: 'x',
+            action: Action::ArchiveExtract,
+        },
+        SequenceBinding {
+            prefix: 'z',
+            key: 'a',
+            action: Action::ArchiveExtractAuto,
+        },
+    ]
+}
+
+static SEQUENCE_BINDINGS: LazyLock<Vec<SequenceBinding>> = LazyLock::new(build_sequence_bindings);
+
+/// 시퀀스 키 바인딩 목록 조회 (1회 초기화 후 재사용)
+pub fn sequence_bindings() -> &'static [SequenceBinding] {
+    SEQUENCE_BINDINGS.as_slice()
+}
+
 /// action_id 문자열로 Action 조회
 impl Action {
     pub fn from_id(id: &str) -> Option<Action> {
@@ -1123,6 +1237,52 @@ mod tests {
             find_action(KeyModifiers::SHIFT, KeyCode::Tab),
             Some(Action::TogglePanel)
         );
+    }
+
+    #[test]
+    fn test_find_sequence_action() {
+        assert_eq!(find_sequence_action('g', 'g'), Some(Action::GoToTop));
+        assert_eq!(
+            find_sequence_action('g', 'm'),
+            Some(Action::ShowMountPoints)
+        );
+        assert_eq!(find_sequence_action('g', 'p'), Some(Action::GoToPath));
+        assert_eq!(find_sequence_action('s', 'n'), Some(Action::SortByName));
+        assert_eq!(find_sequence_action('s', 's'), Some(Action::SortBySize));
+        assert_eq!(find_sequence_action('s', 'd'), Some(Action::SortByDate));
+        assert_eq!(find_sequence_action('s', 'e'), Some(Action::SortByExt));
+        assert_eq!(find_sequence_action('s', 'r'), Some(Action::SortAscending));
+        assert_eq!(find_sequence_action('t', 'n'), Some(Action::TabNew));
+        assert_eq!(find_sequence_action('t', 'x'), Some(Action::TabClose));
+        assert_eq!(find_sequence_action('t', 't'), Some(Action::ShowTabList));
+        assert_eq!(
+            find_sequence_action('t', 'h'),
+            Some(Action::ShowHistoryList)
+        );
+        assert_eq!(
+            find_sequence_action('t', 'b'),
+            Some(Action::ShowBookmarkList)
+        );
+        assert_eq!(
+            find_sequence_action('z', 'c'),
+            Some(Action::ArchiveCompress)
+        );
+        assert_eq!(find_sequence_action('z', 'x'), Some(Action::ArchiveExtract));
+        assert_eq!(
+            find_sequence_action('z', 'a'),
+            Some(Action::ArchiveExtractAuto)
+        );
+        assert_eq!(find_sequence_action('g', 'x'), None);
+        assert_eq!(find_sequence_action('x', 'x'), None);
+    }
+
+    #[test]
+    fn test_is_sequence_prefix() {
+        assert!(is_sequence_prefix('g'));
+        assert!(is_sequence_prefix('s'));
+        assert!(is_sequence_prefix('t'));
+        assert!(is_sequence_prefix('z'));
+        assert!(!is_sequence_prefix('y'));
     }
 
     #[test]

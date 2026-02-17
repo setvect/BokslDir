@@ -1128,6 +1128,21 @@ fn test_editor_preset_actions_update_default_editor() {
 }
 
 #[test]
+fn test_about_action_opens_message_dialog() {
+    let mut app = make_test_app();
+
+    app.execute_action(Action::About);
+
+    match &app.dialog {
+        Some(DialogKind::Message { title, message }) => {
+            assert_eq!(title, "복슬Dir 정보");
+            assert!(message.contains("복슬Dir"));
+        }
+        other => panic!("expected about message dialog, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_apply_open_default_app_result_sets_toast_on_success() {
     let mut app = make_test_app();
     let file_path = PathBuf::from("/tmp/example.txt");

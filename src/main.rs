@@ -6,7 +6,7 @@ mod ui;
 mod utils;
 
 use app::{App, TerminalEditorRequest};
-use core::actions::{find_action, Action};
+use core::actions::{find_action, find_sequence_action, is_sequence_prefix};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -215,86 +215,26 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     // 1) pending 키 시퀀스 처리 (gg, s+키, t+키, z+키)
     if let Some(pending) = app.pending_key {
         app.clear_pending_key();
-        match (pending, &code) {
-            ('g', KeyCode::Char('g')) => {
-                app.execute_action(Action::GoToTop);
-                return;
+        if modifiers == KeyModifiers::NONE {
+            if let KeyCode::Char(key) = code {
+                if let Some(action) = find_sequence_action(pending, key) {
+                    app.execute_action(action);
+                    return;
+                }
             }
-            ('g', KeyCode::Char('m')) => {
-                app.execute_action(Action::ShowMountPoints);
-                return;
-            }
-            ('g', KeyCode::Char('p')) => {
-                app.execute_action(Action::GoToPath);
-                return;
-            }
-            ('s', KeyCode::Char('n')) => {
-                app.execute_action(Action::SortByName);
-                return;
-            }
-            ('s', KeyCode::Char('s')) => {
-                app.execute_action(Action::SortBySize);
-                return;
-            }
-            ('s', KeyCode::Char('d')) => {
-                app.execute_action(Action::SortByDate);
-                return;
-            }
-            ('s', KeyCode::Char('e')) => {
-                app.execute_action(Action::SortByExt);
-                return;
-            }
-            ('s', KeyCode::Char('r')) => {
-                app.execute_action(Action::SortAscending);
-                return;
-            }
-            ('t', KeyCode::Char('n')) => {
-                app.execute_action(Action::TabNew);
-                return;
-            }
-            ('t', KeyCode::Char('x')) => {
-                app.execute_action(Action::TabClose);
-                return;
-            }
-            ('t', KeyCode::Char('t')) => {
-                app.execute_action(Action::ShowTabList);
-                return;
-            }
-            ('t', KeyCode::Char('h')) => {
-                app.execute_action(Action::ShowHistoryList);
-                return;
-            }
-            ('t', KeyCode::Char('b')) => {
-                app.execute_action(Action::ShowBookmarkList);
-                return;
-            }
-            ('z', KeyCode::Char('c')) => {
-                app.execute_action(Action::ArchiveCompress);
-                return;
-            }
-            ('z', KeyCode::Char('x')) => {
-                app.execute_action(Action::ArchiveExtract);
-                return;
-            }
-            ('z', KeyCode::Char('a')) => {
-                app.execute_action(Action::ArchiveExtractAuto);
-                return;
-            }
-            _ => {} // 잘못된 시퀀스, fall through
         }
     }
 
-    // 2) 'g' 또는 's' 또는 't' 또는 'z' 시작 시 시퀀스 모드 진입
-    if modifiers == KeyModifiers::NONE
-        && matches!(
-            code,
-            KeyCode::Char('g') | KeyCode::Char('s') | KeyCode::Char('t') | KeyCode::Char('z')
-        )
-    {
+    // 2) 시퀀스 prefix 입력 시 시퀀스 모드 진입
+    if modifiers == KeyModifiers::NONE {
         if let KeyCode::Char(c) = code {
-            app.set_pending_key(c);
+            if !is_sequence_prefix(c) {
+                // fall through
+            } else {
+                app.set_pending_key(c);
+                return;
+            }
         }
-        return;
     }
 
     // 3) 테이블 조회 → 액션 실행
@@ -1278,13 +1218,17 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
 mod tests {
     use super::*;
 
+    fn dispatch_sequence(app: &mut App, prefix: char, key: char) {
+        handle_normal_keys(app, KeyModifiers::NONE, KeyCode::Char(prefix));
+        assert_eq!(app.pending_key, Some(prefix));
+        handle_normal_keys(app, KeyModifiers::NONE, KeyCode::Char(key));
+        assert_eq!(app.pending_key, None);
+    }
+
     #[test]
     fn test_t_b_sequence_opens_bookmark_flow() {
         let mut app = App::new_for_test();
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('t'));
-        assert_eq!(app.pending_key, Some('t'));
-
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('b'));
+        dispatch_sequence(&mut app, 't', 'b');
         assert!(matches!(
             app.dialog,
             Some(DialogKind::BookmarkList { .. }) | Some(DialogKind::Message { .. })
@@ -1294,20 +1238,14 @@ mod tests {
     #[test]
     fn test_g_p_sequence_opens_go_to_path_dialog() {
         let mut app = App::new_for_test();
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('g'));
-        assert_eq!(app.pending_key, Some('g'));
-
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('p'));
+        dispatch_sequence(&mut app, 'g', 'p');
         assert!(matches!(app.dialog, Some(DialogKind::Input { .. })));
     }
 
     #[test]
     fn test_z_c_sequence_dispatches_archive_compress() {
         let mut app = App::new_for_test();
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('z'));
-        assert_eq!(app.pending_key, Some('z'));
-
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
+        dispatch_sequence(&mut app, 'z', 'c');
         assert!(matches!(
             app.dialog,
             Some(DialogKind::ArchiveCreateOptions { .. }) | Some(DialogKind::Message { .. })
@@ -1317,10 +1255,92 @@ mod tests {
     #[test]
     fn test_z_a_sequence_dispatches_archive_auto_extract() {
         let mut app = App::new_for_test();
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('z'));
-        assert_eq!(app.pending_key, Some('z'));
+        dispatch_sequence(&mut app, 'z', 'a');
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::Error { .. })
+                | Some(DialogKind::Input { .. })
+                | Some(DialogKind::Progress { .. })
+                | Some(DialogKind::Message { .. })
+                | Some(DialogKind::Conflict { .. })
+        ));
+    }
 
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('a'));
+    #[test]
+    fn test_all_registered_sequences_dispatch() {
+        let mut app = App::new_for_test();
+        app.active_panel_state_mut().selected_index = 1;
+        dispatch_sequence(&mut app, 'g', 'g');
+        assert_eq!(app.active_panel_state().selected_index, 0);
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 'g', 'm');
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::MountPoints { .. }) | Some(DialogKind::Message { .. })
+        ));
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 's', 'n');
+        assert_eq!(
+            app.active_panel_state().sort_by,
+            crate::models::panel_state::SortBy::Name
+        );
+        assert_eq!(
+            app.active_panel_state().sort_order,
+            crate::models::panel_state::SortOrder::Descending
+        );
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 's', 's');
+        assert_eq!(
+            app.active_panel_state().sort_by,
+            crate::models::panel_state::SortBy::Size
+        );
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 's', 'd');
+        assert_eq!(
+            app.active_panel_state().sort_by,
+            crate::models::panel_state::SortBy::Modified
+        );
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 's', 'e');
+        assert_eq!(
+            app.active_panel_state().sort_by,
+            crate::models::panel_state::SortBy::Extension
+        );
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 's', 'r');
+        assert_eq!(
+            app.active_panel_state().sort_order,
+            crate::models::panel_state::SortOrder::Descending
+        );
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 't', 'n');
+        assert_eq!(app.panel_tab_count(ActivePanel::Left), 2);
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 't', 'x');
+        assert_eq!(app.panel_tab_count(ActivePanel::Left), 1);
+        assert_eq!(app.toast_display(), Some("Cannot close last tab"));
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 't', 't');
+        assert!(matches!(app.dialog, Some(DialogKind::TabList { .. })));
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 't', 'h');
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::HistoryList { .. }) | Some(DialogKind::Message { .. })
+        ));
+
+        let mut app = App::new_for_test();
+        dispatch_sequence(&mut app, 'z', 'x');
         assert!(matches!(
             app.dialog,
             Some(DialogKind::Error { .. })

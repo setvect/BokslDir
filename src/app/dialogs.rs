@@ -1,3 +1,6 @@
+use super::text_edit::TextBufferEdit;
+use super::*;
+
 impl App {
     // === 다이얼로그 입력 처리 메서드 ===
 
@@ -7,8 +10,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            value.insert(*cursor_pos, c);
-            *cursor_pos += c.len_utf8();
+            TextBufferEdit::insert_char(value, cursor_pos, c);
         }
         self.update_input_completion_state();
     }
@@ -19,15 +21,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                let prev = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                value.remove(prev);
-                *cursor_pos = prev;
-            }
+            TextBufferEdit::backspace(value, cursor_pos);
         }
         self.update_input_completion_state();
     }
@@ -38,7 +32,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            Self::delete_prev_word(value, cursor_pos);
+            TextBufferEdit::delete_prev_word(value, cursor_pos);
         }
         self.update_input_completion_state();
     }
@@ -49,9 +43,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                value.remove(*cursor_pos);
-            }
+            TextBufferEdit::delete(value, cursor_pos);
         }
         self.update_input_completion_state();
     }
@@ -62,13 +54,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos > 0 {
-                *cursor_pos = value[..*cursor_pos]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-            }
+            TextBufferEdit::left(value, cursor_pos);
         }
         self.update_input_completion_state();
     }
@@ -79,13 +65,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            if *cursor_pos < value.len() {
-                *cursor_pos = value[*cursor_pos..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| *cursor_pos + i)
-                    .unwrap_or(value.len());
-            }
+            TextBufferEdit::right(value, cursor_pos);
         }
         self.update_input_completion_state();
     }
@@ -93,7 +73,7 @@ impl App {
     /// 입력 다이얼로그: Home
     pub fn dialog_input_home(&mut self) {
         if let Some(DialogKind::Input { cursor_pos, .. }) = &mut self.dialog {
-            *cursor_pos = 0;
+            TextBufferEdit::home(cursor_pos);
         }
         self.update_input_completion_state();
     }
@@ -104,7 +84,7 @@ impl App {
             value, cursor_pos, ..
         }) = &mut self.dialog
         {
-            *cursor_pos = value.len();
+            TextBufferEdit::end(value, cursor_pos);
         }
         self.update_input_completion_state();
     }
@@ -139,7 +119,7 @@ impl App {
         }
     }
 
-    fn archive_create_field_count(use_password: bool) -> usize {
+    pub(super) fn archive_create_field_count(use_password: bool) -> usize {
         if use_password {
             5
         } else {
@@ -213,16 +193,17 @@ impl App {
         {
             match *focused_field {
                 0 => {
-                    path_value.insert(*path_cursor_pos, c);
-                    *path_cursor_pos += c.len_utf8();
+                    TextBufferEdit::insert_char(path_value, path_cursor_pos, c);
                 }
                 2 if *use_password => {
-                    password_value.insert(*password_cursor_pos, c);
-                    *password_cursor_pos += c.len_utf8();
+                    TextBufferEdit::insert_char(password_value, password_cursor_pos, c);
                 }
                 3 if *use_password => {
-                    password_confirm_value.insert(*password_confirm_cursor_pos, c);
-                    *password_confirm_cursor_pos += c.len_utf8();
+                    TextBufferEdit::insert_char(
+                        password_confirm_value,
+                        password_confirm_cursor_pos,
+                        c,
+                    );
                 }
                 _ => {}
             }
@@ -243,38 +224,12 @@ impl App {
         }) = &mut self.dialog
         {
             match *focused_field {
-                0 => {
-                    if *path_cursor_pos > 0 {
-                        let prev = path_value[..*path_cursor_pos]
-                            .char_indices()
-                            .next_back()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                        path_value.remove(prev);
-                        *path_cursor_pos = prev;
-                    }
-                }
+                0 => TextBufferEdit::backspace(path_value, path_cursor_pos),
                 2 if *use_password => {
-                    if *password_cursor_pos > 0 {
-                        let prev = password_value[..*password_cursor_pos]
-                            .char_indices()
-                            .next_back()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                        password_value.remove(prev);
-                        *password_cursor_pos = prev;
-                    }
+                    TextBufferEdit::backspace(password_value, password_cursor_pos)
                 }
                 3 if *use_password => {
-                    if *password_confirm_cursor_pos > 0 {
-                        let prev = password_confirm_value[..*password_confirm_cursor_pos]
-                            .char_indices()
-                            .next_back()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                        password_confirm_value.remove(prev);
-                        *password_confirm_cursor_pos = prev;
-                    }
+                    TextBufferEdit::backspace(password_confirm_value, password_confirm_cursor_pos)
                 }
                 _ => {}
             }
@@ -295,20 +250,10 @@ impl App {
         }) = &mut self.dialog
         {
             match *focused_field {
-                0 => {
-                    if *path_cursor_pos < path_value.len() {
-                        path_value.remove(*path_cursor_pos);
-                    }
-                }
-                2 if *use_password => {
-                    if *password_cursor_pos < password_value.len() {
-                        password_value.remove(*password_cursor_pos);
-                    }
-                }
+                0 => TextBufferEdit::delete(path_value, path_cursor_pos),
+                2 if *use_password => TextBufferEdit::delete(password_value, password_cursor_pos),
                 3 if *use_password => {
-                    if *password_confirm_cursor_pos < password_confirm_value.len() {
-                        password_confirm_value.remove(*password_confirm_cursor_pos);
-                    }
+                    TextBufferEdit::delete(password_confirm_value, password_confirm_cursor_pos)
                 }
                 _ => {}
             }
@@ -329,33 +274,10 @@ impl App {
         }) = &mut self.dialog
         {
             match *focused_field {
-                0 => {
-                    if *path_cursor_pos > 0 {
-                        *path_cursor_pos = path_value[..*path_cursor_pos]
-                            .char_indices()
-                            .next_back()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                    }
-                }
-                2 if *use_password => {
-                    if *password_cursor_pos > 0 {
-                        *password_cursor_pos = password_value[..*password_cursor_pos]
-                            .char_indices()
-                            .next_back()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                    }
-                }
+                0 => TextBufferEdit::left(path_value, path_cursor_pos),
+                2 if *use_password => TextBufferEdit::left(password_value, password_cursor_pos),
                 3 if *use_password => {
-                    if *password_confirm_cursor_pos > 0 {
-                        *password_confirm_cursor_pos = password_confirm_value
-                            [..*password_confirm_cursor_pos]
-                            .char_indices()
-                            .next_back()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                    }
+                    TextBufferEdit::left(password_confirm_value, password_confirm_cursor_pos)
                 }
                 4 => {
                     self.archive_create_dialog_toggle_button();
@@ -379,33 +301,10 @@ impl App {
         }) = &mut self.dialog
         {
             match *focused_field {
-                0 => {
-                    if *path_cursor_pos < path_value.len() {
-                        *path_cursor_pos = path_value[*path_cursor_pos..]
-                            .char_indices()
-                            .nth(1)
-                            .map(|(i, _)| *path_cursor_pos + i)
-                            .unwrap_or(path_value.len());
-                    }
-                }
-                2 if *use_password => {
-                    if *password_cursor_pos < password_value.len() {
-                        *password_cursor_pos = password_value[*password_cursor_pos..]
-                            .char_indices()
-                            .nth(1)
-                            .map(|(i, _)| *password_cursor_pos + i)
-                            .unwrap_or(password_value.len());
-                    }
-                }
+                0 => TextBufferEdit::right(path_value, path_cursor_pos),
+                2 if *use_password => TextBufferEdit::right(password_value, password_cursor_pos),
                 3 if *use_password => {
-                    if *password_confirm_cursor_pos < password_confirm_value.len() {
-                        *password_confirm_cursor_pos = password_confirm_value
-                            [*password_confirm_cursor_pos..]
-                            .char_indices()
-                            .nth(1)
-                            .map(|(i, _)| *password_confirm_cursor_pos + i)
-                            .unwrap_or(password_confirm_value.len());
-                    }
+                    TextBufferEdit::right(password_confirm_value, password_confirm_cursor_pos)
                 }
                 4 => {
                     self.archive_create_dialog_toggle_button();
@@ -426,9 +325,9 @@ impl App {
         }) = &mut self.dialog
         {
             match *focused_field {
-                0 => *path_cursor_pos = 0,
-                2 if *use_password => *password_cursor_pos = 0,
-                3 if *use_password => *password_confirm_cursor_pos = 0,
+                0 => TextBufferEdit::home(path_cursor_pos),
+                2 if *use_password => TextBufferEdit::home(password_cursor_pos),
+                3 if *use_password => TextBufferEdit::home(password_confirm_cursor_pos),
                 _ => {}
             }
         }
@@ -448,9 +347,11 @@ impl App {
         }) = &mut self.dialog
         {
             match *focused_field {
-                0 => *path_cursor_pos = path_value.len(),
-                2 if *use_password => *password_cursor_pos = password_value.len(),
-                3 if *use_password => *password_confirm_cursor_pos = password_confirm_value.len(),
+                0 => TextBufferEdit::end(path_value, path_cursor_pos),
+                2 if *use_password => TextBufferEdit::end(password_value, password_cursor_pos),
+                3 if *use_password => {
+                    TextBufferEdit::end(password_confirm_value, password_confirm_cursor_pos)
+                }
                 _ => {}
             }
         }
@@ -470,11 +371,14 @@ impl App {
         }) = &mut self.dialog
         {
             match *focused_field {
-                0 => Self::delete_prev_word(path_value, path_cursor_pos),
-                2 if *use_password => Self::delete_prev_word(password_value, password_cursor_pos),
-                3 if *use_password => {
-                    Self::delete_prev_word(password_confirm_value, password_confirm_cursor_pos)
+                0 => TextBufferEdit::delete_prev_word(path_value, path_cursor_pos),
+                2 if *use_password => {
+                    TextBufferEdit::delete_prev_word(password_value, password_cursor_pos)
                 }
+                3 if *use_password => TextBufferEdit::delete_prev_word(
+                    password_confirm_value,
+                    password_confirm_cursor_pos,
+                ),
                 _ => {}
             }
         }

@@ -2614,21 +2614,14 @@ impl App {
     }
 
     fn update_input_completion_state(&mut self) {
-        let (value, cursor_pos, base_path, purpose, mask_input) = match &self.dialog {
+        let (value, base_path, purpose, mask_input) = match &self.dialog {
             Some(DialogKind::Input {
                 value,
-                cursor_pos,
                 base_path,
                 purpose,
                 mask_input,
                 ..
-            }) => (
-                value.clone(),
-                *cursor_pos,
-                base_path.clone(),
-                *purpose,
-                *mask_input,
-            ),
+            }) => (value.clone(), base_path.clone(), *purpose, *mask_input),
             _ => return,
         };
 
@@ -2643,26 +2636,15 @@ impl App {
         } else {
             Some(0)
         };
-        let selected_completion = completion_index.and_then(|idx| completion_candidates.get(idx));
-        let ghost_suffix = if cursor_pos == value.len() {
-            selected_completion
-                .and_then(|candidate| candidate.strip_prefix(&value))
-                .unwrap_or("")
-                .to_string()
-        } else {
-            String::new()
-        };
 
         if let Some(DialogKind::Input {
             completion_candidates: candidates,
             completion_index: selected_idx,
-            ghost_suffix: ghost,
             ..
         }) = &mut self.dialog
         {
             *candidates = completion_candidates;
             *selected_idx = completion_index;
-            *ghost = ghost_suffix;
         }
     }
 
@@ -2702,7 +2684,6 @@ impl App {
             completion_index,
             value,
             cursor_pos,
-            ghost_suffix,
             ..
         }) = &mut self.dialog
         {
@@ -2715,7 +2696,6 @@ impl App {
             *completion_index = Some(next);
             *value = completion_candidates[next].clone();
             *cursor_pos = value.len();
-            *ghost_suffix = String::new();
         }
     }
 
@@ -2737,7 +2717,6 @@ impl App {
             completion_index,
             value,
             cursor_pos,
-            ghost_suffix,
             ..
         }) = &mut self.dialog
         {
@@ -2756,7 +2735,6 @@ impl App {
             *completion_index = Some(prev);
             *value = completion_candidates[prev].clone();
             *cursor_pos = value.len();
-            *ghost_suffix = String::new();
         }
     }
 
@@ -5499,6 +5477,14 @@ impl App {
         }) = &self.dialog
         {
             Some(*selected_button)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_dialog_input_purpose(&self) -> Option<InputPurpose> {
+        if let Some(DialogKind::Input { purpose, .. }) = &self.dialog {
+            Some(*purpose)
         } else {
             None
         }

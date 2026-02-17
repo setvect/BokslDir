@@ -12,14 +12,21 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph},
+    Terminal,
+};
 use std::io;
 use std::path::Path;
 use std::process::Command;
 use system::ime;
 use ui::{
-    ActivePanel, CommandBar, Dialog, DialogKind, DropdownMenu, LayoutMode, MenuBar, Panel,
-    PanelStatus, StatusBar, WarningScreen,
+    ActivePanel, CommandBar, Dialog, DialogKind, DropdownMenu, InputPurpose, LayoutMode, MenuBar,
+    Panel, PanelStatus, StatusBar, WarningScreen,
 };
 use utils::{
     error::Result,
@@ -373,6 +380,8 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
 
 /// 입력 다이얼로그 키 처리
 fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode, _value: &str) {
+    let input_purpose = app.get_dialog_input_purpose();
+
     if is_prev_word_delete_shortcut(modifiers, code) {
         app.dialog_input_delete_prev_word();
         return;
@@ -396,7 +405,16 @@ fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCod
         (_, KeyCode::Esc) => {
             app.close_dialog();
         }
-        // 버튼 전환 (Tab / Shift+Tab)
+        // Go to Path: Tab으로 추천 적용, Shift+Tab으로 이전 추천
+        (KeyModifiers::NONE, KeyCode::Tab) if input_purpose == Some(InputPurpose::GoToPath) => {
+            app.dialog_input_apply_selected_completion();
+        }
+        (KeyModifiers::SHIFT, KeyCode::BackTab)
+            if input_purpose == Some(InputPurpose::GoToPath) =>
+        {
+            app.dialog_input_cycle_completion_prev();
+        }
+        // 기타 입력 다이얼로그: 버튼 전환 (Tab / Shift+Tab)
         (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
             app.dialog_input_toggle_button();
         }
@@ -1036,9 +1054,36 @@ mod tests {
     }
 
     #[test]
-    fn test_input_dialog_tab_toggles_buttons() {
+    fn test_input_dialog_tab_applies_completion_for_go_to_path() {
         let mut app = App::new_for_test();
-        app.start_go_to_path();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "",
+            std::path::PathBuf::from("."),
+        ));
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        }) = &mut app.dialog
+        {
+            *completion_candidates = vec!["docs".to_string(), "downloads".to_string()];
+            *completion_index = Some(0);
+        }
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Tab, "");
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("docs"));
+        assert_eq!(app.get_dialog_input_selected_button(), Some(0));
+    }
+
+    #[test]
+    fn test_input_dialog_tab_toggles_buttons_for_non_go_to_path() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::operation_path_input(
+            "Copy",
+            "Copy to:",
+            "",
+            std::path::PathBuf::from("."),
+        ));
         assert_eq!(app.get_dialog_input_selected_button(), Some(0));
 
         handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Tab, "");
@@ -1227,7 +1272,6 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
     };
 
     let pending_display = app.pending_key_display();
-    let toast_display = app.toast_display().map(|s| s.to_string());
     let sort_display = active_panel_state.sort_indicator();
     let filter_display = active_panel_state.filter_indicator();
     let ime_label = app.ime_status.display_label();
@@ -1239,7 +1283,6 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .selected_size(&selected_size)
         .layout_mode(app.layout_mode_str())
         .pending_key(pending_display.as_deref())
-        .toast(toast_display.as_deref())
         .sort_info(Some(&sort_display))
         .filter_info(filter_display.as_deref())
         .show_hidden(active_panel_state.show_hidden)
@@ -1250,6 +1293,108 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         })
         .theme(theme);
     f.render_widget(status_bar, area);
+}
+
+fn render_toast_overlay(f: &mut ratatui::Frame<'_>, app: &App) {
+    let Some(message) = app.toast_display() else {
+        return;
+    };
+
+    let area = f.area();
+    if area.width < 24 || area.height < 8 {
+        return;
+    }
+
+    // 하단 오버레이 3줄 토스트
+    let max_width = area.width.saturating_sub(4).min(96);
+    let toast_area = Rect {
+        x: area.x + (area.width.saturating_sub(max_width)) / 2,
+        y: area.y + area.height.saturating_sub(4),
+        width: max_width,
+        height: 3,
+    };
+
+    let content_width = toast_area.width.saturating_sub(4) as usize;
+    let msg = if message.chars().count() > content_width {
+        let mut truncated = message
+            .chars()
+            .take(content_width.saturating_sub(1))
+            .collect::<String>();
+        truncated.push('…');
+        truncated
+    } else {
+        message.to_string()
+    };
+
+    let lower = message.to_ascii_lowercase();
+    let (label, label_bg, border_color) = if lower.contains("error")
+        || lower.contains("fail")
+        || lower.contains("cannot")
+        || lower.contains("do not")
+        || lower.contains("invalid")
+        || lower.contains("mismatch")
+        || lower.contains("empty")
+    {
+        (
+            " WARNING ",
+            Color::Rgb(255, 120, 90),
+            Color::Rgb(255, 120, 90),
+        )
+    } else if lower.contains("done")
+        || lower.contains("completed")
+        || lower.contains("created")
+        || lower.contains("opened")
+        || lower.contains("edited")
+        || lower.contains("added")
+        || lower.contains("renamed")
+        || lower.contains("deleted")
+        || lower.contains("cleared")
+        || lower.contains("success")
+    {
+        (
+            " SUCCESS ",
+            Color::Rgb(80, 200, 140),
+            Color::Rgb(80, 200, 140),
+        )
+    } else {
+        (
+            " NOTICE ",
+            Color::Rgb(255, 205, 64),
+            Color::Rgb(35, 170, 255),
+        )
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(Color::Rgb(15, 20, 28)));
+    f.render_widget(Clear, toast_area);
+    f.render_widget(block, toast_area);
+
+    let inner = Rect {
+        x: toast_area.x + 1,
+        y: toast_area.y + 1,
+        width: toast_area.width.saturating_sub(2),
+        height: toast_area.height.saturating_sub(2),
+    };
+
+    let line = Line::from(vec![
+        Span::styled(
+            label,
+            Style::default()
+                .fg(Color::Rgb(15, 20, 28))
+                .bg(label_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  {}", msg),
+            Style::default()
+                .fg(Color::Rgb(240, 248, 255))
+                .bg(Color::Rgb(15, 20, 28))
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(line), inner);
 }
 
 /// 메뉴 드롭다운 조건부 렌더링
@@ -1324,6 +1469,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     f.render_widget(command_bar, areas.command_bar);
 
     render_dropdown_if_active(f, app, theme, areas.menu_bar);
+    render_toast_overlay(f, app);
 
     if let Some(ref dialog_kind) = app.dialog {
         let dialog = Dialog::new(dialog_kind).theme(theme);

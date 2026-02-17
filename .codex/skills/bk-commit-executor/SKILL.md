@@ -44,9 +44,16 @@ cargo clippy --all-targets --all-features
 
 ### 5. 커밋 실행
 - 커밋 메시지는 `commit-message` 스킬 결과를 우선 사용한다.
+- 커밋 메시지는 한글로 작성한다. 단, `type/scope`, `API`, `module` 같은 전문용어는 영어 표현을 허용한다.
+- `commit-message` 스킬 결과가 영어라면 커밋 전에 한글 표현으로 변환한다.
 - 커밋은 항상 비대화형으로 실행한다.
 ```bash
-git commit -m "<type>(<scope>): <subject>"
+git commit -m "<type>(<scope>): <한글 subject>"
+```
+
+예시:
+```bash
+git commit -m "refactor(app): 액션 라우팅과 text edit 모듈 경계 정리"
 ```
 
 ### 6. 결과 보고

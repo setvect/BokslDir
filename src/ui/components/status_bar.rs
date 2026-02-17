@@ -3,7 +3,7 @@
 //
 // 파일/디렉토리 개수, 총 크기, 선택된 항목 정보 표시
 
-use crate::ui::Theme;
+use crate::ui::{I18n, Language, MessageKey, TextKey, Theme};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -51,6 +51,7 @@ pub struct StatusBar<'a> {
     success_color: Color,
     /// 보조(희미한) 색
     muted_color: Color,
+    language: Language,
 }
 
 impl<'a> Default for StatusBar<'a> {
@@ -74,6 +75,7 @@ impl<'a> Default for StatusBar<'a> {
             warning_color: Color::Rgb(255, 180, 50),
             success_color: Color::Rgb(100, 200, 100),
             muted_color: Color::Rgb(100, 100, 100),
+            language: Language::English,
         }
     }
 }
@@ -177,10 +179,16 @@ impl<'a> StatusBar<'a> {
         self.muted_color = theme.panel_inactive_border.to_color();
         self
     }
+
+    pub fn language(mut self, language: Language) -> Self {
+        self.language = language;
+        self
+    }
 }
 
 impl Widget for StatusBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let i18n = I18n::new(self.language);
         // 배경 채우기
         buf.set_style(area, Style::default().bg(self.bg_color));
 
@@ -197,9 +205,13 @@ impl Widget for StatusBar<'_> {
 
         // 왼쪽 정보: 터미널 너비에 따라 3단계
         let left_info = if w >= 60 {
-            format!(
-                " {} files, {} dirs | {}",
-                self.file_count, self.dir_count, self.total_size
+            i18n.fmt(
+                MessageKey::StatusLeftLong,
+                &[
+                    ("files", self.file_count.to_string()),
+                    ("dirs", self.dir_count.to_string()),
+                    ("total", self.total_size.to_string()),
+                ],
             )
         } else if w >= 40 {
             format!(
@@ -217,9 +229,12 @@ impl Widget for StatusBar<'_> {
         // 선택 정보 (있을 경우, 너비 적응)
         let selected_info = if self.selected_count > 0 {
             if w >= 60 {
-                format!(
-                    " | {} selected ({})",
-                    self.selected_count, self.selected_size
+                i18n.fmt(
+                    MessageKey::StatusSelectedLong,
+                    &[
+                        ("count", self.selected_count.to_string()),
+                        ("size", self.selected_size.to_string()),
+                    ],
                 )
             } else if w >= 40 {
                 format!(" | {}sel", self.selected_count)
@@ -252,7 +267,7 @@ impl Widget for StatusBar<'_> {
 
         // 숨김 파일 표시 정보
         let hidden_info_str = if self.show_hidden {
-            "[Hidden] ".to_string()
+            format!("[{}] ", i18n.tr(TextKey::Hidden))
         } else {
             String::new()
         };

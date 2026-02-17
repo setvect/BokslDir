@@ -13,8 +13,8 @@ use crate::system::{
     ArchiveProgressEvent, ArchiveSummary, FileSystem, ImeStatus,
 };
 use crate::ui::{
-    create_default_menus, ActivePanel, DialogKind, InputPurpose, LayoutManager, LayoutMode, Menu,
-    MenuState, ThemeManager,
+    create_default_menus, ActivePanel, DialogKind, I18n, InputPurpose, Language, LayoutManager,
+    LayoutMode, Menu, MenuState, MessageKey, TextKey, ThemeManager,
 };
 use crate::utils::error::{BokslDirError, Result};
 use serde::{Deserialize, Serialize};
@@ -57,8 +57,14 @@ struct PersistedBookmark {
 struct PersistedAppState {
     version: u32,
     theme: String,
+    #[serde(default = "default_language_code")]
+    language: String,
     history: PersistedHistoriesState,
     bookmarks: Vec<PersistedBookmark>,
+}
+
+fn default_language_code() -> String {
+    Language::English.code().to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +173,8 @@ pub struct App {
     pub menu_state: MenuState,
     /// 테마 관리자
     pub theme_manager: ThemeManager,
+    /// 현재 UI 언어
+    pub language: Language,
     // Phase 3.2: 파일 복사/이동
     /// 현재 표시 중인 다이얼로그
     pub dialog: Option<DialogKind>,
@@ -251,7 +259,8 @@ impl App {
             left_tabs: PanelTabs::new(left_panel),
             right_tabs: PanelTabs::new(right_panel),
             filesystem,
-            menus: create_default_menus(),
+            language: Language::English,
+            menus: create_default_menus(Language::English),
             menu_state: MenuState::new(),
             theme_manager: ThemeManager::new(),
             dialog: None,
@@ -294,7 +303,8 @@ impl App {
             left_tabs: PanelTabs::new(PanelState::new(current_dir.clone())),
             right_tabs: PanelTabs::new(PanelState::new(current_dir)),
             filesystem: FileSystem::new(),
-            menus: create_default_menus(),
+            language: Language::English,
+            menus: create_default_menus(Language::English),
             menu_state: MenuState::new(),
             theme_manager: ThemeManager::new(),
             dialog: None,
@@ -343,6 +353,7 @@ impl App {
         let payload = PersistedAppState {
             version: Self::APP_STATE_VERSION,
             theme: self.current_theme_name().to_string(),
+            language: self.language.code().to_string(),
             history: PersistedHistoriesState {
                 left: PersistedPanelHistory {
                     entries: left.history_entries.clone(),
@@ -405,6 +416,8 @@ impl App {
         );
         self.bookmarks = state.bookmarks;
         let _ = self.theme_manager.switch_theme(&state.theme);
+        self.language = Language::from_code(&state.language);
+        self.rebuild_localized_ui();
     }
 
     fn current_theme_name(&self) -> &str {
@@ -415,6 +428,20 @@ impl App {
         if self.theme_manager.switch_theme(theme_name).is_ok() {
             let _ = self.save_persisted_state();
         }
+    }
+
+    pub fn language(&self) -> Language {
+        self.language
+    }
+
+    pub fn set_language_and_save(&mut self, language: Language) {
+        self.language = language;
+        self.rebuild_localized_ui();
+        let _ = self.save_persisted_state();
+    }
+
+    pub fn rebuild_localized_ui(&mut self) {
+        self.menus = create_default_menus(self.language);
     }
 
     fn apply_loaded_history(
@@ -467,44 +494,51 @@ impl App {
 
     /// 활성 패널에 새 탭 생성
     pub fn new_tab_active_panel(&mut self) {
+        let i18n = I18n::new(self.language);
         match self.active_panel() {
             ActivePanel::Left => {
                 if self.left_tabs.len() >= Self::MAX_TABS_PER_PANEL {
-                    self.set_toast("Max 5 tabs per panel");
+                    self.set_toast(i18n.msg(MessageKey::MaxTabsPerPanel));
                     return;
                 }
                 let from = self.left_tabs.active().clone();
                 let idx = self.left_tabs.create_tab(&from);
-                self.set_toast(&format!("Tab created ({})", idx + 1));
+                self.set_toast(
+                    &i18n.fmt(MessageKey::TabCreated, &[("index", (idx + 1).to_string())]),
+                );
             }
             ActivePanel::Right => {
                 if self.right_tabs.len() >= Self::MAX_TABS_PER_PANEL {
-                    self.set_toast("Max 5 tabs per panel");
+                    self.set_toast(i18n.msg(MessageKey::MaxTabsPerPanel));
                     return;
                 }
                 let from = self.right_tabs.active().clone();
                 let idx = self.right_tabs.create_tab(&from);
-                self.set_toast(&format!("Tab created ({})", idx + 1));
+                self.set_toast(
+                    &i18n.fmt(MessageKey::TabCreated, &[("index", (idx + 1).to_string())]),
+                );
             }
         }
     }
 
     /// 활성 패널의 현재 탭 닫기
     pub fn close_tab_active_panel(&mut self) {
+        let i18n = I18n::new(self.language);
         let closed = match self.active_panel() {
             ActivePanel::Left => self.left_tabs.close_active_tab(),
             ActivePanel::Right => self.right_tabs.close_active_tab(),
         };
 
         if closed {
-            self.set_toast("Tab closed");
+            self.set_toast(i18n.msg(MessageKey::TabClosed));
         } else {
-            self.set_toast("Cannot close last tab");
+            self.set_toast(i18n.msg(MessageKey::CannotCloseLastTab));
         }
     }
 
     /// 활성 패널의 이전 탭 전환
     pub fn prev_tab_active_panel(&mut self) {
+        let i18n = I18n::new(self.language);
         let idx = match self.active_panel() {
             ActivePanel::Left => {
                 self.left_tabs.prev_tab();
@@ -515,11 +549,12 @@ impl App {
                 self.right_tabs.active_index()
             }
         };
-        self.set_toast(&format!("Tab {}", idx + 1));
+        self.set_toast(&i18n.fmt(MessageKey::TabIndex, &[("index", (idx + 1).to_string())]));
     }
 
     /// 활성 패널의 다음 탭 전환
     pub fn next_tab_active_panel(&mut self) {
+        let i18n = I18n::new(self.language);
         let idx = match self.active_panel() {
             ActivePanel::Left => {
                 self.left_tabs.next_tab();
@@ -530,20 +565,24 @@ impl App {
                 self.right_tabs.active_index()
             }
         };
-        self.set_toast(&format!("Tab {}", idx + 1));
+        self.set_toast(&i18n.fmt(MessageKey::TabIndex, &[("index", (idx + 1).to_string())]));
     }
 
     /// 활성 패널의 특정 탭(0-based) 전환
     pub fn switch_tab_active_panel(&mut self, index: usize) {
+        let i18n = I18n::new(self.language);
         let ok = match self.active_panel() {
             ActivePanel::Left => self.left_tabs.switch_to(index),
             ActivePanel::Right => self.right_tabs.switch_to(index),
         };
 
         if ok {
-            self.set_toast(&format!("Tab {}", index + 1));
+            self.set_toast(&i18n.fmt(MessageKey::TabIndex, &[("index", (index + 1).to_string())]));
         } else {
-            self.set_toast(&format!("No tab {}", index + 1));
+            self.set_toast(&i18n.fmt(
+                MessageKey::NoTabIndex,
+                &[("index", (index + 1).to_string())],
+            ));
         }
     }
 
@@ -627,9 +666,10 @@ impl App {
 
     /// 레이아웃 모드 문자열 반환
     pub fn layout_mode_str(&self) -> &str {
+        let i18n = I18n::new(self.language);
         match self.layout.mode() {
-            LayoutMode::DualPanel => "DUAL",
-            LayoutMode::TooSmall => "WARN",
+            LayoutMode::DualPanel => i18n.tr(TextKey::LayoutDual),
+            LayoutMode::TooSmall => i18n.tr(TextKey::LayoutWarn),
         }
     }
 }
@@ -647,7 +687,8 @@ impl Default for App {
                 left_tabs: PanelTabs::new(PanelState::new(current_dir.clone())),
                 right_tabs: PanelTabs::new(PanelState::new(current_dir)),
                 filesystem,
-                menus: create_default_menus(),
+                language: Language::English,
+                menus: create_default_menus(Language::English),
                 menu_state: MenuState::new(),
                 theme_manager: ThemeManager::new(),
                 dialog: None,

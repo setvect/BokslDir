@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_menu_bar_creation() {
-        let menus = create_default_menus();
+        let menus = create_default_menus(crate::ui::Language::English);
         let menu_bar = MenuBar::new()
             .app_name("TestApp")
             .menus(&menus)
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_menu_x_position() {
-        let menus = create_default_menus();
+        let menus = create_default_menus(crate::ui::Language::English);
         let menu_bar = MenuBar::new().menus(&menus);
 
         // 첫 번째 메뉴 위치

@@ -1,7 +1,7 @@
 use super::{DialogKind, InputPurpose};
 use crate::core::actions::generate_help_entries;
 use crate::models::operation::OperationProgress;
-use crate::ui::Theme;
+use crate::ui::{I18n, Language, MessageKey, TextKey, Theme};
 use crate::utils::formatter::format_file_size;
 use crate::utils::path_display;
 use ratatui::{
@@ -42,6 +42,7 @@ pub struct Dialog<'a> {
     error_color: Color,
     success_color: Color,
     muted_color: Color,
+    language: Language,
 }
 
 impl<'a> Default for Dialog<'a> {
@@ -67,6 +68,7 @@ impl<'a> Default for Dialog<'a> {
             error_color: Color::Rgb(244, 71, 71),
             success_color: Color::Rgb(100, 180, 100),
             muted_color: Color::Rgb(128, 128, 128),
+            language: Language::English,
         }
     }
 }
@@ -97,6 +99,15 @@ impl<'a> Dialog<'a> {
         self.success_color = theme.success.to_color();
         self.muted_color = theme.panel_inactive_border.to_color();
         self
+    }
+
+    pub fn language(mut self, language: Language) -> Self {
+        self.language = language;
+        self
+    }
+
+    fn i18n(&self) -> I18n {
+        I18n::new(self.language)
     }
 
     /// 다이얼로그 영역 계산 (화면 중앙, 반응형)
@@ -362,7 +373,12 @@ impl<'a> Dialog<'a> {
                     .fg(self.border_color)
                     .bg(self.bg_color)
                     .add_modifier(Modifier::DIM);
-                let title = format!("Suggestions ({}/{})", selected_display, total_candidates);
+                let title = format!(
+                    "{} ({}/{})",
+                    self.i18n().tr(TextKey::DialogSuggestions),
+                    selected_display,
+                    total_candidates
+                );
                 buf.set_string(inner.x, title_y, title, title_style);
 
                 if visible_rows > 0 {
@@ -396,7 +412,7 @@ impl<'a> Dialog<'a> {
             }
 
             if show_hint {
-                let hint = "Tab:Apply suggestion  Shift+Tab/Up/Down:Select";
+                let hint = self.i18n().tr(TextKey::DialogSuggestionHint);
                 let hint_y = button_y.saturating_sub(1);
                 let hint_x = inner.x + (inner.width.saturating_sub(hint.width() as u16)) / 2;
                 buf.set_string(
@@ -413,12 +429,18 @@ impl<'a> Dialog<'a> {
 
         // 버튼
         let button_y = area.y + area.height.saturating_sub(2);
-        let ok_width = self.render_button(buf, inner.x, button_y, "OK", selected_button == 0);
+        let ok_width = self.render_button(
+            buf,
+            inner.x,
+            button_y,
+            self.i18n().tr(TextKey::Ok),
+            selected_button == 0,
+        );
         self.render_button(
             buf,
             inner.x + ok_width + 2,
             button_y,
-            "Cancel",
+            self.i18n().tr(TextKey::Cancel),
             selected_button == 1,
         );
     }
@@ -469,12 +491,18 @@ impl<'a> Dialog<'a> {
         let buttons_width = 14; // "[ OK ]  [Cancel]"
         let button_x = area.x + (area.width.saturating_sub(buttons_width)) / 2;
 
-        let ok_width = self.render_button(buf, button_x, button_y, "OK", selected_button == 0);
+        let ok_width = self.render_button(
+            buf,
+            button_x,
+            button_y,
+            self.i18n().tr(TextKey::Ok),
+            selected_button == 0,
+        );
         self.render_button(
             buf,
             button_x + ok_width + 2,
             button_y,
-            "Cancel",
+            self.i18n().tr(TextKey::Cancel),
             selected_button == 1,
         );
     }
@@ -490,7 +518,7 @@ impl<'a> Dialog<'a> {
     ) {
         // 테두리
         let block = Block::default()
-            .title(" File Exists ")
+            .title(self.i18n().tr(TextKey::DialogTitleFileExists))
             .title_style(
                 Style::default()
                     .fg(self.warning_color)
@@ -513,21 +541,34 @@ impl<'a> Dialog<'a> {
         let label_style = Style::default().fg(self.muted_color);
 
         // 소스 파일 표시
-        buf.set_string(inner.x, inner.y, "Source:", label_style);
+        buf.set_string(
+            inner.x,
+            inner.y,
+            self.i18n().tr(TextKey::DialogSource),
+            label_style,
+        );
         let source_name = source
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
+            .unwrap_or(self.i18n().tr(TextKey::DialogUnknown));
         buf.set_string(inner.x + 8, inner.y, source_name, path_style);
 
         // 대상 경로 표시
-        buf.set_string(inner.x, inner.y + 2, "Target already exists:", msg_style);
+        buf.set_string(
+            inner.x,
+            inner.y + 2,
+            self.i18n().tr(TextKey::DialogTargetExists),
+            msg_style,
+        );
         let truncated_path = path_display::truncate_path_buf(dest, inner.width as usize);
         buf.set_string(inner.x, inner.y + 3, &truncated_path, path_style);
 
         // 옵션 버튼들 (2줄로 배치)
         // 첫 번째 줄: Overwrite, Skip
-        let row1_options = ["Overwrite", "Skip"];
+        let row1_options = [
+            self.i18n().tr(TextKey::DialogOverwrite),
+            self.i18n().tr(TextKey::DialogSkip),
+        ];
         let button_y1 = inner.y + 6;
         let mut x = inner.x;
 
@@ -537,7 +578,11 @@ impl<'a> Dialog<'a> {
         }
 
         // 두 번째 줄: Overwrite All, Skip All, Cancel
-        let row2_options = ["Overwrite All", "Skip All", "Cancel"];
+        let row2_options = [
+            self.i18n().tr(TextKey::DialogOverwriteAll),
+            self.i18n().tr(TextKey::DialogSkipAll),
+            self.i18n().tr(TextKey::Cancel),
+        ];
         let button_y2 = inner.y + 8;
         x = inner.x;
 
@@ -595,9 +640,12 @@ impl<'a> Dialog<'a> {
         gauge.render(gauge_area, buf);
 
         // 파일 카운트
-        let count_text = format!(
-            "{} / {} files",
-            progress.files_completed, progress.total_files
+        let count_text = self.i18n().fmt(
+            MessageKey::ProgressFilesCount,
+            &[
+                ("completed", progress.files_completed.to_string()),
+                ("total", progress.total_files.to_string()),
+            ],
         );
         buf.set_string(inner.x, inner.y + 4, &count_text, file_style);
 
@@ -612,9 +660,13 @@ impl<'a> Dialog<'a> {
         let remaining = progress
             .total_files
             .saturating_sub(progress.items_processed);
-        let processed_text = format!(
-            "Processed: {}  Remaining: {}  Failed: {}",
-            progress.items_processed, remaining, progress.items_failed
+        let processed_text = self.i18n().fmt(
+            MessageKey::ProgressProcessed,
+            &[
+                ("processed", progress.items_processed.to_string()),
+                ("remaining", remaining.to_string()),
+                ("failed", progress.items_failed.to_string()),
+            ],
         );
         buf.set_string(inner.x, inner.y + 6, &processed_text, file_style);
 
@@ -629,7 +681,12 @@ impl<'a> Dialog<'a> {
 
         // Esc 안내
         let hint_style = Style::default().fg(self.muted_color);
-        buf.set_string(inner.x, inner.y + 9, "Press Esc to cancel", hint_style);
+        buf.set_string(
+            inner.x,
+            inner.y + 9,
+            self.i18n().tr(TextKey::DialogPressEscToCancel),
+            hint_style,
+        );
     }
 
     /// 삭제 확인 다이얼로그 렌더링
@@ -643,7 +700,7 @@ impl<'a> Dialog<'a> {
     ) {
         // 테두리
         let block = Block::default()
-            .title(" Delete ")
+            .title(self.i18n().tr(TextKey::DialogTitleDelete))
             .title_style(
                 Style::default()
                     .fg(self.error_color)
@@ -662,10 +719,12 @@ impl<'a> Dialog<'a> {
         };
 
         // 헤더 메시지
-        let header = format!(
-            "Delete {}? ({})",
-            crate::utils::formatter::pluralize(items.len(), "item", "items"),
-            total_size
+        let header = self.i18n().fmt(
+            MessageKey::DeleteHeader,
+            &[
+                ("count", items.len().to_string()),
+                ("total_size", total_size.to_string()),
+            ],
         );
         let header_style = Style::default()
             .fg(self.fg_color)
@@ -677,7 +736,10 @@ impl<'a> Dialog<'a> {
         let max_items = (inner.height.saturating_sub(4)) as usize; // 헤더 + 빈줄 + 버튼줄 + 빈줄
         for (i, item) in items.iter().enumerate() {
             if i >= max_items {
-                let more = format!("  ... and {} more", items.len() - i);
+                let more = self.i18n().fmt(
+                    MessageKey::DeleteMore,
+                    &[("count", (items.len() - i).to_string())],
+                );
                 buf.set_string(
                     inner.x,
                     inner.y + 2 + i as u16,
@@ -696,11 +758,29 @@ impl<'a> Dialog<'a> {
         let button_y = area.y + area.height - 2;
         let mut x = inner.x;
 
-        let w1 = self.render_button(buf, x, button_y, "Trash", selected_button == 0);
+        let w1 = self.render_button(
+            buf,
+            x,
+            button_y,
+            self.i18n().tr(TextKey::DialogTrash),
+            selected_button == 0,
+        );
         x += w1 + 1;
-        let w2 = self.render_button(buf, x, button_y, "Delete", selected_button == 1);
+        let w2 = self.render_button(
+            buf,
+            x,
+            button_y,
+            self.i18n().tr(TextKey::DialogDelete),
+            selected_button == 1,
+        );
         x += w2 + 1;
-        self.render_button(buf, x, button_y, "Cancel", selected_button == 2);
+        self.render_button(
+            buf,
+            x,
+            button_y,
+            self.i18n().tr(TextKey::Cancel),
+            selected_button == 2,
+        );
     }
 
     /// 텍스트 필드 렌더링 헬퍼 (cursor_pos는 바이트 인덱스)
@@ -785,12 +865,12 @@ impl<'a> Dialog<'a> {
         let label_width = 12u16;
 
         let rows: Vec<(&str, &str)> = vec![
-            ("Name:", name),
-            ("Path:", path),
-            ("Type:", file_type),
-            ("Size:", size),
-            ("Modified:", modified),
-            ("Permissions:", permissions),
+            (self.i18n().tr(TextKey::DialogName), name),
+            (self.i18n().tr(TextKey::DialogPath), path),
+            (self.i18n().tr(TextKey::DialogType), file_type),
+            (self.i18n().tr(TextKey::DialogSize), size),
+            (self.i18n().tr(TextKey::DialogModified), modified),
+            (self.i18n().tr(TextKey::DialogPermissions), permissions),
         ];
 
         for (label, value) in &rows {
@@ -804,14 +884,19 @@ impl<'a> Dialog<'a> {
         }
 
         if let Some(ref info) = children_info {
-            buf.set_string(inner.x, y, "Contents:", label_style);
+            buf.set_string(
+                inner.x,
+                y,
+                self.i18n().tr(TextKey::DialogContents),
+                label_style,
+            );
             buf.set_string(inner.x + label_width, y, info, value_style);
         }
 
         // OK 버튼
         let button_y = area.y + area.height - 2;
         let button_x = area.x + (area.width - 6) / 2;
-        self.render_button(buf, button_x, button_y, "OK", true);
+        self.render_button(buf, button_x, button_y, self.i18n().tr(TextKey::Ok), true);
     }
 
     /// 도움말 다이얼로그 렌더링
@@ -1357,7 +1442,7 @@ impl<'a> Dialog<'a> {
             .add_modifier(Modifier::UNDERLINED);
 
         // 도움말 내용 (액션 레지스트리에서 생성)
-        let lines = generate_help_entries();
+        let lines = generate_help_entries(self.language);
         let query = search_query.trim();
 
         // 전체 행 리스트 생성
@@ -1390,15 +1475,25 @@ impl<'a> Dialog<'a> {
 
         let result_count = all_rows.iter().filter(|r| !r.0 && !r.1.is_empty()).count();
         let result_text = if query.is_empty() {
-            format!("Total: {}", result_count)
+            self.i18n().fmt(
+                MessageKey::HelpTotal,
+                &[("count", result_count.to_string())],
+            )
         } else {
-            format!("Results: {}", result_count)
+            self.i18n().fmt(
+                MessageKey::HelpResults,
+                &[("count", result_count.to_string())],
+            )
         };
         let result_x = area.x + area.width.saturating_sub(result_text.len() as u16 + 3);
 
         // 검색 표시줄
         let search_y = area.y + 1;
-        let search_label = if search_mode { "Search*:" } else { "Search:" };
+        let search_label = if search_mode {
+            self.i18n().tr(TextKey::DialogSearchActive)
+        } else {
+            self.i18n().tr(TextKey::DialogSearch)
+        };
         let search_label_style = Style::default().fg(self.border_color);
         let search_style = Style::default().fg(self.fg_color).bg(self.input_bg);
         buf.set_string(inner.x, search_y, search_label, search_label_style);
@@ -1426,10 +1521,10 @@ impl<'a> Dialog<'a> {
         let content_height = inner.height.saturating_sub(1);
 
         if all_rows.is_empty() {
-            let no_result = "No shortcuts match your search";
+            let no_result = self.i18n().tr(TextKey::DialogNoShortcutMatches);
             let y = content_y;
             buf.set_string(inner.x, y, no_result, Style::default().fg(self.muted_color));
-            let hint = "Esc:Clear/Close  /:Search  j/k:Scroll";
+            let hint = self.i18n().tr(TextKey::DialogHelpHint);
             let hint_style = Style::default().fg(self.muted_color);
             let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
             let hint_y = area.y + area.height - 2;
@@ -1504,7 +1599,7 @@ impl<'a> Dialog<'a> {
         }
 
         // 하단 힌트
-        let hint = "Esc:Clear/Close  /:Search  j/k:Scroll";
+        let hint = self.i18n().tr(TextKey::DialogHelpHint);
         let hint_style = Style::default().fg(self.muted_color);
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 2;
@@ -1560,7 +1655,7 @@ impl<'a> Dialog<'a> {
         // OK 버튼
         let button_y = area.y + area.height - 2;
         let button_x = area.x + (area.width - 6) / 2;
-        self.render_button(buf, button_x, button_y, "OK", true);
+        self.render_button(buf, button_x, button_y, self.i18n().tr(TextKey::Ok), true);
     }
 }
 
@@ -1664,8 +1759,8 @@ impl Widget for Dialog<'_> {
                 self.render_input(
                     buf,
                     dialog_area,
-                    "New Directory",
-                    "Directory name:",
+                    self.i18n().tr(TextKey::DialogNewDirectory),
+                    self.i18n().tr(TextKey::DialogDirectoryName),
                     value,
                     InputPurpose::OperationDestination,
                     &[],
@@ -1685,8 +1780,8 @@ impl Widget for Dialog<'_> {
                 self.render_input(
                     buf,
                     dialog_area,
-                    "Rename",
-                    "New name:",
+                    self.i18n().tr(TextKey::DialogRename),
+                    self.i18n().tr(TextKey::DialogNewName),
                     value,
                     InputPurpose::OperationDestination,
                     &[],
@@ -1706,8 +1801,8 @@ impl Widget for Dialog<'_> {
                 self.render_input(
                     buf,
                     dialog_area,
-                    "Bookmark Rename",
-                    "New bookmark name:",
+                    self.i18n().tr(TextKey::DialogBookmarkRename),
+                    self.i18n().tr(TextKey::DialogNewBookmarkName),
                     value,
                     InputPurpose::OperationDestination,
                     &[],
@@ -1726,8 +1821,8 @@ impl Widget for Dialog<'_> {
                 self.render_input(
                     buf,
                     dialog_area,
-                    "Filter",
-                    "Pattern (supports * ?):",
+                    self.i18n().tr(TextKey::DialogFilter),
+                    self.i18n().tr(TextKey::DialogFilterPattern),
                     value,
                     InputPurpose::OperationDestination,
                     &[],

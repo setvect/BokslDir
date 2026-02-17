@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
-**현재 상태**: Phase 8 완료 (압축 파일 처리) + Phase 7.2 완료 (터미널 에디터 통합) + Phase 7.1 완료 (파일 연결 프로그램) + Phase 6.4 완료 (경로 입력 및 자동완성) + Phase 6.3 완료 (북마크 시스템) + Phase 6.2 완료 (디렉토리 히스토리) + Phase 6.1 완료 (탭 시스템) + Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
+**현재 상태**: Phase 8 완료 (압축 파일 처리) + Phase 7.2 완료 (터미널 에디터 통합) + Phase 7.1 완료 (파일 연결 프로그램) + Phase 6.4 완료 (경로 입력 및 자동완성) + Phase 6.3 완료 (북마크 시스템) + Phase 6.2 완료 (디렉토리 히스토리) + Phase 6.1 완료 (탭 시스템) + Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료 + 언어팩(영어/한국어) 및 설정 영속화 완료
 **다음 단계**: Phase 9 - 커스터마이징
 
 ## 개발 명령어
@@ -207,6 +207,11 @@ src/
 - 압축 미리보기: 압축 파일 포커스 후 `Enter` (패널 내부 탐색 형태, 최대 5000개 항목 표시)
 - 암호 지원: `zip`/`7z`만 압축/해제 암호 입력 지원
 - 진행률 + 취소: 백그라운드 작업, Progress 다이얼로그에서 `Esc` 취소
+
+### 언어팩 (ko/en)
+- UI 언어: 영어/한국어 지원 (기본값: 영어)
+- 설정 메뉴(`Settings > Language`)에서 즉시 전환
+- 선택 언어는 `~/.boksldir/settings.toml`에 저장되며 다음 실행 시 복원
 
 ## 단축키 매핑 (Vim 스타일)
 

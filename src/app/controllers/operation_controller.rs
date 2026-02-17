@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::ui::{I18n, MessageKey};
 
 pub(in crate::app) fn execute(app: &mut App, action: Action) {
     match action {
@@ -42,11 +43,13 @@ pub(in crate::app) fn execute(app: &mut App, action: Action) {
         Action::ShowBookmarkList => app.show_bookmark_list(),
         Action::SizeFormatAuto => {
             app.size_format = SizeFormat::Auto;
-            app.set_toast("Size format: Auto");
+            let i18n = I18n::new(app.language());
+            app.set_toast(i18n.msg(MessageKey::SizeFormatAutoToast));
         }
         Action::SizeFormatBytes => {
             app.size_format = SizeFormat::Bytes;
-            app.set_toast("Size format: Bytes");
+            let i18n = I18n::new(app.language());
+            app.set_toast(i18n.msg(MessageKey::SizeFormatBytesToast));
         }
         _ => unreachable!("non-operation action: {:?}", action),
     }

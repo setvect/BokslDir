@@ -1224,8 +1224,8 @@ fn test_about_action_opens_message_dialog() {
 
     match &app.dialog {
         Some(DialogKind::Message { title, message }) => {
-            assert_eq!(title, "복슬Dir 정보");
-            assert!(message.contains("복슬Dir"));
+            assert_eq!(title, "About BokslDir");
+            assert!(message.contains("BokslDir"));
         }
         other => panic!("expected about message dialog, got {:?}", other),
     }

@@ -12,7 +12,7 @@ use ratatui::{
 };
 
 use crate::ui::layout::{MIN_HEIGHT, MIN_WIDTH};
-use crate::ui::Theme;
+use crate::ui::{I18n, Language, TextKey, Theme};
 
 /// 경고 화면 컴포넌트
 pub struct WarningScreen {
@@ -28,6 +28,7 @@ pub struct WarningScreen {
     error_color: Color,
     /// 성공/권장 색상 (요구 크기)
     success_color: Color,
+    language: Language,
 }
 
 impl Default for WarningScreen {
@@ -39,6 +40,7 @@ impl Default for WarningScreen {
             fg_color: Color::Rgb(212, 212, 212),
             error_color: Color::Red,
             success_color: Color::Green,
+            language: Language::English,
         }
     }
 }
@@ -81,10 +83,16 @@ impl WarningScreen {
         self.success_color = theme.success.to_color();
         self
     }
+
+    pub fn language(mut self, language: Language) -> Self {
+        self.language = language;
+        self
+    }
 }
 
 impl Widget for WarningScreen {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let i18n = I18n::new(self.language);
         // 배경 채우기
         buf.set_style(area, Style::default().bg(self.bg_color));
 
@@ -97,14 +105,17 @@ impl Widget for WarningScreen {
         )]);
 
         let title_line = Line::from(vec![Span::styled(
-            "Terminal Too Small",
+            i18n.tr(TextKey::WarnTitle),
             Style::default()
                 .fg(self.warning_color)
                 .add_modifier(Modifier::BOLD),
         )]);
 
         let current_size_line = Line::from(vec![
-            Span::styled("Current: ", Style::default().fg(self.fg_color)),
+            Span::styled(
+                i18n.tr(TextKey::WarnCurrent),
+                Style::default().fg(self.fg_color),
+            ),
             Span::styled(
                 format!("{}x{}", self.current_size.0, self.current_size.1),
                 Style::default()
@@ -114,7 +125,10 @@ impl Widget for WarningScreen {
         ]);
 
         let required_size_line = Line::from(vec![
-            Span::styled("Required: ", Style::default().fg(self.fg_color)),
+            Span::styled(
+                i18n.tr(TextKey::WarnRequired),
+                Style::default().fg(self.fg_color),
+            ),
             Span::styled(
                 format!("{}x{}", MIN_WIDTH, MIN_HEIGHT),
                 Style::default()
@@ -124,7 +138,7 @@ impl Widget for WarningScreen {
         ]);
 
         let hint_line = Line::from(vec![Span::styled(
-            "Please resize your terminal",
+            i18n.tr(TextKey::WarnHint),
             Style::default()
                 .fg(self.fg_color)
                 .add_modifier(Modifier::DIM),

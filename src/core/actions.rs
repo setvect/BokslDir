@@ -5,6 +5,7 @@
 //! 이 모듈의 레지스트리를 참조합니다.
 
 use crate::ui::components::command_bar::CommandItem;
+use crate::ui::{I18n, Language};
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::LazyLock;
 
@@ -51,6 +52,8 @@ pub enum Action {
     ThemeDark,
     ThemeLight,
     ThemeContrast,
+    SetLanguageEnglish,
+    SetLanguageKorean,
     // Sort (Phase 5.1)
     SortByName,
     SortBySize,
@@ -484,6 +487,22 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         action: Action::ThemeContrast,
         id: "theme_contrast",
         label: "High Contrast",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::SetLanguageEnglish,
+        id: "language_en",
+        label: "Language: English",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::SetLanguageKorean,
+        id: "language_ko",
+        label: "Language: Korean",
         category: ActionCategory::System,
         shortcut_display: None,
         command_bar: None,
@@ -1046,7 +1065,11 @@ impl Action {
 }
 
 /// 커맨드바용 항목 생성 (priority 순 정렬)
-pub fn generate_command_bar_items() -> Vec<CommandItem> {
+fn localized_label(language: Language, id: &str, fallback: &'static str) -> &'static str {
+    I18n::new(language).action_help_label(id, fallback)
+}
+
+pub fn generate_command_bar_items(language: Language) -> Vec<CommandItem> {
     let mut entries: Vec<(&CommandBarEntry, &ActionDef)> = ACTION_DEFS
         .iter()
         .filter_map(|def| def.command_bar.as_ref().map(|cb| (cb, def)))
@@ -1056,21 +1079,41 @@ pub fn generate_command_bar_items() -> Vec<CommandItem> {
 
     entries
         .into_iter()
-        .map(|(cb, _)| CommandItem::new(cb.key, cb.label))
+        .map(|(cb, def)| CommandItem::new(cb.key, localized_label(language, def.id, cb.label)))
         .collect()
 }
 
 /// 도움말 다이얼로그용 엔트리 생성
 ///
 /// 반환: (카테고리명, Vec<(단축키, 설명)>) 목록
-pub fn generate_help_entries() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+pub fn generate_help_entries(
+    language: Language,
+) -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
     let categories = [
-        (ActionCategory::Navigation, "Navigation"),
-        (ActionCategory::FileOperation, "File Operations"),
-        (ActionCategory::Selection, "Selection"),
-        (ActionCategory::Sort, "Sort"),
-        (ActionCategory::Filter, "Filter / Search"),
-        (ActionCategory::System, "System"),
+        (
+            ActionCategory::Navigation,
+            I18n::new(language).help_category("navigation"),
+        ),
+        (
+            ActionCategory::FileOperation,
+            I18n::new(language).help_category("file_operation"),
+        ),
+        (
+            ActionCategory::Selection,
+            I18n::new(language).help_category("selection"),
+        ),
+        (
+            ActionCategory::Sort,
+            I18n::new(language).help_category("sort"),
+        ),
+        (
+            ActionCategory::Filter,
+            I18n::new(language).help_category("filter"),
+        ),
+        (
+            ActionCategory::System,
+            I18n::new(language).help_category("system"),
+        ),
     ];
 
     categories
@@ -1079,7 +1122,12 @@ pub fn generate_help_entries() -> Vec<(&'static str, Vec<(&'static str, &'static
             let items: Vec<(&'static str, &'static str)> = ACTION_DEFS
                 .iter()
                 .filter(|d| d.category == *cat && d.shortcut_display.is_some())
-                .map(|d| (d.shortcut_display.unwrap(), d.label))
+                .map(|d| {
+                    (
+                        d.shortcut_display.unwrap(),
+                        localized_label(language, d.id, d.label),
+                    )
+                })
                 .collect();
             (*name, items)
         })
@@ -1287,7 +1335,7 @@ mod tests {
 
     #[test]
     fn test_generate_command_bar_items() {
-        let items = generate_command_bar_items();
+        let items = generate_command_bar_items(Language::English);
         assert!(!items.is_empty());
         // 첫 항목은 priority 10 (Copy)
         assert_eq!(items[0].key, "y");
@@ -1296,7 +1344,7 @@ mod tests {
 
     #[test]
     fn test_generate_help_entries() {
-        let entries = generate_help_entries();
+        let entries = generate_help_entries(Language::English);
         assert!(!entries.is_empty());
         assert_eq!(entries[0].0, "Navigation");
         let nav_items = &entries[0].1;
@@ -1328,7 +1376,7 @@ mod tests {
 
     #[test]
     fn test_command_bar_count() {
-        let items = generate_command_bar_items();
+        let items = generate_command_bar_items(Language::English);
         // 20 items with command_bar entries (19 + Filter)
         assert_eq!(items.len(), 20);
     }

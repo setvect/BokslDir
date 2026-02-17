@@ -4,7 +4,7 @@
 // Vim 스타일 단축키 표시 (화면 너비에 따라 우선순위 기반 동적 표시)
 
 use crate::core::actions::generate_command_bar_items;
-use crate::ui::Theme;
+use crate::ui::{Language, Theme};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -51,6 +51,7 @@ pub struct CommandBar {
     label_fg_color: Color,
     /// 비활성 색상
     disabled_color: Color,
+    language: Language,
 }
 
 impl Default for CommandBar {
@@ -61,6 +62,7 @@ impl Default for CommandBar {
             key_fg_color: Color::Rgb(0, 120, 212),
             label_fg_color: Color::Rgb(212, 212, 212),
             disabled_color: Color::Rgb(100, 100, 100),
+            language: Language::English,
         }
     }
 }
@@ -72,12 +74,18 @@ impl CommandBar {
 
     /// 기본 커맨드 목록 (액션 레지스트리에서 생성)
     fn default_commands() -> Vec<CommandItem> {
-        generate_command_bar_items()
+        generate_command_bar_items(Language::English)
     }
 
     /// 커맨드 목록 설정
     pub fn commands(mut self, commands: Vec<CommandItem>) -> Self {
         self.commands = commands;
+        self
+    }
+
+    pub fn language(mut self, language: Language) -> Self {
+        self.language = language;
+        self.commands = generate_command_bar_items(language);
         self
     }
 

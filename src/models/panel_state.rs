@@ -2,6 +2,7 @@
 
 use crate::models::file_entry::FileEntry;
 use crate::system::filesystem::FileSystem;
+use crate::ui::{I18n, Language, TextKey};
 use crate::utils::error::Result;
 use crate::utils::glob;
 use std::cmp::Ordering;
@@ -266,6 +267,21 @@ impl PanelState {
         format!("{} {}", name, arrow)
     }
 
+    pub fn sort_indicator_localized(&self, language: Language) -> String {
+        let i18n = I18n::new(language);
+        let name_key = match self.sort_by {
+            SortBy::Name => TextKey::SortName,
+            SortBy::Size => TextKey::SortSize,
+            SortBy::Modified => TextKey::SortDate,
+            SortBy::Extension => TextKey::SortExt,
+        };
+        let arrow = match self.sort_order {
+            SortOrder::Ascending => "▲",
+            SortOrder::Descending => "▼",
+        };
+        format!("{} {}", i18n.tr(name_key), arrow)
+    }
+
     // === 필터 관련 메서드 (Phase 5.2) ===
 
     /// 필터 설정
@@ -370,6 +386,14 @@ impl PanelState {
             .as_ref()
             .filter(|f| !f.is_empty())
             .map(|f| format!("Filter: {}", f))
+    }
+
+    pub fn filter_indicator_localized(&self, language: Language) -> Option<String> {
+        let i18n = I18n::new(language);
+        self.filter
+            .as_ref()
+            .filter(|f| !f.is_empty())
+            .map(|f| format!("{}: {}", i18n.tr(TextKey::FilterPrefix), f))
     }
 
     // === 다중 선택 관련 메서드 (Phase 3.1) ===

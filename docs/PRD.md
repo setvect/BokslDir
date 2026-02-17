@@ -52,6 +52,12 @@
 - ✅ 상태바 pending 키 표시 (cyan 색상)
 - ✅ Ctrl+R 새로고침, D 영구삭제 추가
 
+### 언어팩 완료 항목
+- ✅ UI 언어팩 지원 (English/Korean)
+- ✅ 기본 언어 English 적용
+- ✅ `Settings > Language` 즉시 전환
+- ✅ 선택 언어 설정 영속화 및 재시작 복원
+
 ### 다음 할 일 (Next Steps)
 **Phase 9: 구현 개선**
 

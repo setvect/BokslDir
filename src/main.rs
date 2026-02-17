@@ -74,6 +74,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                     let (width, height) = app.layout.terminal_size();
                     let warning = WarningScreen::new()
                         .current_size(width, height)
+                        .language(app.language())
                         .theme(app.theme_manager.current());
                     f.render_widget(warning, size);
                 }
@@ -985,6 +986,7 @@ fn render_panel(
     panel_state: &crate::models::PanelState,
     tab_count: usize,
     is_active: bool,
+    language: ui::Language,
     theme: &ui::Theme,
     area: Rect,
     icon_mode: ui::components::panel::IconMode,
@@ -1009,6 +1011,7 @@ fn render_panel(
         .sort_state(panel_state.sort_by, panel_state.sort_order)
         .filter_pattern(panel_state.filter.as_deref())
         .size_format(size_format)
+        .language(language)
         .theme(theme);
     f.render_widget(panel, area);
 }
@@ -1029,8 +1032,8 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
     };
 
     let pending_display = app.pending_key_display();
-    let sort_display = active_panel_state.sort_indicator();
-    let filter_display = active_panel_state.filter_indicator();
+    let sort_display = active_panel_state.sort_indicator_localized(app.language());
+    let filter_display = active_panel_state.filter_indicator_localized(app.language());
     let ime_label = app.ime_status.display_label();
     let status_bar = StatusBar::new()
         .file_count(file_count)
@@ -1043,6 +1046,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .sort_info(Some(&sort_display))
         .filter_info(filter_display.as_deref())
         .show_hidden(active_panel_state.show_hidden)
+        .language(app.language())
         .ime_info(if app.ime_status.should_display() {
             Some(ime_label)
         } else {
@@ -1196,6 +1200,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
         app.left_active_panel_state(),
         left_tab_count,
         active_panel == ActivePanel::Left,
+        app.language(),
         theme,
         areas.left_panel,
         app.icon_mode,
@@ -1208,6 +1213,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
             app.right_active_panel_state(),
             right_tab_count,
             active_panel == ActivePanel::Right,
+            app.language(),
             theme,
             areas.right_panel,
             app.icon_mode,
@@ -1217,14 +1223,16 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
 
     render_status_bar(f, app, theme, areas.status_bar);
 
-    let command_bar = CommandBar::new().theme(theme);
+    let command_bar = CommandBar::new().language(app.language()).theme(theme);
     f.render_widget(command_bar, areas.command_bar);
 
     render_dropdown_if_active(f, app, theme, areas.menu_bar);
     render_toast_overlay(f, app, theme);
 
     if let Some(ref dialog_kind) = app.dialog {
-        let dialog = Dialog::new(dialog_kind).theme(theme);
+        let dialog = Dialog::new(dialog_kind)
+            .language(app.language())
+            .theme(theme);
         f.render_widget(dialog, f.area());
     }
 }

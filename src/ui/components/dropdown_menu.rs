@@ -5,6 +5,7 @@
 
 use crate::core::actions::get_shortcut_display;
 use crate::ui::Theme;
+use crate::ui::{I18n, Language, TextKey};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -636,100 +637,125 @@ fn menu_action(id: &str, label: &str) -> MenuItem {
 }
 
 /// 기본 메뉴 생성
-pub fn create_default_menus() -> Vec<Menu> {
+pub fn create_default_menus(language: Language) -> Vec<Menu> {
+    let i18n = I18n::new(language);
     vec![
-        Menu::new("file", "파일(F)").hotkey('f').items(vec![
-            menu_action("new_dir", "새 폴더"),
-            MenuItem::separator(),
-            menu_action("open_default", "기본 프로그램으로 열기"),
-            menu_action("open_terminal_editor", "터미널 에디터로 열기"),
-            MenuItem::separator(),
-            menu_action("archive_compress", "압축"),
-            menu_action("archive_extract", "압축 해제"),
-            menu_action("archive_extract_auto", "알아서 풀기"),
-            menu_action("archive_preview", "압축 미리보기"),
-            MenuItem::separator(),
-            menu_action("rename", "이름 변경"),
-            menu_action("delete", "삭제"),
-            menu_action("perm_delete", "영구 삭제"),
-            MenuItem::separator(),
-            menu_action("quit", "종료"),
-        ]),
-        Menu::new("edit", "편집(E)").hotkey('e').items(vec![
-            menu_action("copy", "복사"),
-            menu_action("move", "이동"),
-            MenuItem::separator(),
-            menu_action("select_all", "전체 선택"),
-            menu_action("invert_selection", "선택 반전"),
-            menu_action("deselect", "선택 해제"),
-        ]),
-        Menu::new("view", "보기(V)").hotkey('v').items(vec![
-            menu_action("refresh", "새로고침"),
-            menu_action("file_info", "파일 정보"),
-            MenuItem::separator(),
-            MenuItem::submenu(
-                "sort_by",
-                "정렬 기준",
-                vec![
-                    menu_action("sort_name", "이름"),
-                    menu_action("sort_size", "크기"),
-                    menu_action("sort_date", "수정 날짜"),
-                    menu_action("sort_ext", "확장자"),
-                ],
-            ),
-            MenuItem::submenu(
-                "sort_order",
-                "정렬 순서",
-                vec![
-                    menu_action("sort_asc", "오름차순"),
-                    menu_action("sort_desc", "내림차순"),
-                ],
-            ),
-            MenuItem::separator(),
-            menu_action("filter_start", "필터링"),
-            menu_action("filter_clear", "필터 해제"),
-            MenuItem::separator(),
-            menu_action("toggle_hidden", "숨김 파일 표시"),
-            menu_action("mount_points", "마운트 포인트"),
-            menu_action("goto_path", "경로로 이동"),
-            menu_action("history_list", "디렉토리 히스토리"),
-            menu_action("bookmark_list", "북마크"),
-            MenuItem::submenu(
-                "size_format",
-                "크기 표시 형식",
-                vec![
-                    menu_action("size_auto", "자동 (KB/MB/GB)"),
-                    menu_action("size_bytes", "바이트"),
-                ],
-            ),
-        ]),
-        Menu::new("settings", "설정(S)").hotkey('s').items(vec![
-            MenuItem::submenu(
-                "theme",
-                "테마",
-                vec![
-                    menu_action("theme_dark", "Dark (기본)"),
-                    menu_action("theme_light", "Light"),
-                    menu_action("theme_contrast", "High Contrast"),
-                ],
-            ),
-            MenuItem::submenu(
-                "default_editor",
-                "기본 에디터",
-                vec![
-                    menu_action("editor_preset_vi", "vi"),
-                    menu_action("editor_preset_vim", "vim"),
-                    menu_action("editor_preset_nano", "nano"),
-                    menu_action("editor_preset_emacs", "emacs"),
-                ],
-            ),
-            MenuItem::separator(),
-            menu_action("toggle_icons", "아이콘 전환"),
-        ]),
-        Menu::new("help", "도움말(H)").hotkey('h').items(vec![
-            menu_action("help_keys", "단축키 도움말"),
-            menu_action("about", "복슬Dir 정보"),
-        ]),
+        Menu::new("file", i18n.tr(TextKey::MenuFile))
+            .hotkey('f')
+            .items(vec![
+                menu_action("new_dir", i18n.menu_item("new_dir")),
+                MenuItem::separator(),
+                menu_action("open_default", i18n.menu_item("open_default")),
+                menu_action(
+                    "open_terminal_editor",
+                    i18n.menu_item("open_terminal_editor"),
+                ),
+                MenuItem::separator(),
+                menu_action("archive_compress", i18n.menu_item("archive_compress")),
+                menu_action("archive_extract", i18n.menu_item("archive_extract")),
+                menu_action(
+                    "archive_extract_auto",
+                    i18n.menu_item("archive_extract_auto"),
+                ),
+                menu_action("archive_preview", i18n.menu_item("archive_preview")),
+                MenuItem::separator(),
+                menu_action("rename", i18n.menu_item("rename")),
+                menu_action("delete", i18n.menu_item("delete")),
+                menu_action("perm_delete", i18n.menu_item("perm_delete")),
+                MenuItem::separator(),
+                menu_action("quit", i18n.menu_item("quit")),
+            ]),
+        Menu::new("edit", i18n.tr(TextKey::MenuEdit))
+            .hotkey('e')
+            .items(vec![
+                menu_action("copy", i18n.menu_item("copy")),
+                menu_action("move", i18n.menu_item("move")),
+                MenuItem::separator(),
+                menu_action("select_all", i18n.menu_item("select_all")),
+                menu_action("invert_selection", i18n.menu_item("invert_selection")),
+                menu_action("deselect", i18n.menu_item("deselect")),
+            ]),
+        Menu::new("view", i18n.tr(TextKey::MenuView))
+            .hotkey('v')
+            .items(vec![
+                menu_action("refresh", i18n.menu_item("refresh")),
+                menu_action("file_info", i18n.menu_item("file_info")),
+                MenuItem::separator(),
+                MenuItem::submenu(
+                    "sort_by",
+                    i18n.menu_group("sort_by"),
+                    vec![
+                        menu_action("sort_name", i18n.menu_item("sort_name")),
+                        menu_action("sort_size", i18n.menu_item("sort_size")),
+                        menu_action("sort_date", i18n.menu_item("sort_date")),
+                        menu_action("sort_ext", i18n.menu_item("sort_ext")),
+                    ],
+                ),
+                MenuItem::submenu(
+                    "sort_order",
+                    i18n.menu_group("sort_order"),
+                    vec![
+                        menu_action("sort_asc", i18n.menu_item("sort_asc")),
+                        menu_action("sort_desc", i18n.menu_item("sort_desc")),
+                    ],
+                ),
+                MenuItem::separator(),
+                menu_action("filter_start", i18n.menu_item("filter_start")),
+                menu_action("filter_clear", i18n.menu_item("filter_clear")),
+                MenuItem::separator(),
+                menu_action("toggle_hidden", i18n.menu_item("toggle_hidden")),
+                menu_action("mount_points", i18n.menu_item("mount_points")),
+                menu_action("goto_path", i18n.menu_item("goto_path")),
+                menu_action("history_list", i18n.menu_item("history_list")),
+                menu_action("bookmark_list", i18n.menu_item("bookmark_list")),
+                MenuItem::submenu(
+                    "size_format",
+                    i18n.menu_group("size_format"),
+                    vec![
+                        menu_action("size_auto", i18n.menu_item("size_auto")),
+                        menu_action("size_bytes", i18n.menu_item("size_bytes")),
+                    ],
+                ),
+            ]),
+        Menu::new("settings", i18n.tr(TextKey::MenuSettings))
+            .hotkey('s')
+            .items(vec![
+                MenuItem::submenu(
+                    "theme",
+                    i18n.menu_group("theme"),
+                    vec![
+                        menu_action("theme_dark", "Dark (기본)"),
+                        menu_action("theme_light", "Light"),
+                        menu_action("theme_contrast", "High Contrast"),
+                    ],
+                ),
+                MenuItem::submenu(
+                    "language",
+                    i18n.tr(TextKey::MenuLanguage),
+                    vec![
+                        menu_action("language_en", "English"),
+                        menu_action("language_ko", "한국어"),
+                    ],
+                ),
+                MenuItem::submenu(
+                    "default_editor",
+                    i18n.menu_group("default_editor"),
+                    vec![
+                        menu_action("editor_preset_vi", "vi"),
+                        menu_action("editor_preset_vim", "vim"),
+                        menu_action("editor_preset_nano", "nano"),
+                        menu_action("editor_preset_emacs", "emacs"),
+                    ],
+                ),
+                MenuItem::separator(),
+                menu_action("toggle_icons", i18n.menu_item("toggle_icons")),
+            ]),
+        Menu::new("help", i18n.tr(TextKey::MenuHelp))
+            .hotkey('h')
+            .items(vec![
+                menu_action("help_keys", i18n.menu_item("help_keys")),
+                menu_action("about", i18n.menu_item("about")),
+            ]),
     ]
 }
 
@@ -773,9 +799,9 @@ mod tests {
 
     #[test]
     fn test_default_menus() {
-        let menus = create_default_menus();
+        let menus = create_default_menus(Language::English);
         assert_eq!(menus.len(), 5);
-        assert_eq!(menus[0].title, "파일(F)");
+        assert_eq!(menus[0].title, "File(F)");
     }
 
     #[test]

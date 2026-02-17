@@ -97,6 +97,8 @@ impl App {
             | Action::ThemeDark
             | Action::ThemeLight
             | Action::ThemeContrast
+            | Action::SetLanguageEnglish
+            | Action::SetLanguageKorean
             | Action::ToggleIconMode
             | Action::SetDefaultEditorVi
             | Action::SetDefaultEditorVim
@@ -153,6 +155,7 @@ impl App {
 
     /// 활성 패널 정렬 기준 변경 (같은 기준이면 순서 토글)
     pub(super) fn sort_active_panel(&mut self, sort_by: SortBy) {
+        let language = self.language();
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
 
@@ -181,13 +184,14 @@ impl App {
         // 다중 선택 초기화 (인덱스 무효화)
         panel.selected_items.clear();
 
-        let indicator = panel.sort_indicator();
+        let indicator = panel.sort_indicator_localized(language);
         self.set_toast(&indicator);
         self.adjust_scroll_offset();
     }
 
     /// 활성 패널 정렬 순서 토글
     pub(super) fn toggle_sort_order(&mut self) {
+        let language = self.language();
         let panel = self.active_panel_state();
         let has_parent = panel.current_path.parent().is_some();
 
@@ -216,18 +220,19 @@ impl App {
 
         panel.selected_items.clear();
 
-        let indicator = panel.sort_indicator();
+        let indicator = panel.sort_indicator_localized(language);
         self.set_toast(&indicator);
         self.adjust_scroll_offset();
     }
 
     /// 활성 패널 재정렬 (정렬 상태 변경 후 호출)
     pub(super) fn re_sort_active_panel(&mut self) {
+        let language = self.language();
         let panel = self.active_panel_state_mut();
         panel.sort_entries();
         panel.selected_items.clear();
 
-        let indicator = panel.sort_indicator();
+        let indicator = panel.sort_indicator_localized(language);
         self.set_toast(&indicator);
     }
 
@@ -416,7 +421,9 @@ impl App {
 
     /// 메시지 다이얼로그 표시
     pub fn show_message(&mut self, title: &str, message: &str) {
-        self.dialog = Some(DialogKind::message(title, message));
+        let localized_title = crate::ui::localize_runtime_text(self.language(), title);
+        let localized_message = crate::ui::localize_runtime_text(self.language(), message);
+        self.dialog = Some(DialogKind::message(localized_title, localized_message));
     }
 
     pub(super) fn format_user_error(
@@ -460,7 +467,8 @@ impl App {
 
     /// 토스트 메시지 설정 (3초 후 자동 소멸)
     pub fn set_toast(&mut self, message: &str) {
-        self.toast_message = Some((message.to_string(), Instant::now()));
+        let localized = crate::ui::localize_runtime_text(self.language(), message);
+        self.toast_message = Some((localized, Instant::now()));
     }
 
     /// 만료된 토스트 제거

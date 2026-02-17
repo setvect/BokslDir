@@ -6,7 +6,7 @@
 use crate::app::SizeFormat;
 use crate::models::file_entry::{FileEntry, FileType};
 use crate::models::panel_state::{SortBy, SortOrder};
-use crate::ui::Theme;
+use crate::ui::{I18n, Language, TextKey, Theme};
 use crate::utils::formatter::{
     format_date, format_file_size, format_file_size_bytes, format_permissions,
 };
@@ -90,6 +90,8 @@ pub struct Panel<'a> {
     filter_pattern: Option<&'a str>,
     /// 파일 크기 표시 형식
     size_format: SizeFormat,
+    /// UI 언어
+    language: Language,
 }
 
 /// 빈 HashSet을 위한 정적 참조
@@ -123,6 +125,7 @@ impl<'a> Default for Panel<'a> {
             sort_order: SortOrder::Ascending,
             filter_pattern: None,
             size_format: SizeFormat::default(),
+            language: Language::English,
         }
     }
 }
@@ -214,6 +217,11 @@ impl<'a> Panel<'a> {
     /// 크기 표시 형식 설정
     pub fn size_format(mut self, format: SizeFormat) -> Self {
         self.size_format = format;
+        self
+    }
+
+    pub fn language(mut self, language: Language) -> Self {
+        self.language = language;
         self
     }
 
@@ -344,6 +352,7 @@ impl Panel<'_> {
     /// 탭바 렌더링. y를 1 증가시킨다.
     /// 헤더 행 + 구분선 렌더링. y를 2 증가시킨다.
     fn render_header(&self, layout: &ColumnLayout, inner: Rect, buf: &mut Buffer, y: &mut u16) {
+        let i18n = I18n::new(self.language);
         let header_style = Style::default()
             .fg(self.inactive_border_color)
             .add_modifier(Modifier::BOLD);
@@ -355,9 +364,9 @@ impl Panel<'_> {
 
         // Name 헤더 (Extension 정렬 시 "Name(Ext)" 표시)
         let name_label = match self.sort_by {
-            SortBy::Name => format!("Name {}", arrow),
-            SortBy::Extension => format!("Name(Ext) {}", arrow),
-            _ => "Name".to_string(),
+            SortBy::Name => format!("{} {}", i18n.tr(TextKey::PanelHeaderName), arrow),
+            SortBy::Extension => format!("{} {}", i18n.tr(TextKey::PanelHeaderNameExt), arrow),
+            _ => i18n.tr(TextKey::PanelHeaderName).to_string(),
         };
 
         let mut header_spans = vec![Span::raw(" ")];
@@ -368,18 +377,18 @@ impl Panel<'_> {
 
         if layout.show_size {
             let size_label = if self.sort_by == SortBy::Size {
-                format!("Size {}", arrow)
+                format!("{} {}", i18n.tr(TextKey::PanelHeaderSize), arrow)
             } else {
-                "Size".to_string()
+                i18n.tr(TextKey::PanelHeaderSize).to_string()
             };
             header_spans.push(Span::raw(" "));
             header_spans.push(Span::styled(format!("{:<10}", size_label), header_style));
         }
 
         let modified_label = if self.sort_by == SortBy::Modified {
-            format!("Modified {}", arrow)
+            format!("{} {}", i18n.tr(TextKey::PanelHeaderModified), arrow)
         } else {
-            "Modified".to_string()
+            i18n.tr(TextKey::PanelHeaderModified).to_string()
         };
         header_spans.push(Span::raw(" "));
         header_spans.push(Span::styled(
@@ -389,7 +398,10 @@ impl Panel<'_> {
 
         if layout.show_permissions {
             header_spans.push(Span::raw(" "));
-            header_spans.push(Span::styled(format!("{:<11}", "Permissions"), header_style));
+            header_spans.push(Span::styled(
+                format!("{:<11}", i18n.tr(TextKey::PanelHeaderPermissions)),
+                header_style,
+            ));
         }
 
         let header_line = Line::from(header_spans);

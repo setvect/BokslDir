@@ -1225,6 +1225,23 @@ impl App {
         }
     }
 
+    /// 기존 디렉토리 경로 여부 검증. 실패 시 표준 에러 메시지 반환.
+    pub(in crate::app) fn validate_existing_directory_path(
+        path: &Path,
+        path_display: &str,
+    ) -> std::result::Result<(), String> {
+        if !path.exists() {
+            return Err(format!(
+                "Destination path does not exist:\n{}",
+                path_display
+            ));
+        }
+        if !path.is_dir() {
+            return Err(format!("Destination is not a directory:\n{}", path_display));
+        }
+        Ok(())
+    }
+
     /// 대상 경로 검증 (존재/디렉토리/재귀 검사). 실패 시 에러 메시지 반환.
     pub(super) fn validate_operation_destination(
         sources: &[PathBuf],
@@ -1232,18 +1249,7 @@ impl App {
         dest_path: &std::path::Path,
         dest_path_str: &str,
     ) -> std::result::Result<(), String> {
-        if !dest_path.exists() {
-            return Err(format!(
-                "Destination path does not exist:\n{}",
-                dest_path_str
-            ));
-        }
-        if !dest_path.is_dir() {
-            return Err(format!(
-                "Destination is not a directory:\n{}",
-                dest_path_str
-            ));
-        }
+        Self::validate_existing_directory_path(dest_path, dest_path_str)?;
         if let Some(error_msg) = Self::check_recursive_operation(sources, operation_type, dest_path)
         {
             return Err(error_msg);
@@ -1506,18 +1512,10 @@ impl App {
                     selected_entries,
                 }) = self.archive_flow.clone()
                 {
-                    if !resolved_path.exists() {
-                        self.dialog = Some(DialogKind::error(
-                            "Error",
-                            format!("Destination path does not exist:\n{}", resolved_path_str),
-                        ));
-                        return;
-                    }
-                    if !resolved_path.is_dir() {
-                        self.dialog = Some(DialogKind::error(
-                            "Error",
-                            format!("Destination is not a directory:\n{}", resolved_path_str),
-                        ));
+                    if let Err(error_msg) =
+                        Self::validate_existing_directory_path(&resolved_path, &resolved_path_str)
+                    {
+                        self.dialog = Some(DialogKind::error("Error", error_msg));
                         return;
                     }
 
@@ -1530,18 +1528,10 @@ impl App {
                 self.close_dialog();
             }
             InputPurpose::GoToPath => {
-                if !resolved_path.exists() {
-                    self.dialog = Some(DialogKind::error(
-                        "Error",
-                        format!("Destination path does not exist:\n{}", resolved_path_str),
-                    ));
-                    return;
-                }
-                if !resolved_path.is_dir() {
-                    self.dialog = Some(DialogKind::error(
-                        "Error",
-                        format!("Destination is not a directory:\n{}", resolved_path_str),
-                    ));
+                if let Err(error_msg) =
+                    Self::validate_existing_directory_path(&resolved_path, &resolved_path_str)
+                {
+                    self.dialog = Some(DialogKind::error("Error", error_msg));
                     return;
                 }
 
@@ -1604,18 +1594,10 @@ impl App {
                     return;
                 };
 
-                if !resolved_path.exists() {
-                    self.dialog = Some(DialogKind::error(
-                        "Error",
-                        format!("Destination path does not exist:\n{}", resolved_path_str),
-                    ));
-                    return;
-                }
-                if !resolved_path.is_dir() {
-                    self.dialog = Some(DialogKind::error(
-                        "Error",
-                        format!("Destination is not a directory:\n{}", resolved_path_str),
-                    ));
+                if let Err(error_msg) =
+                    Self::validate_existing_directory_path(&resolved_path, &resolved_path_str)
+                {
+                    self.dialog = Some(DialogKind::error("Error", error_msg));
                     return;
                 }
 
@@ -2035,8 +2017,7 @@ impl App {
 
     // === 파일 삭제 관련 메서드 (Phase 3.3) ===
 
-    /// 삭제 시작 (d)
-    pub fn start_delete(&mut self) {
+    pub(in crate::app) fn prepare_delete_pending_dialog(&mut self, selected_button: usize) {
         let sources = self.get_operation_sources();
 
         if sources.is_empty() {
@@ -2081,8 +2062,16 @@ impl App {
         pending.progress.total_files = total_files;
         self.pending_operation = Some(pending);
 
-        // 삭제 확인 다이얼로그 표시
-        self.dialog = Some(DialogKind::delete_confirm(items, total_size));
+        self.dialog = Some(DialogKind::DeleteConfirm {
+            items,
+            total_size,
+            selected_button,
+        });
+    }
+
+    /// 삭제 시작 (d)
+    pub fn start_delete(&mut self) {
+        self.prepare_delete_pending_dialog(0);
     }
 
     /// 삭제 확인 처리

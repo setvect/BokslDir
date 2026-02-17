@@ -952,6 +952,20 @@ fn test_go_to_path_relative_success() {
 }
 
 #[test]
+fn test_go_to_path_fails_for_missing_directory() {
+    let mut app = make_test_app();
+    let temp = TempDir::new().unwrap();
+    let base = temp.path().join("base");
+    fs::create_dir_all(&base).unwrap();
+
+    app.go_to_mount_point(base);
+    app.start_go_to_path();
+    app.confirm_input_dialog("missing_dir".to_string());
+
+    assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+}
+
+#[test]
 fn test_go_to_path_fails_for_non_directory() {
     let mut app = make_test_app();
     let temp = TempDir::new().unwrap();
@@ -965,6 +979,74 @@ fn test_go_to_path_fails_for_non_directory() {
     app.confirm_input_dialog("file.txt".to_string());
 
     assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+}
+
+#[test]
+fn test_start_delete_sets_default_button_and_pending_delete() {
+    let mut app = make_test_app();
+    let temp = TempDir::new().unwrap();
+    let base = temp.path().join("base");
+    let file = base.join("sample.txt");
+    fs::create_dir_all(&base).unwrap();
+    fs::write(&file, "payload").unwrap();
+
+    app.go_to_mount_point(base.clone());
+    let has_parent = app.active_panel_state().current_path.parent().is_some();
+    let offset = if has_parent { 1 } else { 0 };
+    let entry_index = app
+        .active_panel_state()
+        .entries
+        .iter()
+        .position(|e| e.path == file)
+        .expect("file entry should exist");
+    app.active_panel_state_mut().selected_index = entry_index + offset;
+
+    app.start_delete();
+
+    match &app.dialog {
+        Some(DialogKind::DeleteConfirm {
+            selected_button, ..
+        }) => {
+            assert_eq!(*selected_button, 0);
+        }
+        other => panic!("expected delete confirm dialog, got {:?}", other),
+    }
+    let pending = app.pending_operation.as_ref().expect("pending operation");
+    assert_eq!(pending.operation_type, OperationType::Delete);
+}
+
+#[test]
+fn test_start_permanent_delete_sets_default_button_and_pending_delete() {
+    let mut app = make_test_app();
+    let temp = TempDir::new().unwrap();
+    let base = temp.path().join("base");
+    let file = base.join("sample.txt");
+    fs::create_dir_all(&base).unwrap();
+    fs::write(&file, "payload").unwrap();
+
+    app.go_to_mount_point(base.clone());
+    let has_parent = app.active_panel_state().current_path.parent().is_some();
+    let offset = if has_parent { 1 } else { 0 };
+    let entry_index = app
+        .active_panel_state()
+        .entries
+        .iter()
+        .position(|e| e.path == file)
+        .expect("file entry should exist");
+    app.active_panel_state_mut().selected_index = entry_index + offset;
+
+    app.start_permanent_delete();
+
+    match &app.dialog {
+        Some(DialogKind::DeleteConfirm {
+            selected_button, ..
+        }) => {
+            assert_eq!(*selected_button, 1);
+        }
+        other => panic!("expected delete confirm dialog, got {:?}", other),
+    }
+    let pending = app.pending_operation.as_ref().expect("pending operation");
+    assert_eq!(pending.operation_type, OperationType::Delete);
 }
 
 #[test]

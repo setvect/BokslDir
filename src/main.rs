@@ -188,14 +188,29 @@ fn suspend_tui_and_run_editor(
     }
 }
 
-fn run_editor_process(editor_command: &str, target_path: &Path) -> std::result::Result<(), String> {
-    let mut parts = editor_command.split_whitespace();
+fn parse_editor_command(
+    editor_command: &str,
+) -> std::result::Result<(String, Vec<String>), String> {
+    let Some(parts) = shlex::split(editor_command) else {
+        return Err(format!(
+            "Invalid editor command syntax: {}\nReason: unmatched quotes or escaping.",
+            editor_command
+        ));
+    };
+
+    let mut parts = parts.into_iter();
     let Some(program) = parts.next() else {
         return Err("Editor command is empty.".to_string());
     };
 
-    let status = Command::new(program)
-        .args(parts)
+    Ok((program, parts.collect()))
+}
+
+fn run_editor_process(editor_command: &str, target_path: &Path) -> std::result::Result<(), String> {
+    let (program, args) = parse_editor_command(editor_command)?;
+
+    let status = Command::new(&program)
+        .args(args)
         .arg(target_path)
         .status()
         .map_err(|e| format!("Failed to start '{}': {}", editor_command, e))?;
@@ -1541,5 +1556,39 @@ mod tests {
         ));
         handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Esc);
         assert!(app.dialog.is_none());
+    }
+
+    #[test]
+    fn test_parse_editor_command_plain() {
+        let (program, args) = parse_editor_command("vim").expect("command should parse");
+        assert_eq!(program, "vim");
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_parse_editor_command_with_args() {
+        let (program, args) = parse_editor_command("code --wait").expect("command should parse");
+        assert_eq!(program, "code");
+        assert_eq!(args, vec!["--wait"]);
+    }
+
+    #[test]
+    fn test_parse_editor_command_with_quoted_program() {
+        let (program, args) =
+            parse_editor_command("\"Visual Studio Code\" --wait").expect("command should parse");
+        assert_eq!(program, "Visual Studio Code");
+        assert_eq!(args, vec!["--wait"]);
+    }
+
+    #[test]
+    fn test_parse_editor_command_rejects_empty_and_unclosed_quote() {
+        assert!(matches!(
+            parse_editor_command("   "),
+            Err(message) if message == "Editor command is empty."
+        ));
+        assert!(matches!(
+            parse_editor_command("\"broken"),
+            Err(message) if message.contains("Invalid editor command syntax")
+        ));
     }
 }

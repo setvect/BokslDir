@@ -381,53 +381,7 @@ impl App {
 
     /// 영구 삭제 시작 (D)
     pub fn start_permanent_delete(&mut self) {
-        let sources = self.get_operation_sources();
-
-        if sources.is_empty() {
-            self.dialog = Some(DialogKind::message(
-                "Information",
-                "No files selected for deletion.",
-            ));
-            return;
-        }
-
-        let items: Vec<String> = sources
-            .iter()
-            .map(|p| {
-                let name = p
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                if p.is_dir() {
-                    format!("{}/", name)
-                } else {
-                    name
-                }
-            })
-            .collect();
-
-        let (total_bytes, total_files) = self
-            .filesystem
-            .calculate_total_size(&sources)
-            .unwrap_or((0, 0));
-        let total_size = format!(
-            "{}, {}",
-            crate::utils::formatter::pluralize(total_files, "file", "files"),
-            crate::utils::formatter::format_file_size(total_bytes)
-        );
-
-        let mut pending = PendingOperation::new(OperationType::Delete, sources, PathBuf::new());
-        pending.progress.total_bytes = total_bytes;
-        pending.progress.total_files = total_files;
-        self.pending_operation = Some(pending);
-
-        // 영구 삭제 기본 선택 (selected_button: 1)
-        self.dialog = Some(DialogKind::DeleteConfirm {
-            items,
-            total_size,
-            selected_button: 1,
-        });
+        self.prepare_delete_pending_dialog(1);
     }
 
     /// 도움말 표시 (?)

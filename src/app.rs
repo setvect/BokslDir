@@ -36,8 +36,7 @@ struct PersistedPanelHistory {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedHistories {
-    version: u32,
+struct PersistedHistoriesState {
     left: PersistedPanelHistory,
     right: PersistedPanelHistory,
 }
@@ -49,8 +48,10 @@ struct PersistedBookmark {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedBookmarks {
+struct PersistedAppState {
     version: u32,
+    theme: String,
+    history: PersistedHistoriesState,
     bookmarks: Vec<PersistedBookmark>,
 }
 
@@ -192,14 +193,13 @@ pub struct App {
     pending_terminal_editor_request: Option<TerminalEditorRequest>,
     /// 전역 북마크 목록
     bookmarks: Vec<PersistedBookmark>,
-    /// 테스트에서 북마크 저장 경로를 격리하기 위한 override
-    bookmarks_store_override: Option<PathBuf>,
+    /// 테스트에서 설정 저장 경로를 격리하기 위한 override
+    state_store_override: Option<PathBuf>,
 }
 
 impl App {
     const MAX_TABS_PER_PANEL: usize = 5;
-    const HISTORY_STORE_VERSION: u32 = 1;
-    const BOOKMARK_STORE_VERSION: u32 = 1;
+    const APP_STATE_VERSION: u32 = 1;
     const FALLBACK_TERMINAL_EDITOR: &'static str = "vi";
 
     fn resolve_default_terminal_editor_from_env() -> String {
@@ -263,10 +263,9 @@ impl App {
             default_terminal_editor: Self::resolve_default_terminal_editor_from_env(),
             pending_terminal_editor_request: None,
             bookmarks: Vec::new(),
-            bookmarks_store_override: None,
+            state_store_override: None,
         };
-        app.load_persisted_histories();
-        app.load_persisted_bookmarks();
+        app.load_persisted_state();
         Ok(app)
     }
 
@@ -277,8 +276,8 @@ impl App {
         static TEST_APP_COUNTER: AtomicUsize = AtomicUsize::new(0);
         let current_dir = std::path::PathBuf::from(".");
         let suffix = TEST_APP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let bookmarks_store_override = std::env::temp_dir().join(format!(
-            "boksldir-test-bookmarks-{}-{}.toml",
+        let state_store_override = std::env::temp_dir().join(format!(
+            "boksldir-test-settings-{}-{}.toml",
             std::process::id(),
             suffix
         ));
@@ -307,19 +306,21 @@ impl App {
             default_terminal_editor: Self::FALLBACK_TERMINAL_EDITOR.to_string(),
             pending_terminal_editor_request: None,
             bookmarks: Vec::new(),
-            bookmarks_store_override: Some(bookmarks_store_override),
+            state_store_override: Some(state_store_override),
         }
     }
 
     /// 종료
     pub fn quit(&mut self) {
-        let _ = self.save_persisted_histories();
-        let _ = self.save_persisted_bookmarks();
+        let _ = self.save_persisted_state();
         self.should_quit = true;
     }
 
-    fn history_store_path() -> Option<PathBuf> {
-        if let Ok(custom) = env::var("BOKSLDIR_HISTORY_FILE") {
+    fn state_store_path(&self) -> Option<PathBuf> {
+        if let Some(path) = &self.state_store_override {
+            return Some(path.clone());
+        }
+        if let Ok(custom) = env::var("BOKSLDIR_SETTINGS_FILE") {
             let trimmed = custom.trim();
             if !trimmed.is_empty() {
                 return Some(PathBuf::from(trimmed));
@@ -327,58 +328,94 @@ impl App {
         }
         env::var_os("HOME")
             .map(PathBuf::from)
-            .map(|home| home.join(".boksldir").join("history.toml"))
+            .map(|home| home.join(".boksldir").join("settings.toml"))
     }
 
-    fn encode_histories(
-        left_entries: &[PathBuf],
-        left_index: usize,
-        right_entries: &[PathBuf],
-        right_index: usize,
-    ) -> std::result::Result<String, toml::ser::Error> {
-        let payload = PersistedHistories {
-            version: Self::HISTORY_STORE_VERSION,
-            left: PersistedPanelHistory {
-                entries: left_entries.to_vec(),
-                index: left_index,
+    fn encode_app_state(&self) -> std::result::Result<String, toml::ser::Error> {
+        let left = self.left_tabs.active();
+        let right = self.right_tabs.active();
+        let payload = PersistedAppState {
+            version: Self::APP_STATE_VERSION,
+            theme: self.current_theme_name().to_string(),
+            history: PersistedHistoriesState {
+                left: PersistedPanelHistory {
+                    entries: left.history_entries.clone(),
+                    index: left.history_index,
+                },
+                right: PersistedPanelHistory {
+                    entries: right.history_entries.clone(),
+                    index: right.history_index,
+                },
             },
-            right: PersistedPanelHistory {
-                entries: right_entries.to_vec(),
-                index: right_index,
-            },
+            bookmarks: self.bookmarks.clone(),
         };
         toml::to_string_pretty(&payload)
     }
 
-    fn decode_histories(data: &str) -> Option<((Vec<PathBuf>, usize), (Vec<PathBuf>, usize))> {
-        let parsed: PersistedHistories = toml::from_str(data).ok()?;
-        if parsed.version != Self::HISTORY_STORE_VERSION {
+    fn decode_app_state(data: &str) -> Option<PersistedAppState> {
+        let parsed: PersistedAppState = toml::from_str(data).ok()?;
+        if parsed.version != Self::APP_STATE_VERSION {
             return None;
         }
-        Some((
-            (parsed.left.entries, parsed.left.index),
-            (parsed.right.entries, parsed.right.index),
-        ))
+        if parsed.theme.trim().is_empty() {
+            return None;
+        }
+        Some(parsed)
     }
 
-    fn save_persisted_histories(&self) -> std::io::Result<()> {
-        let Some(path) = Self::history_store_path() else {
+    fn save_persisted_state(&self) -> std::io::Result<()> {
+        let Some(path) = self.state_store_path() else {
             return Ok(());
         };
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-
-        let left = self.left_tabs.active();
-        let right = self.right_tabs.active();
-        let data = Self::encode_histories(
-            &left.history_entries,
-            left.history_index,
-            &right.history_entries,
-            right.history_index,
-        )
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let data = self
+            .encode_app_state()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         fs::write(path, data)
+    }
+
+    fn load_persisted_state(&mut self) {
+        let Some(path) = self.state_store_path() else {
+            return;
+        };
+        let Ok(data) = fs::read_to_string(path) else {
+            return;
+        };
+        let Some(state) = Self::decode_app_state(&data) else {
+            return;
+        };
+
+        self.apply_loaded_history(
+            ActivePanel::Left,
+            state.history.left.entries,
+            state.history.left.index,
+        );
+        self.apply_loaded_history(
+            ActivePanel::Right,
+            state.history.right.entries,
+            state.history.right.index,
+        );
+        self.bookmarks = state.bookmarks;
+        let _ = self.theme_manager.switch_theme(&state.theme);
+    }
+
+    fn current_theme_name(&self) -> &'static str {
+        let bg = self.theme_manager.current().bg_primary.to_color();
+        if bg == crate::ui::Theme::light().bg_primary.to_color() {
+            "light"
+        } else if bg == crate::ui::Theme::high_contrast().bg_primary.to_color() {
+            "high_contrast"
+        } else {
+            "dark"
+        }
+    }
+
+    fn switch_theme_and_save(&mut self, theme_name: &str) {
+        if self.theme_manager.switch_theme(theme_name).is_ok() {
+            let _ = self.save_persisted_state();
+        }
     }
 
     fn apply_loaded_history(
@@ -415,83 +452,6 @@ impl App {
                 panel.history_entries = valid_entries;
                 panel.history_index = clamped_index;
                 let _ = panel.change_directory(restore_path, &self.filesystem);
-            }
-        }
-    }
-
-    fn load_persisted_histories(&mut self) {
-        let Some(path) = Self::history_store_path() else {
-            return;
-        };
-        if let Ok(data) = fs::read_to_string(&path) {
-            if let Some((left, right)) = Self::decode_histories(&data) {
-                self.apply_loaded_history(ActivePanel::Left, left.0, left.1);
-                self.apply_loaded_history(ActivePanel::Right, right.0, right.1);
-            }
-        }
-    }
-
-    fn resolve_bookmarks_store_path(&self) -> Option<PathBuf> {
-        if let Some(path) = &self.bookmarks_store_override {
-            return Some(path.clone());
-        }
-        if let Ok(custom) = env::var("BOKSLDIR_BOOKMARKS_FILE") {
-            let trimmed = custom.trim();
-            if !trimmed.is_empty() {
-                return Some(PathBuf::from(trimmed));
-            }
-        }
-        env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join(".boksldir").join("bookmarks.toml"))
-    }
-
-    fn encode_bookmarks(
-        bookmarks: &[PersistedBookmark],
-    ) -> std::result::Result<String, toml::ser::Error> {
-        let payload = PersistedBookmarks {
-            version: Self::BOOKMARK_STORE_VERSION,
-            bookmarks: bookmarks.to_vec(),
-        };
-        toml::to_string_pretty(&payload)
-    }
-
-    fn decode_bookmarks(data: &str) -> Option<Vec<PersistedBookmark>> {
-        let parsed: PersistedBookmarks = toml::from_str(data).ok()?;
-        if parsed.version != Self::BOOKMARK_STORE_VERSION {
-            return None;
-        }
-        Some(parsed.bookmarks)
-    }
-
-    fn save_persisted_bookmarks(&self) -> std::io::Result<()> {
-        let Some(path) = self.resolve_bookmarks_store_path() else {
-            return Ok(());
-        };
-        self.save_persisted_bookmarks_to_path(&path)
-    }
-
-    fn save_persisted_bookmarks_to_path(&self, path: &std::path::Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let data = Self::encode_bookmarks(&self.bookmarks)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        fs::write(path, data)
-    }
-
-    fn load_persisted_bookmarks(&mut self) {
-        let Some(path) = self.resolve_bookmarks_store_path() else {
-            return;
-        };
-        self.load_persisted_bookmarks_from_path(&path);
-    }
-
-    fn load_persisted_bookmarks_from_path(&mut self, path: &std::path::Path) {
-        if let Ok(data) = fs::read_to_string(path) {
-            if let Some(bookmarks) = Self::decode_bookmarks(&data) {
-                self.bookmarks = bookmarks;
             }
         }
     }
@@ -783,13 +743,13 @@ impl App {
             Action::Refresh => self.refresh_current(),
             Action::OpenMenu => self.open_menu(),
             Action::ThemeDark => {
-                let _ = self.theme_manager.switch_theme("dark");
+                self.switch_theme_and_save("dark");
             }
             Action::ThemeLight => {
-                let _ = self.theme_manager.switch_theme("light");
+                self.switch_theme_and_save("light");
             }
             Action::ThemeContrast => {
-                let _ = self.theme_manager.switch_theme("high_contrast");
+                self.switch_theme_and_save("high_contrast");
             }
             Action::ToggleIconMode => {
                 use crate::ui::components::panel::IconMode;
@@ -1039,7 +999,7 @@ impl App {
         }
 
         if result.is_ok() {
-            let _ = self.save_persisted_histories();
+            let _ = self.save_persisted_state();
         }
 
         result.is_ok()
@@ -4641,7 +4601,7 @@ impl App {
             name: name.clone(),
             path: current_path,
         });
-        let _ = self.save_persisted_bookmarks();
+        let _ = self.save_persisted_state();
         self.set_toast(&format!("Bookmark added: {}", name));
     }
 
@@ -4719,7 +4679,7 @@ impl App {
         }
 
         self.bookmarks.remove(selected_index);
-        let _ = self.save_persisted_bookmarks();
+        let _ = self.save_persisted_state();
 
         if self.bookmarks.is_empty() {
             self.dialog = None;
@@ -4763,7 +4723,7 @@ impl App {
 
         let unique = self.make_unique_bookmark_name(trimmed, Some(bookmark_index));
         self.bookmarks[bookmark_index].name = unique;
-        let _ = self.save_persisted_bookmarks();
+        let _ = self.save_persisted_state();
         self.dialog = Some(DialogKind::bookmark_list(
             self.bookmark_items(),
             bookmark_index.min(self.bookmarks.len().saturating_sub(1)),
@@ -4866,7 +4826,7 @@ impl App {
         self.active_panel_state_mut().clear_history_to_current();
         let items = self.active_panel_state().history_items_latest_first();
         self.dialog = Some(DialogKind::history_list(items, 0));
-        let _ = self.save_persisted_histories();
+        let _ = self.save_persisted_state();
         self.set_toast("History cleared");
     }
 
@@ -6036,7 +5996,7 @@ impl Default for App {
                 default_terminal_editor: Self::FALLBACK_TERMINAL_EDITOR.to_string(),
                 pending_terminal_editor_request: None,
                 bookmarks: Vec::new(),
-                bookmarks_store_override: None,
+                state_store_override: None,
             }
         })
     }
@@ -6046,6 +6006,7 @@ impl Default for App {
 mod tests {
     use super::*;
     use crate::utils::error::BokslDirError;
+    use ratatui::style::Color;
     use std::fs;
     use std::io::Write;
     use tempfile::TempDir;
@@ -7266,21 +7227,32 @@ mod tests {
     }
 
     #[test]
-    fn test_history_persistence_encode_decode_roundtrip() {
-        let left_entries = vec![
-            PathBuf::from("/a"),
-            PathBuf::from("/b"),
-            PathBuf::from("/c"),
-        ];
-        let right_entries = vec![PathBuf::from("/x"), PathBuf::from("/y")];
+    fn test_app_state_encode_decode_roundtrip() {
+        let mut app = make_test_app();
+        app.bookmarks = vec![PersistedBookmark {
+            name: "A".to_string(),
+            path: PathBuf::from("/a"),
+        }];
+        app.left_tabs.active_mut().history_entries =
+            vec![PathBuf::from("/l1"), PathBuf::from("/l2")];
+        app.left_tabs.active_mut().history_index = 1;
+        app.right_tabs.active_mut().history_entries = vec![PathBuf::from("/r1")];
+        app.right_tabs.active_mut().history_index = 0;
+        app.switch_theme_and_save("light");
 
-        let text = App::encode_histories(&left_entries, 2, &right_entries, 1).unwrap();
-        let decoded = App::decode_histories(&text).unwrap();
-
-        assert_eq!(decoded.0 .0, left_entries);
-        assert_eq!(decoded.0 .1, 2);
-        assert_eq!(decoded.1 .0, right_entries);
-        assert_eq!(decoded.1 .1, 1);
+        let text = app.encode_app_state().unwrap();
+        let decoded = App::decode_app_state(&text).unwrap();
+        assert_eq!(decoded.version, App::APP_STATE_VERSION);
+        assert_eq!(decoded.theme, "light");
+        assert_eq!(
+            decoded.history.left.entries,
+            vec![PathBuf::from("/l1"), PathBuf::from("/l2")]
+        );
+        assert_eq!(decoded.history.left.index, 1);
+        assert_eq!(decoded.history.right.entries, vec![PathBuf::from("/r1")]);
+        assert_eq!(decoded.history.right.index, 0);
+        assert_eq!(decoded.bookmarks.len(), 1);
+        assert_eq!(decoded.bookmarks[0].name, "A");
     }
 
     #[test]
@@ -7454,42 +7426,73 @@ mod tests {
     }
 
     #[test]
-    fn test_bookmark_persistence_encode_decode_roundtrip() {
-        let bookmarks = vec![
-            PersistedBookmark {
-                name: "A".to_string(),
-                path: PathBuf::from("/a"),
-            },
-            PersistedBookmark {
-                name: "B".to_string(),
-                path: PathBuf::from("/b"),
-            },
-        ];
-
-        let text = App::encode_bookmarks(&bookmarks).unwrap();
-        let decoded = App::decode_bookmarks(&text).unwrap();
-        assert_eq!(decoded, bookmarks);
-    }
-
-    #[test]
-    fn test_load_persisted_bookmarks_restores_state() {
-        let temp = TempDir::new().unwrap();
-        let bookmarks_file = temp.path().join("bookmarks.toml");
-
+    fn test_save_persisted_state_writes_single_file() {
         let mut app = make_test_app();
+        let state_path = app.state_store_override.clone().unwrap();
         app.bookmarks = vec![PersistedBookmark {
             name: "Temp".to_string(),
             path: PathBuf::from("/tmp"),
         }];
-        app.save_persisted_bookmarks_to_path(&bookmarks_file)
-            .unwrap();
+        app.switch_theme_and_save("light");
+        app.save_persisted_state().unwrap();
+
+        assert!(state_path.exists());
+        let text = fs::read_to_string(&state_path).unwrap();
+        assert!(text.contains("theme = \"light\""));
+        assert!(text.contains("[history.left]"));
+        assert!(text.contains("[history.right]"));
+        assert!(text.contains("[[bookmarks]]"));
+    }
+
+    #[test]
+    fn test_load_persisted_state_restores_theme_history_bookmarks() {
+        let mut app = make_test_app();
+        let state_path = app.state_store_override.clone().unwrap();
+        let temp = TempDir::new().unwrap();
+        let left = temp.path().join("left");
+        let right = temp.path().join("right");
+        fs::create_dir_all(&left).unwrap();
+        fs::create_dir_all(&right).unwrap();
+
+        app.bookmarks = vec![PersistedBookmark {
+            name: "Temp".to_string(),
+            path: PathBuf::from("/tmp"),
+        }];
+        app.left_tabs.active_mut().history_entries = vec![left.clone()];
+        app.left_tabs.active_mut().history_index = 0;
+        app.right_tabs.active_mut().history_entries = vec![right.clone()];
+        app.right_tabs.active_mut().history_index = 0;
+        app.switch_theme_and_save("light");
+        app.save_persisted_state().unwrap();
 
         let mut loaded = make_test_app();
+        loaded.state_store_override = Some(state_path);
         loaded.bookmarks.clear();
-        loaded.load_persisted_bookmarks_from_path(&bookmarks_file);
+        loaded.load_persisted_state();
+
+        assert_eq!(
+            loaded.theme_manager.current().bg_primary.to_color(),
+            Color::Rgb(255, 255, 255)
+        );
         assert_eq!(loaded.bookmarks.len(), 1);
         assert_eq!(loaded.bookmarks[0].name, "Temp");
-        assert_eq!(loaded.bookmarks[0].path, PathBuf::from("/tmp"));
+        assert_eq!(loaded.left_tabs.active().history_entries, vec![left]);
+        assert_eq!(loaded.right_tabs.active().history_entries, vec![right]);
+    }
+
+    #[test]
+    fn test_theme_switch_persists_via_unified_state() {
+        let mut app = make_test_app();
+        let state_path = app.state_store_override.clone().unwrap();
+        app.switch_theme_and_save("light");
+
+        let mut loaded = make_test_app();
+        loaded.state_store_override = Some(state_path);
+        loaded.load_persisted_state();
+        assert_eq!(
+            loaded.theme_manager.current().bg_primary.to_color(),
+            Color::Rgb(255, 255, 255)
+        );
     }
 
     #[test]

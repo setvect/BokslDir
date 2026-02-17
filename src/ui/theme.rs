@@ -249,14 +249,33 @@ impl Theme {
 /// 현재 활성 테마를 관리하고 런타임에 테마를 전환합니다.
 pub struct ThemeManager {
     current_theme: Theme,
+    current_theme_name: String,
     available_themes: Vec<(String, Theme)>,
 }
 
 impl ThemeManager {
+    fn infer_theme_name(theme: &Theme) -> String {
+        let candidates = [
+            ("dark", Theme::dark()),
+            ("light", Theme::light()),
+            ("high_contrast", Theme::high_contrast()),
+        ];
+        for (name, candidate) in candidates {
+            if candidate.bg_primary.to_color() == theme.bg_primary.to_color()
+                && candidate.fg_primary.to_color() == theme.fg_primary.to_color()
+                && candidate.accent.to_color() == theme.accent.to_color()
+            {
+                return name.to_string();
+            }
+        }
+        "custom".to_string()
+    }
+
     /// 기본 테마 관리자 생성 (Dark 테마)
     pub fn new() -> Self {
         Self {
             current_theme: Theme::dark(),
+            current_theme_name: "dark".to_string(),
             available_themes: vec![
                 ("dark".to_string(), Theme::dark()),
                 ("light".to_string(), Theme::light()),
@@ -268,7 +287,8 @@ impl ThemeManager {
     /// 특정 테마로 초기화
     pub fn with_theme(theme: Theme) -> Self {
         Self {
-            current_theme: theme.clone(),
+            current_theme_name: Self::infer_theme_name(&theme),
+            current_theme: theme,
             available_themes: vec![
                 ("dark".to_string(), Theme::dark()),
                 ("light".to_string(), Theme::light()),
@@ -282,10 +302,16 @@ impl ThemeManager {
         &self.current_theme
     }
 
+    /// 현재 테마 이름 반환
+    pub fn current_name(&self) -> &str {
+        &self.current_theme_name
+    }
+
     /// 테마 전환 (이름으로)
     pub fn switch_theme(&mut self, name: &str) -> Result<(), String> {
         if let Some((_, theme)) = self.available_themes.iter().find(|(n, _)| n == name) {
             self.current_theme = theme.clone();
+            self.current_theme_name = name.to_string();
             Ok(())
         } else {
             Err(format!("테마를 찾을 수 없습니다: {}", name))
@@ -297,14 +323,11 @@ impl ThemeManager {
         let current_index = self
             .available_themes
             .iter()
-            .position(|(_, t)| {
-                // 테마 비교는 이름으로 하는 것이 더 안전
-                // 임시로 첫 번째 색상으로 비교
-                format!("{:?}", t.bg_primary) == format!("{:?}", self.current_theme.bg_primary)
-            })
+            .position(|(name, _)| name == &self.current_theme_name)
             .unwrap_or(0);
 
         let next_index = (current_index + 1) % self.available_themes.len();
+        self.current_theme_name = self.available_themes[next_index].0.clone();
         self.current_theme = self.available_themes[next_index].1.clone();
     }
 
@@ -395,12 +418,14 @@ mod tests {
     fn test_theme_manager_creation() {
         let manager = ThemeManager::new();
         assert_eq!(manager.available_themes().len(), 3);
+        assert_eq!(manager.current_name(), "dark");
     }
 
     #[test]
     fn test_theme_switching() {
         let mut manager = ThemeManager::new();
         assert!(manager.switch_theme("light").is_ok());
+        assert_eq!(manager.current_name(), "light");
         assert_eq!(
             manager.current().bg_primary.to_color(),
             Color::Rgb(255, 255, 255)
@@ -412,6 +437,7 @@ mod tests {
         let mut manager = ThemeManager::new();
         manager.cycle_theme();
         // 순환 후에는 다음 테마로 변경됨
+        assert_eq!(manager.current_name(), "light");
         assert_eq!(manager.available_themes().len(), 3);
     }
 }

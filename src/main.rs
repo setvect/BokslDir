@@ -320,8 +320,8 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     };
 
     match dialog_kind {
-        DialogKind::Input { value, .. } => {
-            handle_input_dialog_keys(app, modifiers, code, &value);
+        DialogKind::Input { .. } => {
+            handle_input_dialog_keys(app, modifiers, code);
         }
         DialogKind::ArchiveCreateOptions { .. } => {
             handle_archive_create_dialog_keys(app, modifiers, code);
@@ -380,14 +380,65 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     }
 }
 
-/// 입력 다이얼로그 키 처리
-fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode, _value: &str) {
-    let input_purpose = app.get_dialog_input_purpose();
+#[derive(Clone, Copy)]
+struct TextEditHandlers {
+    delete_prev_word: fn(&mut App),
+    input_char: fn(&mut App, char),
+    backspace: fn(&mut App),
+    delete: fn(&mut App),
+    left: fn(&mut App),
+    right: fn(&mut App),
+    home: fn(&mut App),
+    end: fn(&mut App),
+}
 
+fn handle_text_edit_keys(
+    app: &mut App,
+    modifiers: KeyModifiers,
+    code: KeyCode,
+    handlers: TextEditHandlers,
+) -> bool {
     if is_prev_word_delete_shortcut(modifiers, code) {
-        app.dialog_input_delete_prev_word();
-        return;
+        (handlers.delete_prev_word)(app);
+        return true;
     }
+
+    match (modifiers, code) {
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (handlers.input_char)(app, c);
+            true
+        }
+        (_, KeyCode::Backspace) => {
+            (handlers.backspace)(app);
+            true
+        }
+        (_, KeyCode::Delete) => {
+            (handlers.delete)(app);
+            true
+        }
+        (_, KeyCode::Left) => {
+            (handlers.left)(app);
+            true
+        }
+        (_, KeyCode::Right) => {
+            (handlers.right)(app);
+            true
+        }
+        (_, KeyCode::Home) => {
+            (handlers.home)(app);
+            true
+        }
+        (_, KeyCode::End) => {
+            (handlers.end)(app);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// 입력 다이얼로그 키 처리
+fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    let input_purpose = app.get_dialog_input_purpose();
 
     match (modifiers, code) {
         // 확인 (선택된 버튼에 따라 동작)
@@ -431,32 +482,23 @@ fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCod
         (KeyModifiers::NONE, KeyCode::Up) => {
             app.dialog_input_cycle_completion_prev();
         }
-        // 문자 입력
-        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
-            app.dialog_input_char(c);
+        _ => {
+            let _ = handle_text_edit_keys(
+                app,
+                modifiers,
+                code,
+                TextEditHandlers {
+                    delete_prev_word: App::dialog_input_delete_prev_word,
+                    input_char: App::dialog_input_char,
+                    backspace: App::dialog_input_backspace,
+                    delete: App::dialog_input_delete,
+                    left: App::dialog_input_left,
+                    right: App::dialog_input_right,
+                    home: App::dialog_input_home,
+                    end: App::dialog_input_end,
+                },
+            );
         }
-        // 백스페이스
-        (_, KeyCode::Backspace) => {
-            app.dialog_input_backspace();
-        }
-        // Delete
-        (_, KeyCode::Delete) => {
-            app.dialog_input_delete();
-        }
-        // 커서 이동
-        (_, KeyCode::Left) => {
-            app.dialog_input_left();
-        }
-        (_, KeyCode::Right) => {
-            app.dialog_input_right();
-        }
-        (_, KeyCode::Home) => {
-            app.dialog_input_home();
-        }
-        (_, KeyCode::End) => {
-            app.dialog_input_end();
-        }
-        _ => {}
     }
 }
 
@@ -610,11 +652,6 @@ fn handle_delete_confirm_dialog_keys(app: &mut App, modifiers: KeyModifiers, cod
 
 /// 새 디렉토리 입력 다이얼로그 키 처리
 fn handle_mkdir_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
-    if is_prev_word_delete_shortcut(modifiers, code) {
-        app.dialog_mkdir_input_delete_prev_word();
-        return;
-    }
-
     match (modifiers, code) {
         (_, KeyCode::Enter) => {
             let selected_button = app.get_mkdir_selected_button().unwrap_or(0);
@@ -630,26 +667,28 @@ fn handle_mkdir_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: 
         (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
             app.dialog_mkdir_toggle_button();
         }
-        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
-            app.dialog_mkdir_input_char(c);
+        _ => {
+            let _ = handle_text_edit_keys(
+                app,
+                modifiers,
+                code,
+                TextEditHandlers {
+                    delete_prev_word: App::dialog_mkdir_input_delete_prev_word,
+                    input_char: App::dialog_mkdir_input_char,
+                    backspace: App::dialog_mkdir_input_backspace,
+                    delete: App::dialog_mkdir_input_delete,
+                    left: App::dialog_mkdir_input_left,
+                    right: App::dialog_mkdir_input_right,
+                    home: App::dialog_mkdir_input_home,
+                    end: App::dialog_mkdir_input_end,
+                },
+            );
         }
-        (_, KeyCode::Backspace) => app.dialog_mkdir_input_backspace(),
-        (_, KeyCode::Delete) => app.dialog_mkdir_input_delete(),
-        (_, KeyCode::Left) => app.dialog_mkdir_input_left(),
-        (_, KeyCode::Right) => app.dialog_mkdir_input_right(),
-        (_, KeyCode::Home) => app.dialog_mkdir_input_home(),
-        (_, KeyCode::End) => app.dialog_mkdir_input_end(),
-        _ => {}
     }
 }
 
 /// 이름 변경 입력 다이얼로그 키 처리
 fn handle_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
-    if is_prev_word_delete_shortcut(modifiers, code) {
-        app.dialog_rename_input_delete_prev_word();
-        return;
-    }
-
     match (modifiers, code) {
         (_, KeyCode::Enter) => {
             let selected_button = app.get_rename_selected_button().unwrap_or(0);
@@ -665,16 +704,23 @@ fn handle_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code:
         (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
             app.dialog_rename_toggle_button();
         }
-        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
-            app.dialog_rename_input_char(c);
+        _ => {
+            let _ = handle_text_edit_keys(
+                app,
+                modifiers,
+                code,
+                TextEditHandlers {
+                    delete_prev_word: App::dialog_rename_input_delete_prev_word,
+                    input_char: App::dialog_rename_input_char,
+                    backspace: App::dialog_rename_input_backspace,
+                    delete: App::dialog_rename_input_delete,
+                    left: App::dialog_rename_input_left,
+                    right: App::dialog_rename_input_right,
+                    home: App::dialog_rename_input_home,
+                    end: App::dialog_rename_input_end,
+                },
+            );
         }
-        (_, KeyCode::Backspace) => app.dialog_rename_input_backspace(),
-        (_, KeyCode::Delete) => app.dialog_rename_input_delete(),
-        (_, KeyCode::Left) => app.dialog_rename_input_left(),
-        (_, KeyCode::Right) => app.dialog_rename_input_right(),
-        (_, KeyCode::Home) => app.dialog_rename_input_home(),
-        (_, KeyCode::End) => app.dialog_rename_input_end(),
-        _ => {}
     }
 }
 
@@ -828,11 +874,6 @@ fn handle_bookmark_list_dialog_keys(app: &mut App, code: KeyCode) {
 
 /// 북마크 이름 변경 입력 다이얼로그 키 처리
 fn handle_bookmark_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
-    if is_prev_word_delete_shortcut(modifiers, code) {
-        app.dialog_bookmark_rename_input_delete_prev_word();
-        return;
-    }
-
     match (modifiers, code) {
         (_, KeyCode::Enter) => {
             let selected_button = app.get_bookmark_rename_selected_button().unwrap_or(0);
@@ -848,16 +889,23 @@ fn handle_bookmark_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifie
         (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
             app.dialog_bookmark_rename_toggle_button();
         }
-        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
-            app.dialog_bookmark_rename_input_char(c);
+        _ => {
+            let _ = handle_text_edit_keys(
+                app,
+                modifiers,
+                code,
+                TextEditHandlers {
+                    delete_prev_word: App::dialog_bookmark_rename_input_delete_prev_word,
+                    input_char: App::dialog_bookmark_rename_input_char,
+                    backspace: App::dialog_bookmark_rename_input_backspace,
+                    delete: App::dialog_bookmark_rename_input_delete,
+                    left: App::dialog_bookmark_rename_input_left,
+                    right: App::dialog_bookmark_rename_input_right,
+                    home: App::dialog_bookmark_rename_input_home,
+                    end: App::dialog_bookmark_rename_input_end,
+                },
+            );
         }
-        (_, KeyCode::Backspace) => app.dialog_bookmark_rename_input_backspace(),
-        (_, KeyCode::Delete) => app.dialog_bookmark_rename_input_delete(),
-        (_, KeyCode::Left) => app.dialog_bookmark_rename_input_left(),
-        (_, KeyCode::Right) => app.dialog_bookmark_rename_input_right(),
-        (_, KeyCode::Home) => app.dialog_bookmark_rename_input_home(),
-        (_, KeyCode::End) => app.dialog_bookmark_rename_input_end(),
-        _ => {}
     }
 }
 
@@ -877,11 +925,6 @@ fn handle_archive_preview_dialog_keys(app: &mut App, code: KeyCode) {
 
 /// 필터 입력 다이얼로그 키 처리
 fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
-    if is_prev_word_delete_shortcut(modifiers, code) {
-        app.dialog_filter_input_delete_prev_word();
-        return;
-    }
-
     match (modifiers, code) {
         (_, KeyCode::Enter) => {
             let selected_button = app.get_filter_selected_button().unwrap_or(0);
@@ -901,16 +944,23 @@ fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code:
         (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
             app.dialog_filter_toggle_button();
         }
-        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
-            app.dialog_filter_input_char(c);
+        _ => {
+            let _ = handle_text_edit_keys(
+                app,
+                modifiers,
+                code,
+                TextEditHandlers {
+                    delete_prev_word: App::dialog_filter_input_delete_prev_word,
+                    input_char: App::dialog_filter_input_char,
+                    backspace: App::dialog_filter_input_backspace,
+                    delete: App::dialog_filter_input_delete,
+                    left: App::dialog_filter_input_left,
+                    right: App::dialog_filter_input_right,
+                    home: App::dialog_filter_input_home,
+                    end: App::dialog_filter_input_end,
+                },
+            );
         }
-        (_, KeyCode::Backspace) => app.dialog_filter_input_backspace(),
-        (_, KeyCode::Delete) => app.dialog_filter_input_delete(),
-        (_, KeyCode::Left) => app.dialog_filter_input_left(),
-        (_, KeyCode::Right) => app.dialog_filter_input_right(),
-        (_, KeyCode::Home) => app.dialog_filter_input_home(),
-        (_, KeyCode::End) => app.dialog_filter_input_end(),
-        _ => {}
     }
 }
 
@@ -970,256 +1020,6 @@ fn handle_menu_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
         (_, KeyCode::F(10)) => app.quit(),
         _ => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_t_b_sequence_opens_bookmark_flow() {
-        let mut app = App::new_for_test();
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('t'));
-        assert_eq!(app.pending_key, Some('t'));
-
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('b'));
-        assert!(matches!(
-            app.dialog,
-            Some(DialogKind::BookmarkList { .. }) | Some(DialogKind::Message { .. })
-        ));
-    }
-
-    #[test]
-    fn test_g_p_sequence_opens_go_to_path_dialog() {
-        let mut app = App::new_for_test();
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('g'));
-        assert_eq!(app.pending_key, Some('g'));
-
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('p'));
-        assert!(matches!(app.dialog, Some(DialogKind::Input { .. })));
-    }
-
-    #[test]
-    fn test_z_c_sequence_dispatches_archive_compress() {
-        let mut app = App::new_for_test();
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('z'));
-        assert_eq!(app.pending_key, Some('z'));
-
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
-        assert!(matches!(
-            app.dialog,
-            Some(DialogKind::ArchiveCreateOptions { .. }) | Some(DialogKind::Message { .. })
-        ));
-    }
-
-    #[test]
-    fn test_z_a_sequence_dispatches_archive_auto_extract() {
-        let mut app = App::new_for_test();
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('z'));
-        assert_eq!(app.pending_key, Some('z'));
-
-        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('a'));
-        assert!(matches!(
-            app.dialog,
-            Some(DialogKind::Error { .. })
-                | Some(DialogKind::Input { .. })
-                | Some(DialogKind::Progress { .. })
-                | Some(DialogKind::Message { .. })
-                | Some(DialogKind::Conflict { .. })
-        ));
-    }
-
-    #[test]
-    fn test_bookmark_list_dialog_key_navigation_and_rename() {
-        let mut app = App::new_for_test();
-        app.dialog = Some(DialogKind::bookmark_list(
-            vec![
-                ("A".to_string(), std::path::PathBuf::from("/a")),
-                ("B".to_string(), std::path::PathBuf::from("/b")),
-            ],
-            0,
-        ));
-
-        handle_bookmark_list_dialog_keys(&mut app, KeyCode::Char('j'));
-        if let Some(DialogKind::BookmarkList { selected_index, .. }) = &app.dialog {
-            assert_eq!(*selected_index, 1);
-        } else {
-            panic!("bookmark list dialog not shown");
-        }
-
-        handle_bookmark_list_dialog_keys(&mut app, KeyCode::Char('r'));
-        assert!(matches!(
-            app.dialog,
-            Some(DialogKind::BookmarkRenameInput { .. })
-        ));
-    }
-
-    #[test]
-    fn test_input_dialog_tab_applies_completion_for_go_to_path() {
-        let mut app = App::new_for_test();
-        app.dialog = Some(DialogKind::go_to_path_input(
-            "",
-            std::path::PathBuf::from("."),
-        ));
-        if let Some(DialogKind::Input {
-            completion_candidates,
-            completion_index,
-            ..
-        }) = &mut app.dialog
-        {
-            *completion_candidates = vec!["docs".to_string(), "downloads".to_string()];
-            *completion_index = Some(0);
-        }
-
-        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Tab, "");
-        assert_eq!(app.get_dialog_input_value().as_deref(), Some("docs"));
-        assert_eq!(app.get_dialog_input_selected_button(), Some(0));
-    }
-
-    #[test]
-    fn test_input_dialog_tab_toggles_buttons_for_non_go_to_path() {
-        let mut app = App::new_for_test();
-        app.dialog = Some(DialogKind::operation_path_input(
-            "Copy",
-            "Copy to:",
-            "",
-            std::path::PathBuf::from("."),
-        ));
-        assert_eq!(app.get_dialog_input_selected_button(), Some(0));
-
-        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Tab, "");
-        assert_eq!(app.get_dialog_input_selected_button(), Some(1));
-    }
-
-    #[test]
-    fn test_input_dialog_right_applies_selected_completion() {
-        let mut app = App::new_for_test();
-        app.dialog = Some(DialogKind::go_to_path_input(
-            "",
-            std::path::PathBuf::from("."),
-        ));
-        if let Some(DialogKind::Input {
-            completion_candidates,
-            completion_index,
-            ..
-        }) = &mut app.dialog
-        {
-            *completion_candidates = vec!["docs".to_string(), "downloads".to_string()];
-            *completion_index = Some(0);
-        }
-
-        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Right, "");
-        assert_eq!(app.get_dialog_input_value().as_deref(), Some("docs"));
-    }
-
-    #[test]
-    fn test_input_dialog_up_down_cycles_completion() {
-        let mut app = App::new_for_test();
-        app.dialog = Some(DialogKind::go_to_path_input(
-            "",
-            std::path::PathBuf::from("."),
-        ));
-        if let Some(DialogKind::Input {
-            completion_candidates,
-            completion_index,
-            ..
-        }) = &mut app.dialog
-        {
-            *completion_candidates = vec!["alpha".to_string(), "beta".to_string()];
-            *completion_index = Some(0);
-        }
-
-        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Down, "");
-        assert_eq!(app.get_dialog_input_value().as_deref(), Some("beta"));
-
-        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Up, "");
-        assert_eq!(app.get_dialog_input_value().as_deref(), Some("alpha"));
-    }
-
-    #[test]
-    fn test_input_dialog_j_k_stays_text_input() {
-        let mut app = App::new_for_test();
-        app.dialog = Some(DialogKind::go_to_path_input(
-            "",
-            std::path::PathBuf::from("."),
-        ));
-
-        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('j'), "");
-        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('k'), "");
-
-        assert_eq!(app.get_dialog_input_value().as_deref(), Some("jk"));
-    }
-
-    #[test]
-    fn test_input_dialog_ctrl_w_deletes_prev_word() {
-        let mut app = App::new_for_test();
-        app.dialog = Some(DialogKind::go_to_path_input(
-            "/Users/boksl/IdeaProjects/BokslDir/temp",
-            std::path::PathBuf::from("."),
-        ));
-
-        handle_input_dialog_keys(&mut app, KeyModifiers::CONTROL, KeyCode::Char('w'), "");
-        assert_eq!(
-            app.get_dialog_input_value().as_deref(),
-            Some("/Users/boksl/IdeaProjects/BokslDir/")
-        );
-    }
-
-    #[test]
-    fn test_help_search_ctrl_w_deletes_prev_word() {
-        let mut app = App::new_for_test();
-        app.show_help();
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('o'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('p'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('y'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char(' '));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('f'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('i'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('l'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('e'));
-
-        handle_help_dialog_keys(&mut app, KeyModifiers::CONTROL, KeyCode::Char('w'));
-
-        assert!(matches!(
-            &app.dialog,
-            Some(DialogKind::Help { search_query, .. }) if search_query == "copy "
-        ));
-    }
-
-    #[test]
-    fn test_help_dialog_slash_enters_search_mode() {
-        let mut app = App::new_for_test();
-        app.show_help();
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
-        assert!(matches!(
-            app.dialog,
-            Some(DialogKind::Help {
-                search_mode: true,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn test_help_dialog_esc_clears_query_then_closes() {
-        let mut app = App::new_for_test();
-        app.show_help();
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Esc);
-        assert!(matches!(
-            &app.dialog,
-            Some(DialogKind::Help {
-                search_query,
-                search_mode: false,
-                ..
-            }) if search_query.is_empty()
-        ));
-        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Esc);
-        assert!(app.dialog.is_none());
     }
 }
 
@@ -1471,5 +1271,255 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     if let Some(ref dialog_kind) = app.dialog {
         let dialog = Dialog::new(dialog_kind).theme(theme);
         f.render_widget(dialog, f.area());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_t_b_sequence_opens_bookmark_flow() {
+        let mut app = App::new_for_test();
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('t'));
+        assert_eq!(app.pending_key, Some('t'));
+
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('b'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::BookmarkList { .. }) | Some(DialogKind::Message { .. })
+        ));
+    }
+
+    #[test]
+    fn test_g_p_sequence_opens_go_to_path_dialog() {
+        let mut app = App::new_for_test();
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('g'));
+        assert_eq!(app.pending_key, Some('g'));
+
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('p'));
+        assert!(matches!(app.dialog, Some(DialogKind::Input { .. })));
+    }
+
+    #[test]
+    fn test_z_c_sequence_dispatches_archive_compress() {
+        let mut app = App::new_for_test();
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('z'));
+        assert_eq!(app.pending_key, Some('z'));
+
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::ArchiveCreateOptions { .. }) | Some(DialogKind::Message { .. })
+        ));
+    }
+
+    #[test]
+    fn test_z_a_sequence_dispatches_archive_auto_extract() {
+        let mut app = App::new_for_test();
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('z'));
+        assert_eq!(app.pending_key, Some('z'));
+
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('a'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::Error { .. })
+                | Some(DialogKind::Input { .. })
+                | Some(DialogKind::Progress { .. })
+                | Some(DialogKind::Message { .. })
+                | Some(DialogKind::Conflict { .. })
+        ));
+    }
+
+    #[test]
+    fn test_bookmark_list_dialog_key_navigation_and_rename() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::bookmark_list(
+            vec![
+                ("A".to_string(), std::path::PathBuf::from("/a")),
+                ("B".to_string(), std::path::PathBuf::from("/b")),
+            ],
+            0,
+        ));
+
+        handle_bookmark_list_dialog_keys(&mut app, KeyCode::Char('j'));
+        if let Some(DialogKind::BookmarkList { selected_index, .. }) = &app.dialog {
+            assert_eq!(*selected_index, 1);
+        } else {
+            panic!("bookmark list dialog not shown");
+        }
+
+        handle_bookmark_list_dialog_keys(&mut app, KeyCode::Char('r'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::BookmarkRenameInput { .. })
+        ));
+    }
+
+    #[test]
+    fn test_input_dialog_tab_applies_completion_for_go_to_path() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "",
+            std::path::PathBuf::from("."),
+        ));
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        }) = &mut app.dialog
+        {
+            *completion_candidates = vec!["docs".to_string(), "downloads".to_string()];
+            *completion_index = Some(0);
+        }
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("docs"));
+        assert_eq!(app.get_dialog_input_selected_button(), Some(0));
+    }
+
+    #[test]
+    fn test_input_dialog_tab_toggles_buttons_for_non_go_to_path() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::operation_path_input(
+            "Copy",
+            "Copy to:",
+            "",
+            std::path::PathBuf::from("."),
+        ));
+        assert_eq!(app.get_dialog_input_selected_button(), Some(0));
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(app.get_dialog_input_selected_button(), Some(1));
+    }
+
+    #[test]
+    fn test_input_dialog_right_applies_selected_completion() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "",
+            std::path::PathBuf::from("."),
+        ));
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        }) = &mut app.dialog
+        {
+            *completion_candidates = vec!["docs".to_string(), "downloads".to_string()];
+            *completion_index = Some(0);
+        }
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Right);
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("docs"));
+    }
+
+    #[test]
+    fn test_input_dialog_up_down_cycles_completion() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "",
+            std::path::PathBuf::from("."),
+        ));
+        if let Some(DialogKind::Input {
+            completion_candidates,
+            completion_index,
+            ..
+        }) = &mut app.dialog
+        {
+            *completion_candidates = vec!["alpha".to_string(), "beta".to_string()];
+            *completion_index = Some(0);
+        }
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Down);
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("beta"));
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Up);
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("alpha"));
+    }
+
+    #[test]
+    fn test_input_dialog_j_k_stays_text_input() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "",
+            std::path::PathBuf::from("."),
+        ));
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('j'));
+        handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('k'));
+
+        assert_eq!(app.get_dialog_input_value().as_deref(), Some("jk"));
+    }
+
+    #[test]
+    fn test_input_dialog_ctrl_w_deletes_prev_word() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "/Users/boksl/IdeaProjects/BokslDir/temp",
+            std::path::PathBuf::from("."),
+        ));
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::CONTROL, KeyCode::Char('w'));
+        assert_eq!(
+            app.get_dialog_input_value().as_deref(),
+            Some("/Users/boksl/IdeaProjects/BokslDir/")
+        );
+    }
+
+    #[test]
+    fn test_help_search_ctrl_w_deletes_prev_word() {
+        let mut app = App::new_for_test();
+        app.show_help();
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('o'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('p'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('y'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char(' '));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('f'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('i'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('l'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('e'));
+
+        handle_help_dialog_keys(&mut app, KeyModifiers::CONTROL, KeyCode::Char('w'));
+
+        assert!(matches!(
+            &app.dialog,
+            Some(DialogKind::Help { search_query, .. }) if search_query == "copy "
+        ));
+    }
+
+    #[test]
+    fn test_help_dialog_slash_enters_search_mode() {
+        let mut app = App::new_for_test();
+        app.show_help();
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::Help {
+                search_mode: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_help_dialog_esc_clears_query_then_closes() {
+        let mut app = App::new_for_test();
+        app.show_help();
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Esc);
+        assert!(matches!(
+            &app.dialog,
+            Some(DialogKind::Help {
+                search_query,
+                search_mode: false,
+                ..
+            }) if search_query.is_empty()
+        ));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Esc);
+        assert!(app.dialog.is_none());
     }
 }

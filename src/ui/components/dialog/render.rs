@@ -1414,7 +1414,7 @@ impl<'a> Dialog<'a> {
     ) {
         // 테두리
         let block = Block::default()
-            .title(" Keyboard Shortcuts ")
+            .title(self.i18n().tr(TextKey::DialogKeyboardShortcutsTitle))
             .title_style(
                 Style::default()
                     .fg(self.title_color)

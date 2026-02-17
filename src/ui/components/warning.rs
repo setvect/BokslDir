@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::ui::layout::{MIN_HEIGHT, MIN_WIDTH};
+use crate::ui::Theme;
 
 /// 경고 화면 컴포넌트
 pub struct WarningScreen {
@@ -23,6 +24,10 @@ pub struct WarningScreen {
     bg_color: Color,
     /// 전경색
     fg_color: Color,
+    /// 에러 색상 (현재 크기)
+    error_color: Color,
+    /// 성공/권장 색상 (요구 크기)
+    success_color: Color,
 }
 
 impl Default for WarningScreen {
@@ -32,6 +37,8 @@ impl Default for WarningScreen {
             warning_color: Color::Yellow,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
+            error_color: Color::Red,
+            success_color: Color::Green,
         }
     }
 }
@@ -64,6 +71,16 @@ impl WarningScreen {
         self.fg_color = color;
         self
     }
+
+    /// 테마 적용
+    pub fn theme(mut self, theme: &Theme) -> Self {
+        self.warning_color = theme.warning.to_color();
+        self.bg_color = theme.bg_primary.to_color();
+        self.fg_color = theme.fg_primary.to_color();
+        self.error_color = theme.error.to_color();
+        self.success_color = theme.success.to_color();
+        self
+    }
 }
 
 impl Widget for WarningScreen {
@@ -90,7 +107,9 @@ impl Widget for WarningScreen {
             Span::styled("Current: ", Style::default().fg(self.fg_color)),
             Span::styled(
                 format!("{}x{}", self.current_size.0, self.current_size.1),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(self.error_color)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]);
 
@@ -99,7 +118,7 @@ impl Widget for WarningScreen {
             Span::styled(
                 format!("{}x{}", MIN_WIDTH, MIN_HEIGHT),
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(self.success_color)
                     .add_modifier(Modifier::BOLD),
             ),
         ]);

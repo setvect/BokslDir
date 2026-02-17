@@ -388,7 +388,9 @@ impl<'a> DropdownMenu<'a> {
         self.fg_color = theme.file_normal.to_color();
         self.selected_bg = theme.file_selected_bg.to_color();
         self.selected_fg = theme.file_selected.to_color();
+        self.disabled_color = theme.panel_inactive_border.to_color();
         self.border_color = theme.panel_inactive_border.to_color();
+        self.shortcut_color = theme.warning.to_color();
         self
     }
 

@@ -514,6 +514,10 @@ pub struct Dialog<'a> {
     input_bg: Color,
     progress_filled: Color,
     progress_unfilled: Color,
+    warning_color: Color,
+    error_color: Color,
+    success_color: Color,
+    muted_color: Color,
 }
 
 impl<'a> Default for Dialog<'a> {
@@ -535,6 +539,10 @@ impl<'a> Default for Dialog<'a> {
             input_bg: Color::Rgb(30, 30, 30),
             progress_filled: Color::Rgb(0, 120, 212),
             progress_unfilled: Color::Rgb(60, 60, 60),
+            warning_color: Color::Rgb(255, 165, 0),
+            error_color: Color::Rgb(244, 71, 71),
+            success_color: Color::Rgb(100, 180, 100),
+            muted_color: Color::Rgb(128, 128, 128),
         }
     }
 }
@@ -560,6 +568,10 @@ impl<'a> Dialog<'a> {
         self.input_bg = theme.bg_primary.to_color();
         self.progress_filled = theme.accent.to_color();
         self.progress_unfilled = theme.panel_inactive_border.to_color();
+        self.warning_color = theme.warning.to_color();
+        self.error_color = theme.error.to_color();
+        self.success_color = theme.success.to_color();
+        self.muted_color = theme.panel_inactive_border.to_color();
         self
     }
 
@@ -957,11 +969,11 @@ impl<'a> Dialog<'a> {
             .title(" File Exists ")
             .title_style(
                 Style::default()
-                    .fg(Color::Rgb(255, 165, 0))
+                    .fg(self.warning_color)
                     .add_modifier(Modifier::BOLD),
             )
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(255, 165, 0)))
+            .border_style(Style::default().fg(self.warning_color))
             .style(Style::default().bg(self.bg_color));
         block.render(area, buf);
 
@@ -973,8 +985,8 @@ impl<'a> Dialog<'a> {
         };
 
         let msg_style = Style::default().fg(self.fg_color);
-        let path_style = Style::default().fg(Color::Rgb(86, 156, 214));
-        let label_style = Style::default().fg(Color::Rgb(128, 128, 128));
+        let path_style = Style::default().fg(self.title_color);
+        let label_style = Style::default().fg(self.muted_color);
 
         // 소스 파일 표시
         buf.set_string(inner.x, inner.y, "Source:", label_style);
@@ -1088,11 +1100,11 @@ impl<'a> Dialog<'a> {
             progress.format_speed(),
             progress.format_eta()
         );
-        let speed_style = Style::default().fg(Color::Rgb(100, 180, 100));
+        let speed_style = Style::default().fg(self.success_color);
         buf.set_string(inner.x, inner.y + 7, &speed_eta, speed_style);
 
         // Esc 안내
-        let hint_style = Style::default().fg(Color::Rgb(128, 128, 128));
+        let hint_style = Style::default().fg(self.muted_color);
         buf.set_string(inner.x, inner.y + 9, "Press Esc to cancel", hint_style);
     }
 
@@ -1110,11 +1122,11 @@ impl<'a> Dialog<'a> {
             .title(" Delete ")
             .title_style(
                 Style::default()
-                    .fg(Color::Rgb(244, 71, 71))
+                    .fg(self.error_color)
                     .add_modifier(Modifier::BOLD),
             )
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(244, 71, 71)))
+            .border_style(Style::default().fg(self.error_color))
             .style(Style::default().bg(self.bg_color));
         block.render(area, buf);
 
@@ -1137,7 +1149,7 @@ impl<'a> Dialog<'a> {
         buf.set_string(inner.x, inner.y, &header, header_style);
 
         // 파일 목록
-        let item_style = Style::default().fg(Color::Rgb(86, 156, 214));
+        let item_style = Style::default().fg(self.title_color);
         let max_items = (inner.height.saturating_sub(4)) as usize; // 헤더 + 빈줄 + 버튼줄 + 빈줄
         for (i, item) in items.iter().enumerate() {
             if i >= max_items {
@@ -1146,7 +1158,7 @@ impl<'a> Dialog<'a> {
                     inner.x,
                     inner.y + 2 + i as u16,
                     &more,
-                    Style::default().fg(Color::Rgb(128, 128, 128)),
+                    Style::default().fg(self.muted_color),
                 );
                 break;
             }
@@ -1242,7 +1254,7 @@ impl<'a> Dialog<'a> {
             height: area.height.saturating_sub(DIALOG_V_PADDING * 2),
         };
 
-        let label_style = Style::default().fg(Color::Rgb(128, 128, 128));
+        let label_style = Style::default().fg(self.muted_color);
         let value_style = Style::default().fg(self.fg_color);
 
         let mut y = inner.y;
@@ -1342,12 +1354,7 @@ impl<'a> Dialog<'a> {
         let hint = " j/k:Move  Enter:Go  Esc:Close ";
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
-        buf.set_string(
-            hint_x,
-            hint_y,
-            hint,
-            Style::default().fg(Color::Rgb(100, 100, 100)),
-        );
+        buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
 
     fn render_tab_list(
@@ -1409,12 +1416,7 @@ impl<'a> Dialog<'a> {
         let hint = " j/k:Move  Enter:Go  Esc:Close ";
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
-        buf.set_string(
-            hint_x,
-            hint_y,
-            hint,
-            Style::default().fg(Color::Rgb(100, 100, 100)),
-        );
+        buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
 
     fn render_history_list(
@@ -1495,8 +1497,8 @@ impl<'a> Dialog<'a> {
             };
 
             let scrollbar_x = area.x + area.width - 2;
-            let track_style = Style::default().fg(Color::Rgb(60, 60, 60));
-            let thumb_style = Style::default().fg(Color::Rgb(150, 150, 150));
+            let track_style = Style::default().fg(self.progress_unfilled);
+            let thumb_style = Style::default().fg(self.muted_color);
 
             for i in 0..track_height {
                 let sy = inner.y + i as u16;
@@ -1512,12 +1514,7 @@ impl<'a> Dialog<'a> {
         let hint = " j/k:Move  Enter:Go  D:Clear  Esc:Close ";
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
-        buf.set_string(
-            hint_x,
-            hint_y,
-            hint,
-            Style::default().fg(Color::Rgb(100, 100, 100)),
-        );
+        buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
 
     fn render_bookmark_list(
@@ -1590,12 +1587,7 @@ impl<'a> Dialog<'a> {
         let hint = " j/k:Move  Enter:Go  r:Rename  d:Delete  Esc:Close ";
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
-        buf.set_string(
-            hint_x,
-            hint_y,
-            hint,
-            Style::default().fg(Color::Rgb(100, 100, 100)),
-        );
+        buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1662,12 +1654,7 @@ impl<'a> Dialog<'a> {
         }
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
-        buf.set_string(
-            hint_x,
-            hint_y,
-            hint,
-            Style::default().fg(Color::Rgb(100, 100, 100)),
-        );
+        buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1705,7 +1692,7 @@ impl<'a> Dialog<'a> {
         };
 
         let label_style = Style::default().fg(self.fg_color);
-        let dim_style = Style::default().fg(Color::Rgb(120, 120, 120));
+        let dim_style = Style::default().fg(self.muted_color);
         let focused_label_style = label_style.add_modifier(Modifier::BOLD);
 
         let path_label_style = if focused_field == 0 {
@@ -1792,12 +1779,7 @@ impl<'a> Dialog<'a> {
         let hint = "Tab/Shift+Tab:Move  Space:Toggle password  Enter:OK  Esc:Cancel  (zip/7z only)";
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height.saturating_sub(3);
-        buf.set_string(
-            hint_x,
-            hint_y,
-            hint,
-            Style::default().fg(Color::Rgb(100, 100, 100)),
-        );
+        buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
 
         let button_y = area.y + area.height.saturating_sub(2);
         let buttons_selected = focused_field == 4;
@@ -1844,10 +1826,10 @@ impl<'a> Dialog<'a> {
         let header_style = Style::default()
             .fg(self.title_color)
             .add_modifier(Modifier::BOLD);
-        let key_style = Style::default().fg(Color::Rgb(86, 156, 214));
+        let key_style = Style::default().fg(self.title_color);
         let desc_style = Style::default().fg(self.fg_color);
         let match_style = Style::default()
-            .fg(Color::Rgb(255, 255, 100))
+            .fg(self.warning_color)
             .add_modifier(Modifier::UNDERLINED);
 
         // 도움말 내용 (액션 레지스트리에서 생성)
@@ -1912,7 +1894,7 @@ impl<'a> Dialog<'a> {
             result_x,
             search_y,
             &result_text,
-            Style::default().fg(Color::Rgb(128, 128, 128)),
+            Style::default().fg(self.muted_color),
         );
 
         // 검색 줄 아래부터 본문 시작
@@ -1922,14 +1904,9 @@ impl<'a> Dialog<'a> {
         if all_rows.is_empty() {
             let no_result = "No shortcuts match your search";
             let y = content_y;
-            buf.set_string(
-                inner.x,
-                y,
-                no_result,
-                Style::default().fg(Color::Rgb(128, 128, 128)),
-            );
+            buf.set_string(inner.x, y, no_result, Style::default().fg(self.muted_color));
             let hint = "Esc:Clear/Close  /:Search  j/k:Scroll";
-            let hint_style = Style::default().fg(Color::Rgb(128, 128, 128));
+            let hint_style = Style::default().fg(self.muted_color);
             let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
             let hint_y = area.y + area.height - 2;
             buf.set_string(hint_x, hint_y, hint, hint_style);
@@ -1988,8 +1965,8 @@ impl<'a> Dialog<'a> {
             };
 
             let scrollbar_x = area.x + area.width - 2;
-            let track_style = Style::default().fg(Color::Rgb(60, 60, 60));
-            let thumb_style = Style::default().fg(Color::Rgb(150, 150, 150));
+            let track_style = Style::default().fg(self.progress_unfilled);
+            let thumb_style = Style::default().fg(self.muted_color);
 
             for i in 0..track_height {
                 let sy = content_y + i as u16;
@@ -2004,7 +1981,7 @@ impl<'a> Dialog<'a> {
 
         // 하단 힌트
         let hint = "Esc:Clear/Close  /:Search  j/k:Scroll";
-        let hint_style = Style::default().fg(Color::Rgb(128, 128, 128));
+        let hint_style = Style::default().fg(self.muted_color);
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 2;
         buf.set_string(hint_x, hint_y, hint, hint_style);
@@ -2020,12 +1997,12 @@ impl<'a> Dialog<'a> {
         is_error: bool,
     ) {
         let title_color = if is_error {
-            Color::Rgb(244, 71, 71)
+            self.error_color
         } else {
             self.title_color
         };
         let border_color = if is_error {
-            Color::Rgb(244, 71, 71)
+            self.error_color
         } else {
             self.border_color
         };

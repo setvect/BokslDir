@@ -86,6 +86,7 @@ impl CommandBar {
         self.bg_color = theme.command_bar_bg.to_color();
         self.key_fg_color = theme.accent.to_color();
         self.label_fg_color = theme.command_bar_fg.to_color();
+        self.disabled_color = theme.panel_inactive_border.to_color();
         self
     }
 }
@@ -126,7 +127,7 @@ impl Widget for CommandBar {
         let mut spans = Vec::new();
         spans.push(Span::raw(" ")); // 왼쪽 패딩
 
-        let sep_style = Style::default().fg(Color::Rgb(80, 80, 80));
+        let sep_style = Style::default().fg(self.disabled_color);
 
         for (i, cmd) in self.commands.iter().take(visible_count).enumerate() {
             if i > 0 {

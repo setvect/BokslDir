@@ -15,7 +15,7 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Terminal,
@@ -72,7 +72,9 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                 LayoutMode::TooSmall => {
                     // 경고 화면 표시
                     let (width, height) = app.layout.terminal_size();
-                    let warning = WarningScreen::new().current_size(width, height);
+                    let warning = WarningScreen::new()
+                        .current_size(width, height)
+                        .theme(app.theme_manager.current());
                     f.render_widget(warning, size);
                 }
                 LayoutMode::DualPanel => {
@@ -1295,7 +1297,7 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
     f.render_widget(status_bar, area);
 }
 
-fn render_toast_overlay(f: &mut ratatui::Frame<'_>, app: &App) {
+fn render_toast_overlay(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme) {
     let Some(message) = app.toast_display() else {
         return;
     };
@@ -1327,6 +1329,13 @@ fn render_toast_overlay(f: &mut ratatui::Frame<'_>, app: &App) {
     };
 
     let lower = message.to_ascii_lowercase();
+    let panel_bg = theme.panel_bg.to_color();
+    let fg = theme.fg_primary.to_color();
+    let accent = theme.accent.to_color();
+    let warning = theme.warning.to_color();
+    let success = theme.success.to_color();
+    let error = theme.error.to_color();
+
     let (label, label_bg, border_color) = if lower.contains("error")
         || lower.contains("fail")
         || lower.contains("cannot")
@@ -1335,11 +1344,7 @@ fn render_toast_overlay(f: &mut ratatui::Frame<'_>, app: &App) {
         || lower.contains("mismatch")
         || lower.contains("empty")
     {
-        (
-            " WARNING ",
-            Color::Rgb(255, 120, 90),
-            Color::Rgb(255, 120, 90),
-        )
+        (" WARNING ", warning, error)
     } else if lower.contains("done")
         || lower.contains("completed")
         || lower.contains("created")
@@ -1351,23 +1356,15 @@ fn render_toast_overlay(f: &mut ratatui::Frame<'_>, app: &App) {
         || lower.contains("cleared")
         || lower.contains("success")
     {
-        (
-            " SUCCESS ",
-            Color::Rgb(80, 200, 140),
-            Color::Rgb(80, 200, 140),
-        )
+        (" SUCCESS ", success, success)
     } else {
-        (
-            " NOTICE ",
-            Color::Rgb(255, 205, 64),
-            Color::Rgb(35, 170, 255),
-        )
+        (" NOTICE ", warning, accent)
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(Color::Rgb(15, 20, 28)));
+        .style(Style::default().bg(panel_bg));
     f.render_widget(Clear, toast_area);
     f.render_widget(block, toast_area);
 
@@ -1382,15 +1379,15 @@ fn render_toast_overlay(f: &mut ratatui::Frame<'_>, app: &App) {
         Span::styled(
             label,
             Style::default()
-                .fg(Color::Rgb(15, 20, 28))
+                .fg(panel_bg)
                 .bg(label_bg)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  {}", msg),
             Style::default()
-                .fg(Color::Rgb(240, 248, 255))
-                .bg(Color::Rgb(15, 20, 28))
+                .fg(fg)
+                .bg(panel_bg)
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
@@ -1469,7 +1466,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     f.render_widget(command_bar, areas.command_bar);
 
     render_dropdown_if_active(f, app, theme, areas.menu_bar);
-    render_toast_overlay(f, app);
+    render_toast_overlay(f, app, theme);
 
     if let Some(ref dialog_kind) = app.dialog {
         let dialog = Dialog::new(dialog_kind).theme(theme);

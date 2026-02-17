@@ -343,25 +343,18 @@ impl Panel<'_> {
 
     /// 탭바 렌더링. y를 1 증가시킨다.
     /// 헤더 행 + 구분선 렌더링. y를 2 증가시킨다.
-    fn render_header(
-        layout: &ColumnLayout,
-        inner: Rect,
-        buf: &mut Buffer,
-        y: &mut u16,
-        sort_by: SortBy,
-        sort_order: SortOrder,
-    ) {
+    fn render_header(&self, layout: &ColumnLayout, inner: Rect, buf: &mut Buffer, y: &mut u16) {
         let header_style = Style::default()
-            .fg(Color::Rgb(150, 150, 150))
+            .fg(self.inactive_border_color)
             .add_modifier(Modifier::BOLD);
 
-        let arrow = match sort_order {
+        let arrow = match self.sort_order {
             SortOrder::Ascending => "▲",
             SortOrder::Descending => "▼",
         };
 
         // Name 헤더 (Extension 정렬 시 "Name(Ext)" 표시)
-        let name_label = match sort_by {
+        let name_label = match self.sort_by {
             SortBy::Name => format!("Name {}", arrow),
             SortBy::Extension => format!("Name(Ext) {}", arrow),
             _ => "Name".to_string(),
@@ -374,7 +367,7 @@ impl Panel<'_> {
         ));
 
         if layout.show_size {
-            let size_label = if sort_by == SortBy::Size {
+            let size_label = if self.sort_by == SortBy::Size {
                 format!("Size {}", arrow)
             } else {
                 "Size".to_string()
@@ -383,7 +376,7 @@ impl Panel<'_> {
             header_spans.push(Span::styled(format!("{:<10}", size_label), header_style));
         }
 
-        let modified_label = if sort_by == SortBy::Modified {
+        let modified_label = if self.sort_by == SortBy::Modified {
             format!("Modified {}", arrow)
         } else {
             "Modified".to_string()
@@ -408,7 +401,7 @@ impl Panel<'_> {
             inner.x,
             inner.y + *y,
             separator,
-            Style::default().fg(Color::Rgb(60, 60, 60)),
+            Style::default().fg(self.inactive_border_color),
         );
         *y += 1;
     }
@@ -421,7 +414,7 @@ impl Panel<'_> {
                 .bg(self.file_selected_bg_color)
                 .fg(self.file_selected_color)
         } else {
-            Style::default().fg(Color::Rgb(150, 150, 150))
+            Style::default().fg(self.inactive_border_color)
         };
 
         let parent_text = "[..]";
@@ -497,12 +490,12 @@ impl Panel<'_> {
 
         let highlight_style = if let Some(bg_color) = bg {
             Style::default()
-                .fg(Color::Rgb(255, 255, 100))
+                .fg(self.file_marked_symbol_color)
                 .bg(bg_color)
                 .add_modifier(Modifier::UNDERLINED)
         } else {
             Style::default()
-                .fg(Color::Rgb(255, 255, 100))
+                .fg(self.file_marked_symbol_color)
                 .add_modifier(Modifier::UNDERLINED)
         };
 
@@ -583,10 +576,10 @@ impl Panel<'_> {
     }
 
     /// 빈 패널 메시지 렌더링
-    fn render_empty_state(inner: Rect, buf: &mut Buffer, y: u16) {
+    fn render_empty_state(&self, inner: Rect, buf: &mut Buffer, y: u16) {
         let empty_text = Line::from(vec![Span::styled(
             " (No files)",
-            Style::default().fg(Color::Rgb(100, 100, 100)),
+            Style::default().fg(self.inactive_border_color),
         )]);
         buf.set_line(inner.x, inner.y + y, &empty_text, inner.width);
     }
@@ -655,7 +648,7 @@ impl Widget for Panel<'_> {
         let layout = Self::calculate_column_layout(inner.width as usize, has_scrollbar);
         let mut y: u16 = 0;
 
-        Self::render_header(&layout, inner, buf, &mut y, self.sort_by, self.sort_order);
+        self.render_header(&layout, inner, buf, &mut y);
 
         if self.show_parent {
             self.render_parent_entry(inner, buf, &mut y);
@@ -674,7 +667,7 @@ impl Widget for Panel<'_> {
         }
 
         if self.entries.is_empty() && !self.show_parent && y < inner.height {
-            Self::render_empty_state(inner, buf, y);
+            self.render_empty_state(inner, buf, y);
         }
 
         // 스크롤바 렌더링
@@ -693,8 +686,8 @@ impl Widget for Panel<'_> {
                 let scrollbar_x = inner.x + inner.width - 1;
                 let track_start_y = inner.y + (header_lines + parent_line) as u16;
 
-                let track_style = Style::default().fg(Color::Rgb(60, 60, 60));
-                let thumb_style = Style::default().fg(Color::Rgb(150, 150, 150));
+                let track_style = Style::default().fg(self.inactive_border_color);
+                let thumb_style = Style::default().fg(self.file_normal_color);
 
                 for i in 0..track_height {
                     let sy = track_start_y + i as u16;

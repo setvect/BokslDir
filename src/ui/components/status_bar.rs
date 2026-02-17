@@ -43,6 +43,14 @@ pub struct StatusBar<'a> {
     bg_color: Color,
     /// 전경색
     fg_color: Color,
+    /// 강조색
+    accent_color: Color,
+    /// 경고색
+    warning_color: Color,
+    /// 성공색
+    success_color: Color,
+    /// 보조(희미한) 색
+    muted_color: Color,
 }
 
 impl<'a> Default for StatusBar<'a> {
@@ -62,6 +70,10 @@ impl<'a> Default for StatusBar<'a> {
             ime_info: None,
             bg_color: Color::Rgb(30, 30, 30),
             fg_color: Color::Rgb(212, 212, 212),
+            accent_color: Color::Rgb(0, 120, 212),
+            warning_color: Color::Rgb(255, 180, 50),
+            success_color: Color::Rgb(100, 200, 100),
+            muted_color: Color::Rgb(100, 100, 100),
         }
     }
 }
@@ -159,6 +171,10 @@ impl<'a> StatusBar<'a> {
     pub fn theme(mut self, theme: &Theme) -> Self {
         self.bg_color = theme.status_bar_bg.to_color();
         self.fg_color = theme.status_bar_fg.to_color();
+        self.accent_color = theme.accent.to_color();
+        self.warning_color = theme.warning.to_color();
+        self.success_color = theme.success.to_color();
+        self.muted_color = theme.panel_inactive_border.to_color();
         self
     }
 }
@@ -173,9 +189,7 @@ impl Widget for StatusBar<'_> {
         // 토스트 메시지가 있으면 토스트만 표시
         if let Some(toast_msg) = self.toast {
             let toast_text = format!(" {} ", toast_msg);
-            let toast_style = Style::default()
-                .fg(Color::Rgb(255, 200, 50))
-                .bg(self.bg_color);
+            let toast_style = Style::default().fg(self.warning_color).bg(self.bg_color);
             let line = Line::from(Span::styled(&toast_text, toast_style));
             Paragraph::new(line).render(area, buf);
             return;
@@ -272,30 +286,21 @@ impl Widget for StatusBar<'_> {
 
         // IME 상태 색상: 한글이면 노란색 경고, 영문이면 녹색
         let ime_color = if self.ime_info == Some("한글") {
-            Color::Rgb(255, 180, 50) // 노란-주황 (한글 모드 경고)
+            self.warning_color
         } else {
-            Color::Rgb(100, 200, 100) // 녹색 (영문 모드)
+            self.success_color
         };
 
         let spans = vec![
             Span::styled(&left_info, Style::default().fg(self.fg_color)),
-            Span::styled(&selected_info, Style::default().fg(Color::Yellow)),
-            Span::styled(&pending_info, Style::default().fg(Color::Cyan)),
+            Span::styled(&selected_info, Style::default().fg(self.warning_color)),
+            Span::styled(&pending_info, Style::default().fg(self.accent_color)),
             Span::raw(padding),
             Span::styled(ime_info_str, Style::default().fg(ime_color)),
-            Span::styled(
-                hidden_info_str,
-                Style::default().fg(Color::Rgb(180, 140, 255)),
-            ),
-            Span::styled(
-                filter_info_str,
-                Style::default().fg(Color::Rgb(100, 220, 100)),
-            ),
-            Span::styled(
-                sort_info_str,
-                Style::default().fg(Color::Rgb(100, 180, 255)),
-            ),
-            Span::styled(layout_info, Style::default().fg(Color::Rgb(100, 100, 100))),
+            Span::styled(hidden_info_str, Style::default().fg(self.warning_color)),
+            Span::styled(filter_info_str, Style::default().fg(self.success_color)),
+            Span::styled(sort_info_str, Style::default().fg(self.accent_color)),
+            Span::styled(layout_info, Style::default().fg(self.muted_color)),
         ];
 
         let line = Line::from(spans);

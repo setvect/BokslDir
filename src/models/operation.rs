@@ -96,6 +96,10 @@ pub struct OperationProgress {
     pub total_bytes: u64,
     /// 작업 시작 시각
     pub start_time: Instant,
+    /// 처리된 항목 수 (성공 + 건너뜀/실패)
+    pub items_processed: usize,
+    /// 실패한 항목 수
+    pub items_failed: usize,
 }
 
 impl OperationProgress {
@@ -109,6 +113,8 @@ impl OperationProgress {
             bytes_copied: 0,
             total_bytes,
             start_time: Instant::now(),
+            items_processed: 0,
+            items_failed: 0,
         }
     }
 
@@ -251,6 +257,11 @@ impl PendingOperation {
         self.state = OperationState::Processing;
         self.progress.total_bytes = total_bytes;
         self.progress.total_files = total_files;
+        self.progress.files_completed = 0;
+        self.progress.bytes_copied = 0;
+        self.progress.items_processed = 0;
+        self.progress.items_failed = 0;
+        self.progress.start_time = Instant::now();
     }
 
     /// 현재 파일 이름 업데이트
@@ -265,12 +276,17 @@ impl PendingOperation {
         self.progress.files_completed += file_count;
         self.progress.bytes_copied += bytes;
         self.completed_count += 1;
+        self.progress.items_processed += 1;
     }
 
     /// 파일/디렉토리 건너뛰기 (에러 또는 Skip)
     pub fn file_skipped(&mut self) {
-        // 건너뛴 항목은 진행률에 반영하지 않음 (total에서 제외하는 것이 더 정확하지만 복잡)
-        // 대신 완료 시 total_files까지 도달하지 않을 수 있음
+        self.progress.items_processed += 1;
+    }
+
+    /// 현재 항목 실패 기록
+    pub fn mark_item_failed(&mut self) {
+        self.progress.items_failed += 1;
     }
 
     /// 에러 추가

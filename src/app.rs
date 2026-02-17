@@ -1024,6 +1024,40 @@ impl App {
         self.dialog = Some(DialogKind::message(title, message));
     }
 
+    fn format_user_error(action: &str, path: Option<&Path>, error: &str, hint: &str) -> String {
+        let mut message = format!("{} failed.", action);
+        if let Some(p) = path {
+            message.push_str(&format!("\nPath: {}", p.display()));
+        }
+        message.push_str(&format!("\nReason: {}", error));
+        if !hint.is_empty() {
+            message.push_str(&format!("\nHint: {}", hint));
+        }
+        message
+    }
+
+    fn focus_active_entry_by_name(&mut self, name: &str) -> bool {
+        let (idx_opt, offset) = {
+            let panel = self.active_panel_state();
+            let has_parent = panel.current_path.parent().is_some();
+            let offset = if has_parent { 1 } else { 0 };
+            (
+                panel
+                    .entries
+                    .iter()
+                    .position(|entry| entry.name.eq_ignore_ascii_case(name)),
+                offset,
+            )
+        };
+        if let Some(idx) = idx_opt {
+            self.active_panel_state_mut().selected_index = idx + offset;
+            self.adjust_scroll_offset();
+            true
+        } else {
+            false
+        }
+    }
+
     /// 토스트 메시지 설정 (3초 후 자동 소멸)
     pub fn set_toast(&mut self, message: &str) {
         self.toast_message = Some((message.to_string(), Instant::now()));
@@ -1051,15 +1085,160 @@ impl App {
 
     /// 도움말 스크롤 아래로
     pub fn dialog_help_scroll_down(&mut self) {
-        if let Some(DialogKind::Help { scroll_offset }) = &mut self.dialog {
+        if let Some(DialogKind::Help { scroll_offset, .. }) = &mut self.dialog {
             *scroll_offset += 1;
         }
     }
 
     /// 도움말 스크롤 위로
     pub fn dialog_help_scroll_up(&mut self) {
-        if let Some(DialogKind::Help { scroll_offset }) = &mut self.dialog {
+        if let Some(DialogKind::Help { scroll_offset, .. }) = &mut self.dialog {
             *scroll_offset = scroll_offset.saturating_sub(1);
+        }
+    }
+
+    pub fn dialog_help_start_search(&mut self) {
+        if let Some(DialogKind::Help { search_mode, .. }) = &mut self.dialog {
+            *search_mode = true;
+        }
+    }
+
+    pub fn dialog_help_end_search(&mut self) {
+        if let Some(DialogKind::Help { search_mode, .. }) = &mut self.dialog {
+            *search_mode = false;
+        }
+    }
+
+    pub fn dialog_help_clear_or_close(&mut self) {
+        if let Some(DialogKind::Help {
+            search_query,
+            search_cursor,
+            search_mode,
+            scroll_offset,
+        }) = &mut self.dialog
+        {
+            if !search_query.is_empty() || *search_mode {
+                search_query.clear();
+                *search_cursor = 0;
+                *search_mode = false;
+                *scroll_offset = 0;
+            } else {
+                self.close_dialog();
+            }
+        }
+    }
+
+    pub fn dialog_help_input_char(&mut self, c: char) {
+        if let Some(DialogKind::Help {
+            search_query,
+            search_cursor,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            search_query.insert(*search_cursor, c);
+            *search_cursor += c.len_utf8();
+            *scroll_offset = 0;
+        }
+    }
+
+    pub fn dialog_help_backspace(&mut self) {
+        if let Some(DialogKind::Help {
+            search_query,
+            search_cursor,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            if *search_cursor > 0 {
+                let prev = search_query[..*search_cursor]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                search_query.remove(prev);
+                *search_cursor = prev;
+                *scroll_offset = 0;
+            }
+        }
+    }
+
+    pub fn dialog_help_delete_prev_word(&mut self) {
+        if let Some(DialogKind::Help {
+            search_query,
+            search_cursor,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            Self::delete_prev_word(search_query, search_cursor);
+            *scroll_offset = 0;
+        }
+    }
+
+    pub fn dialog_help_delete(&mut self) {
+        if let Some(DialogKind::Help {
+            search_query,
+            search_cursor,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            if *search_cursor < search_query.len() {
+                search_query.remove(*search_cursor);
+                *scroll_offset = 0;
+            }
+        }
+    }
+
+    pub fn dialog_help_cursor_left(&mut self) {
+        if let Some(DialogKind::Help {
+            search_query,
+            search_cursor,
+            ..
+        }) = &mut self.dialog
+        {
+            if *search_cursor > 0 {
+                *search_cursor = search_query[..*search_cursor]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+            }
+        }
+    }
+
+    pub fn dialog_help_cursor_right(&mut self) {
+        if let Some(DialogKind::Help {
+            search_query,
+            search_cursor,
+            ..
+        }) = &mut self.dialog
+        {
+            if *search_cursor < search_query.len() {
+                *search_cursor = search_query[*search_cursor..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| *search_cursor + i)
+                    .unwrap_or(search_query.len());
+            }
+        }
+    }
+
+    pub fn dialog_help_cursor_home(&mut self) {
+        if let Some(DialogKind::Help { search_cursor, .. }) = &mut self.dialog {
+            *search_cursor = 0;
+        }
+    }
+
+    pub fn dialog_help_cursor_end(&mut self) {
+        if let Some(DialogKind::Help {
+            search_query,
+            search_cursor,
+            ..
+        }) = &mut self.dialog
+        {
+            *search_cursor = search_query.len();
         }
     }
 
@@ -1335,14 +1514,14 @@ impl App {
             // 패널 새로고침 (일부 복사된 파일 반영)
             self.refresh_both_panels();
 
-            // 취소 메시지 표시
-            let msg = format!(
-                "{} cancelled.\nCompleted: {} / {} files",
+            // 취소 토스트 표시
+            self.dialog = None;
+            self.set_toast(&format!(
+                "{} cancelled ({}/{})",
                 pending.operation_type.name(),
                 pending.progress.files_completed,
                 pending.progress.total_files
-            );
-            self.dialog = Some(DialogKind::message("Cancelled", msg));
+            ));
         } else {
             self.close_dialog();
         }
@@ -1800,6 +1979,7 @@ impl App {
             Ok(bytes) => pending.files_completed(bytes, 1),
             Err(e) => {
                 pending.add_error(format!("{}: {}", file_name, e));
+                pending.mark_item_failed();
                 pending.file_skipped();
             }
         }
@@ -1899,6 +2079,7 @@ impl App {
 
         if file_entry.entry_kind != FlattenedEntryKind::Directory && source == dest_path {
             pending.add_error(format!("Source and destination are the same: {:?}", source));
+            pending.mark_item_failed();
             pending.file_skipped();
             pending.current_index += 1;
             self.pending_operation = Some(pending);
@@ -1999,21 +2180,29 @@ impl App {
 
         // 결과 표시
         if pending.errors.is_empty() {
-            self.dialog = Some(DialogKind::message(
-                "Complete",
-                format!(
-                    "{} completed: {}",
-                    pending.operation_type.name(),
-                    crate::utils::formatter::pluralize(pending.completed_count, "file", "files")
-                ),
+            self.close_dialog();
+            self.set_toast(&format!(
+                "{} completed: {}",
+                pending.operation_type.name(),
+                crate::utils::formatter::pluralize(pending.completed_count, "file", "files")
             ));
         } else {
+            let preview: Vec<String> = pending.errors.iter().take(5).cloned().collect();
+            let detail = if pending.errors.len() > 5 {
+                format!(
+                    "{}\n... and {} more errors",
+                    preview.join("\n"),
+                    pending.errors.len() - 5
+                )
+            } else {
+                preview.join("\n")
+            };
             let error_msg = format!(
-                "{} completed with errors:\n{} succeeded, {} failed\n\nErrors:\n{}",
+                "{} completed with errors.\nSucceeded: {}\nFailed: {}\n\n{}",
                 pending.operation_type.name(),
                 pending.completed_count,
                 pending.errors.len(),
-                pending.errors.join("\n")
+                detail
             );
             self.dialog = Some(DialogKind::error("Error", error_msg));
         }
@@ -2149,23 +2338,22 @@ impl App {
                 Ok(()) => {
                     self.refresh_both_panels();
                     self.active_panel_state_mut().deselect_all();
-                    self.dialog = Some(DialogKind::message(
-                        "Complete",
-                        format!(
-                            "Moved {} to trash.",
-                            crate::utils::formatter::pluralize(
-                                pending.sources.len(),
-                                "item",
-                                "items"
-                            )
-                        ),
+                    self.dialog = None;
+                    self.set_toast(&format!(
+                        "Moved {} to trash.",
+                        crate::utils::formatter::pluralize(pending.sources.len(), "item", "items")
                     ));
                 }
                 Err(e) => {
                     self.refresh_both_panels();
                     self.dialog = Some(DialogKind::error(
                         "Error",
-                        format!("Failed to move to trash: {}", e),
+                        Self::format_user_error(
+                            "Move to trash",
+                            pending.sources.first().map(|p| p.as_path()),
+                            &e.to_string(),
+                            "Check permissions and available disk space.",
+                        ),
                     ));
                 }
             }
@@ -2196,6 +2384,7 @@ impl App {
             Ok(bytes) => pending.files_completed(bytes, 1),
             Err(e) => {
                 pending.add_error(format!("{}: {}", file_name, e));
+                pending.mark_item_failed();
                 pending.file_skipped();
             }
         }
@@ -2296,7 +2485,7 @@ impl App {
         if dir_name.is_empty() {
             self.dialog = Some(DialogKind::error(
                 "Error",
-                "Directory name cannot be empty.",
+                "Create directory failed.\nReason: Name cannot be empty.\nHint: Enter at least one character.",
             ));
             return;
         }
@@ -2306,15 +2495,19 @@ impl App {
         match self.filesystem.create_directory(&new_path) {
             Ok(()) => {
                 self.refresh_both_panels();
-                self.dialog = Some(DialogKind::message(
-                    "Complete",
-                    format!("Directory '{}' created.", dir_name),
-                ));
+                self.focus_active_entry_by_name(&dir_name);
+                self.dialog = None;
+                self.set_toast(&format!("Directory '{}' created.", dir_name));
             }
             Err(e) => {
                 self.dialog = Some(DialogKind::error(
                     "Error",
-                    format!("Failed to create directory: {}", e),
+                    Self::format_user_error(
+                        "Create directory",
+                        Some(&new_path),
+                        &e.to_string(),
+                        "Use a valid name and check write permission.",
+                    ),
                 ));
             }
         }
@@ -2350,7 +2543,10 @@ impl App {
         let new_name = new_name.trim().to_string();
 
         if new_name.is_empty() {
-            self.dialog = Some(DialogKind::error("Error", "Name cannot be empty."));
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                "Rename failed.\nReason: Name cannot be empty.\nHint: Enter at least one character.",
+            ));
             return;
         }
 
@@ -2362,12 +2558,19 @@ impl App {
         match self.filesystem.rename_path(&original_path, &new_path) {
             Ok(()) => {
                 self.refresh_both_panels();
+                self.focus_active_entry_by_name(&new_name);
                 self.dialog = None;
+                self.set_toast("Rename completed");
             }
             Err(e) => {
                 self.dialog = Some(DialogKind::error(
                     "Error",
-                    format!("Failed to rename: {}", e),
+                    Self::format_user_error(
+                        "Rename",
+                        Some(&original_path),
+                        &e.to_string(),
+                        "Check duplicate names and write permission.",
+                    ),
                 ));
             }
         }
@@ -2488,6 +2691,15 @@ impl App {
         }
     }
 
+    pub fn dialog_mkdir_input_delete_prev_word(&mut self) {
+        if let Some(DialogKind::MkdirInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            Self::delete_prev_word(value, cursor_pos);
+        }
+    }
+
     pub fn dialog_mkdir_input_delete(&mut self) {
         if let Some(DialogKind::MkdirInput {
             value, cursor_pos, ..
@@ -2604,6 +2816,15 @@ impl App {
         }
     }
 
+    pub fn dialog_rename_input_delete_prev_word(&mut self) {
+        if let Some(DialogKind::RenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            Self::delete_prev_word(value, cursor_pos);
+        }
+    }
+
     pub fn dialog_rename_input_delete(&mut self) {
         if let Some(DialogKind::RenameInput {
             value, cursor_pos, ..
@@ -2717,6 +2938,15 @@ impl App {
                 value.remove(prev);
                 *cursor_pos = prev;
             }
+        }
+    }
+
+    pub fn dialog_bookmark_rename_input_delete_prev_word(&mut self) {
+        if let Some(DialogKind::BookmarkRenameInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            Self::delete_prev_word(value, cursor_pos);
         }
     }
 
@@ -3320,6 +3550,71 @@ impl App {
 
     // === FilterInput 다이얼로그 입력 처리 ===
 
+    fn prev_char_start(value: &str, cursor_pos: usize) -> usize {
+        value[..cursor_pos]
+            .char_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+
+    fn is_word_delimiter(ch: char) -> bool {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                '/' | '\\'
+                    | ':'
+                    | ';'
+                    | ','
+                    | '.'
+                    | '|'
+                    | '('
+                    | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '"'
+                    | '\''
+                    | '`'
+            )
+    }
+
+    fn delete_prev_word(value: &mut String, cursor_pos: &mut usize) {
+        if *cursor_pos == 0 {
+            return;
+        }
+
+        let original = *cursor_pos;
+        let mut pos = original;
+
+        // 1) 커서 왼쪽의 구분자들을 먼저 건너뜀
+        while pos > 0 {
+            let prev = Self::prev_char_start(value, pos);
+            let ch = value[prev..pos].chars().next().unwrap_or_default();
+            if Self::is_word_delimiter(ch) {
+                pos = prev;
+            } else {
+                break;
+            }
+        }
+
+        // 2) 실제 단어 시작까지 이동
+        while pos > 0 {
+            let prev = Self::prev_char_start(value, pos);
+            let ch = value[prev..pos].chars().next().unwrap_or_default();
+            if Self::is_word_delimiter(ch) {
+                break;
+            }
+            pos = prev;
+        }
+
+        value.replace_range(pos..original, "");
+        *cursor_pos = pos;
+    }
+
     pub fn dialog_filter_input_char(&mut self, c: char) {
         let new_value = if let Some(DialogKind::FilterInput {
             value, cursor_pos, ..
@@ -3350,6 +3645,21 @@ impl App {
                 value.remove(prev);
                 *cursor_pos = prev;
             }
+            Some(value.clone())
+        } else {
+            None
+        };
+        if let Some(v) = new_value {
+            self.apply_live_filter(&v);
+        }
+    }
+
+    pub fn dialog_filter_input_delete_prev_word(&mut self) {
+        let new_value = if let Some(DialogKind::FilterInput {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            Self::delete_prev_word(value, cursor_pos);
             Some(value.clone())
         } else {
             None
@@ -3484,6 +3794,17 @@ impl App {
                 value.remove(prev);
                 *cursor_pos = prev;
             }
+        }
+        self.update_input_completion_state();
+    }
+
+    /// 입력 다이얼로그: 이전 단어 삭제 (Ctrl+W)
+    pub fn dialog_input_delete_prev_word(&mut self) {
+        if let Some(DialogKind::Input {
+            value, cursor_pos, ..
+        }) = &mut self.dialog
+        {
+            Self::delete_prev_word(value, cursor_pos);
         }
         self.update_input_completion_state();
     }
@@ -4493,6 +4814,72 @@ mod tests {
             fs::read_to_string(moved_root.join("nested").join("data.txt")).unwrap(),
             "payload"
         );
+    }
+
+    #[test]
+    fn test_confirm_mkdir_uses_toast_and_focuses_new_directory() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        fs::create_dir_all(base.join("alpha")).unwrap();
+        fs::create_dir_all(&base).unwrap();
+
+        app.go_to_mount_point(base.clone());
+        app.confirm_mkdir("new_dir".to_string(), base.clone());
+
+        assert!(app.dialog.is_none());
+        assert_eq!(app.toast_display(), Some("Directory 'new_dir' created."));
+        assert_eq!(
+            app.active_panel_state()
+                .entries
+                .get(app.active_panel_state().selected_index.saturating_sub(1))
+                .map(|e| e.name.as_str()),
+            Some("new_dir")
+        );
+    }
+
+    #[test]
+    fn test_confirm_rename_uses_toast_and_focuses_new_name() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+        let old = base.join("old_name");
+        fs::write(&old, "x").unwrap();
+
+        app.go_to_mount_point(base.clone());
+        app.confirm_rename("new_name".to_string(), old);
+
+        assert!(app.dialog.is_none());
+        assert_eq!(app.toast_display(), Some("Rename completed"));
+        assert_eq!(
+            app.active_panel_state()
+                .entries
+                .get(app.active_panel_state().selected_index.saturating_sub(1))
+                .map(|e| e.name.as_str()),
+            Some("new_name")
+        );
+    }
+
+    #[test]
+    fn test_cancel_operation_uses_toast() {
+        let mut app = make_test_app();
+        let mut pending = PendingOperation::new(OperationType::Copy, Vec::new(), PathBuf::new());
+        pending.start_processing(0, 3);
+        pending.progress.files_completed = 1;
+        app.pending_operation = Some(pending);
+        app.dialog = Some(DialogKind::progress(
+            app.pending_operation
+                .as_ref()
+                .expect("pending set")
+                .progress
+                .clone(),
+        ));
+
+        app.cancel_operation();
+
+        assert!(app.dialog.is_none());
+        assert_eq!(app.toast_display(), Some("Copy cancelled (1/3)"));
     }
 
     #[cfg(unix)]

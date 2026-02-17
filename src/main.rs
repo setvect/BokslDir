@@ -285,6 +285,11 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
 
 /// 입력 다이얼로그 키 처리
 fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode, _value: &str) {
+    if is_prev_word_delete_shortcut(modifiers, code) {
+        app.dialog_input_delete_prev_word();
+        return;
+    }
+
     match (modifiers, code) {
         // 확인 (선택된 버튼에 따라 동작)
         (_, KeyCode::Enter) => {
@@ -439,6 +444,11 @@ fn handle_delete_confirm_dialog_keys(app: &mut App, modifiers: KeyModifiers, cod
 
 /// 새 디렉토리 입력 다이얼로그 키 처리
 fn handle_mkdir_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    if is_prev_word_delete_shortcut(modifiers, code) {
+        app.dialog_mkdir_input_delete_prev_word();
+        return;
+    }
+
     match (modifiers, code) {
         (_, KeyCode::Enter) => {
             let selected_button = app.get_mkdir_selected_button().unwrap_or(0);
@@ -469,6 +479,11 @@ fn handle_mkdir_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: 
 
 /// 이름 변경 입력 다이얼로그 키 처리
 fn handle_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    if is_prev_word_delete_shortcut(modifiers, code) {
+        app.dialog_rename_input_delete_prev_word();
+        return;
+    }
+
     match (modifiers, code) {
         (_, KeyCode::Enter) => {
             let selected_button = app.get_rename_selected_button().unwrap_or(0);
@@ -508,9 +523,46 @@ fn handle_message_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: Key
 }
 
 /// 도움말 다이얼로그 키 처리
-fn handle_help_dialog_keys(app: &mut App, _modifiers: KeyModifiers, code: KeyCode) {
+fn handle_help_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    let in_search_mode = matches!(
+        app.dialog,
+        Some(DialogKind::Help {
+            search_mode: true,
+            ..
+        })
+    );
+
+    if in_search_mode {
+        if is_prev_word_delete_shortcut(modifiers, code) {
+            app.dialog_help_delete_prev_word();
+            return;
+        }
+
+        match (modifiers, code) {
+            (_, KeyCode::Enter) => app.dialog_help_end_search(),
+            (_, KeyCode::Esc) => app.dialog_help_clear_or_close(),
+            (_, KeyCode::Backspace) => app.dialog_help_backspace(),
+            (_, KeyCode::Delete) => app.dialog_help_delete(),
+            (_, KeyCode::Left) => app.dialog_help_cursor_left(),
+            (_, KeyCode::Right) => app.dialog_help_cursor_right(),
+            (_, KeyCode::Home) => app.dialog_help_cursor_home(),
+            (_, KeyCode::End) => app.dialog_help_cursor_end(),
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+                app.dialog_help_input_char(c)
+            }
+            _ => {}
+        }
+        return;
+    }
+
     match code {
-        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+        KeyCode::Char('/') => {
+            app.dialog_help_start_search();
+        }
+        KeyCode::Esc => {
+            app.dialog_help_clear_or_close();
+        }
+        KeyCode::Char('q') | KeyCode::Char('?') => {
             app.close_dialog();
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -610,6 +662,11 @@ fn handle_bookmark_list_dialog_keys(app: &mut App, code: KeyCode) {
 
 /// 북마크 이름 변경 입력 다이얼로그 키 처리
 fn handle_bookmark_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    if is_prev_word_delete_shortcut(modifiers, code) {
+        app.dialog_bookmark_rename_input_delete_prev_word();
+        return;
+    }
+
     match (modifiers, code) {
         (_, KeyCode::Enter) => {
             let selected_button = app.get_bookmark_rename_selected_button().unwrap_or(0);
@@ -640,6 +697,11 @@ fn handle_bookmark_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifie
 
 /// 필터 입력 다이얼로그 키 처리
 fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    if is_prev_word_delete_shortcut(modifiers, code) {
+        app.dialog_filter_input_delete_prev_word();
+        return;
+    }
+
     match (modifiers, code) {
         (_, KeyCode::Enter) => {
             let selected_button = app.get_filter_selected_button().unwrap_or(0);
@@ -670,6 +732,12 @@ fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code:
         (_, KeyCode::End) => app.dialog_filter_input_end(),
         _ => {}
     }
+}
+
+fn is_prev_word_delete_shortcut(modifiers: KeyModifiers, code: KeyCode) -> bool {
+    (matches!(code, KeyCode::Char('w') | KeyCode::Char('W'))
+        && modifiers.contains(KeyModifiers::CONTROL))
+        || matches!(code, KeyCode::Char('\u{17}'))
 }
 
 /// 메뉴 모드 키 처리
@@ -844,6 +912,77 @@ mod tests {
         handle_input_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('k'), "");
 
         assert_eq!(app.get_dialog_input_value().as_deref(), Some("jk"));
+    }
+
+    #[test]
+    fn test_input_dialog_ctrl_w_deletes_prev_word() {
+        let mut app = App::new_for_test();
+        app.dialog = Some(DialogKind::go_to_path_input(
+            "/Users/boksl/IdeaProjects/BokslDir/temp",
+            std::path::PathBuf::from("."),
+        ));
+
+        handle_input_dialog_keys(&mut app, KeyModifiers::CONTROL, KeyCode::Char('w'), "");
+        assert_eq!(
+            app.get_dialog_input_value().as_deref(),
+            Some("/Users/boksl/IdeaProjects/BokslDir/")
+        );
+    }
+
+    #[test]
+    fn test_help_search_ctrl_w_deletes_prev_word() {
+        let mut app = App::new_for_test();
+        app.show_help();
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('o'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('p'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('y'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char(' '));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('f'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('i'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('l'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('e'));
+
+        handle_help_dialog_keys(&mut app, KeyModifiers::CONTROL, KeyCode::Char('w'));
+
+        assert!(matches!(
+            &app.dialog,
+            Some(DialogKind::Help { search_query, .. }) if search_query == "copy "
+        ));
+    }
+
+    #[test]
+    fn test_help_dialog_slash_enters_search_mode() {
+        let mut app = App::new_for_test();
+        app.show_help();
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::Help {
+                search_mode: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_help_dialog_esc_clears_query_then_closes() {
+        let mut app = App::new_for_test();
+        app.show_help();
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('/'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Esc);
+        assert!(matches!(
+            &app.dialog,
+            Some(DialogKind::Help {
+                search_query,
+                search_mode: false,
+                ..
+            }) if search_query.is_empty()
+        ));
+        handle_help_dialog_keys(&mut app, KeyModifiers::NONE, KeyCode::Esc);
+        assert!(app.dialog.is_none());
     }
 }
 

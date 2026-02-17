@@ -23,6 +23,13 @@ const DIALOG_H_PADDING: u16 = 2;
 /// 다이얼로그 내부 상단 패딩 (border 아래 여백)
 const DIALOG_V_PADDING: u16 = 1;
 
+fn contains_case_insensitive(text: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    text.to_lowercase().contains(&needle.to_lowercase())
+}
+
 /// 입력 다이얼로그 목적
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputPurpose {
@@ -94,7 +101,12 @@ pub enum DialogKind {
         selected_button: usize, // 0: OK, 1: Cancel
     },
     /// 단축키 도움말 다이얼로그 (Phase 4)
-    Help { scroll_offset: usize },
+    Help {
+        scroll_offset: usize,
+        search_query: String,
+        search_cursor: usize,
+        search_mode: bool,
+    },
     /// 마운트 포인트 선택 다이얼로그 (Phase 5.3)
     MountPoints {
         items: Vec<(String, std::path::PathBuf)>,
@@ -315,7 +327,12 @@ impl DialogKind {
 
     /// 단축키 도움말 다이얼로그
     pub fn help() -> Self {
-        DialogKind::Help { scroll_offset: 0 }
+        DialogKind::Help {
+            scroll_offset: 0,
+            search_query: String::new(),
+            search_cursor: 0,
+            search_mode: false,
+        }
     }
 
     /// 파일 속성 다이얼로그
@@ -451,7 +468,7 @@ impl<'a> Dialog<'a> {
             | DialogKind::FilterInput { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 7u16),
             DialogKind::Confirm { .. } => (40u16.min(sw.saturating_sub(4)).max(25), 8u16),
             DialogKind::Conflict { .. } => (55u16.min(sw.saturating_sub(4)).max(35), 15u16),
-            DialogKind::Progress { .. } => (50u16.min(sw.saturating_sub(4)).max(30), 11u16),
+            DialogKind::Progress { .. } => (56u16.min(sw.saturating_sub(4)).max(36), 12u16),
             DialogKind::Error { message, .. } | DialogKind::Message { message, .. } => {
                 let lines = message.lines().count().max(1);
                 let w = 50u16.min(sw.saturating_sub(4)).max(30);
@@ -559,6 +576,7 @@ impl<'a> Dialog<'a> {
         completion_index: Option<usize>,
         cursor_pos: usize,
         selected_button: usize,
+        show_suggestions_panel: bool,
     ) {
         // 테두리
         let block = Block::default()
@@ -685,7 +703,7 @@ impl<'a> Dialog<'a> {
         }
 
         // 자동완성 목록 (표시 가능한 높이만 렌더, 선택 항목 기준 스크롤)
-        if inner.height >= 5 {
+        if show_suggestions_panel && inner.height >= 5 {
             let title_y = inner.y + 2;
             let list_y = inner.y + 3;
             let button_y = area.y + area.height.saturating_sub(2);
@@ -945,6 +963,15 @@ impl<'a> Dialog<'a> {
         );
         buf.set_string(inner.x, inner.y + 5, &size_text, file_style);
 
+        let remaining = progress
+            .total_files
+            .saturating_sub(progress.items_processed);
+        let processed_text = format!(
+            "Processed: {}  Remaining: {}  Failed: {}",
+            progress.items_processed, remaining, progress.items_failed
+        );
+        buf.set_string(inner.x, inner.y + 6, &processed_text, file_style);
+
         // 속도 / ETA
         let speed_eta = format!(
             "{}  ETA: {}",
@@ -952,11 +979,11 @@ impl<'a> Dialog<'a> {
             progress.format_eta()
         );
         let speed_style = Style::default().fg(Color::Rgb(100, 180, 100));
-        buf.set_string(inner.x, inner.y + 6, &speed_eta, speed_style);
+        buf.set_string(inner.x, inner.y + 7, &speed_eta, speed_style);
 
         // Esc 안내
         let hint_style = Style::default().fg(Color::Rgb(128, 128, 128));
-        buf.set_string(inner.x, inner.y + 8, "Press Esc to cancel", hint_style);
+        buf.set_string(inner.x, inner.y + 9, "Press Esc to cancel", hint_style);
     }
 
     /// 삭제 확인 다이얼로그 렌더링
@@ -1461,7 +1488,14 @@ impl<'a> Dialog<'a> {
         );
     }
 
-    fn render_help(&self, buf: &mut Buffer, area: Rect, scroll_offset: usize) {
+    fn render_help(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        scroll_offset: usize,
+        search_query: &str,
+        search_mode: bool,
+    ) {
         // 테두리
         let block = Block::default()
             .title(" Keyboard Shortcuts ")
@@ -1479,7 +1513,7 @@ impl<'a> Dialog<'a> {
             x: area.x + DIALOG_H_PADDING,
             y: area.y + DIALOG_V_PADDING,
             width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
-            height: area.height.saturating_sub(3), // 하단 힌트 공간 확보
+            height: area.height.saturating_sub(5), // 검색 줄 + 하단 힌트 공간 확보
         };
 
         let header_style = Style::default()
@@ -1487,22 +1521,98 @@ impl<'a> Dialog<'a> {
             .add_modifier(Modifier::BOLD);
         let key_style = Style::default().fg(Color::Rgb(86, 156, 214));
         let desc_style = Style::default().fg(self.fg_color);
+        let match_style = Style::default()
+            .fg(Color::Rgb(255, 255, 100))
+            .add_modifier(Modifier::UNDERLINED);
 
         // 도움말 내용 (액션 레지스트리에서 생성)
         let lines = generate_help_entries();
+        let query = search_query.trim();
 
         // 전체 행 리스트 생성
-        let mut all_rows: Vec<(bool, &str, &str)> = Vec::new(); // (is_header, col1, col2)
+        let mut all_rows: Vec<(bool, String, String)> = Vec::new(); // (is_header, col1, col2)
         for (category, items) in &lines {
-            all_rows.push((true, category, ""));
+            let mut filtered_items = Vec::new();
             for (key, desc) in items {
+                if query.is_empty()
+                    || contains_case_insensitive(key, query)
+                    || contains_case_insensitive(desc, query)
+                {
+                    filtered_items.push(((*key).to_string(), (*desc).to_string()));
+                }
+            }
+            if !query.is_empty() && filtered_items.is_empty() {
+                continue;
+            }
+            all_rows.push((true, (*category).to_string(), String::new()));
+            for (key, desc) in filtered_items {
                 all_rows.push((false, key, desc));
             }
-            all_rows.push((false, "", "")); // 빈 줄
+            all_rows.push((false, String::new(), String::new())); // 빈 줄
+        }
+        while all_rows
+            .last()
+            .is_some_and(|r| !r.0 && r.1.is_empty() && r.2.is_empty())
+        {
+            all_rows.pop();
+        }
+
+        let result_count = all_rows.iter().filter(|r| !r.0 && !r.1.is_empty()).count();
+        let result_text = if query.is_empty() {
+            format!("Total: {}", result_count)
+        } else {
+            format!("Results: {}", result_count)
+        };
+        let result_x = area.x + area.width.saturating_sub(result_text.len() as u16 + 3);
+
+        // 검색 표시줄
+        let search_y = area.y + 1;
+        let search_label = if search_mode { "Search*:" } else { "Search:" };
+        let search_label_style = Style::default().fg(self.border_color);
+        let search_style = Style::default().fg(self.fg_color).bg(self.input_bg);
+        buf.set_string(inner.x, search_y, search_label, search_label_style);
+        let search_field_x = inner.x + 9;
+        // 우측 결과 텍스트와 겹치지 않도록 검색 필드 폭 예약
+        let search_field_end = result_x.saturating_sub(2).max(search_field_x);
+        let search_field_width = search_field_end.saturating_sub(search_field_x);
+        for x in search_field_x..search_field_x + search_field_width {
+            if let Some(cell) = buf.cell_mut((x, search_y)) {
+                cell.set_bg(self.input_bg);
+            }
+        }
+        let search_display = path_display::truncate_middle(query, search_field_width as usize);
+        buf.set_string(search_field_x, search_y, search_display, search_style);
+
+        buf.set_string(
+            result_x,
+            search_y,
+            &result_text,
+            Style::default().fg(Color::Rgb(128, 128, 128)),
+        );
+
+        // 검색 줄 아래부터 본문 시작
+        let content_y = inner.y + 1;
+        let content_height = inner.height.saturating_sub(1);
+
+        if all_rows.is_empty() {
+            let no_result = "No shortcuts match your search";
+            let y = content_y;
+            buf.set_string(
+                inner.x,
+                y,
+                no_result,
+                Style::default().fg(Color::Rgb(128, 128, 128)),
+            );
+            let hint = "Esc:Clear/Close  /:Search  j/k:Scroll";
+            let hint_style = Style::default().fg(Color::Rgb(128, 128, 128));
+            let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+            let hint_y = area.y + area.height - 2;
+            buf.set_string(hint_x, hint_y, hint, hint_style);
+            return;
         }
 
         // 스크롤 적용
-        let visible_height = inner.height as usize;
+        let visible_height = content_height as usize;
         let max_scroll = all_rows.len().saturating_sub(visible_height);
         let effective_scroll = scroll_offset.min(max_scroll);
 
@@ -1514,14 +1624,30 @@ impl<'a> Dialog<'a> {
             .take(visible_height)
             .enumerate()
         {
-            let y = inner.y + i as u16;
+            let y = content_y + i as u16;
             if row.0 {
                 // 카테고리 헤더
-                buf.set_string(inner.x, y, row.1, header_style);
+                buf.set_string(inner.x, y, &row.1, header_style);
             } else if !row.1.is_empty() {
                 // 키바인딩
-                buf.set_string(inner.x + 2, y, row.1, key_style);
-                buf.set_string(inner.x + key_col_width, y, row.2, desc_style);
+                let key_matches = !query.is_empty() && contains_case_insensitive(&row.1, query);
+                let desc_matches = !query.is_empty() && contains_case_insensitive(&row.2, query);
+                buf.set_string(
+                    inner.x + 2,
+                    y,
+                    &row.1,
+                    if key_matches { match_style } else { key_style },
+                );
+                buf.set_string(
+                    inner.x + key_col_width,
+                    y,
+                    &row.2,
+                    if desc_matches {
+                        match_style
+                    } else {
+                        desc_style
+                    },
+                );
             }
         }
 
@@ -1541,7 +1667,7 @@ impl<'a> Dialog<'a> {
             let thumb_style = Style::default().fg(Color::Rgb(150, 150, 150));
 
             for i in 0..track_height {
-                let sy = inner.y + i as u16;
+                let sy = content_y + i as u16;
                 let (symbol, style) = if i >= thumb_pos && i < thumb_pos + thumb_height {
                     ("┃", thumb_style)
                 } else {
@@ -1552,7 +1678,7 @@ impl<'a> Dialog<'a> {
         }
 
         // 하단 힌트
-        let hint = "Esc/?:Close  j/k:Scroll";
+        let hint = "Esc:Clear/Close  /:Search  j/k:Scroll";
         let hint_style = Style::default().fg(Color::Rgb(128, 128, 128));
         let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
         let hint_y = area.y + area.height - 2;
@@ -1642,6 +1768,7 @@ impl Widget for Dialog<'_> {
                     *completion_index,
                     *cursor_pos,
                     *selected_button,
+                    true,
                 );
             }
             DialogKind::Confirm {
@@ -1691,6 +1818,7 @@ impl Widget for Dialog<'_> {
                     None,
                     *cursor_pos,
                     *selected_button,
+                    false,
                 );
             }
             DialogKind::RenameInput {
@@ -1710,6 +1838,7 @@ impl Widget for Dialog<'_> {
                     None,
                     *cursor_pos,
                     *selected_button,
+                    false,
                 );
             }
             DialogKind::BookmarkRenameInput {
@@ -1729,6 +1858,7 @@ impl Widget for Dialog<'_> {
                     None,
                     *cursor_pos,
                     *selected_button,
+                    false,
                 );
             }
             DialogKind::FilterInput {
@@ -1747,6 +1877,7 @@ impl Widget for Dialog<'_> {
                     None,
                     *cursor_pos,
                     *selected_button,
+                    false,
                 );
             }
             DialogKind::MountPoints {
@@ -1773,8 +1904,13 @@ impl Widget for Dialog<'_> {
             } => {
                 self.render_bookmark_list(buf, dialog_area, items, *selected_index);
             }
-            DialogKind::Help { scroll_offset } => {
-                self.render_help(buf, dialog_area, *scroll_offset);
+            DialogKind::Help {
+                scroll_offset,
+                search_query,
+                search_mode,
+                ..
+            } => {
+                self.render_help(buf, dialog_area, *scroll_offset, search_query, *search_mode);
             }
             DialogKind::Properties {
                 name,
@@ -1971,6 +2107,112 @@ mod tests {
         assert!(
             found_title,
             "suggestions title should show selected/total count"
+        );
+    }
+
+    #[test]
+    fn test_mkdir_input_hides_suggestions_panel() {
+        let kind = DialogKind::mkdir_input(PathBuf::from("."));
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 90,
+            height: 20,
+        };
+        let mut buf = Buffer::empty(area);
+        Dialog::new(&kind).render(area, &mut buf);
+
+        let mut contains_suggestions = false;
+        for y in 0..area.height {
+            let mut line = String::new();
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    line.push_str(cell.symbol());
+                }
+            }
+            if line.contains("Suggestions") || line.contains("No suggestions") {
+                contains_suggestions = true;
+                break;
+            }
+        }
+
+        assert!(
+            !contains_suggestions,
+            "mkdir dialog should hide suggestions"
+        );
+    }
+
+    #[test]
+    fn test_help_search_renders_result_count() {
+        let kind = DialogKind::Help {
+            scroll_offset: 0,
+            search_query: "copy".to_string(),
+            search_cursor: 4,
+            search_mode: true,
+        };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        };
+        let mut buf = Buffer::empty(area);
+        Dialog::new(&kind).render(area, &mut buf);
+
+        let mut found_results = false;
+        for y in 0..area.height {
+            let mut line = String::new();
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    line.push_str(cell.symbol());
+                }
+            }
+            if line.contains("Results:") {
+                found_results = true;
+                break;
+            }
+        }
+
+        assert!(
+            found_results,
+            "help dialog should render search result count"
+        );
+    }
+
+    #[test]
+    fn test_help_search_query_line_visible_with_results() {
+        let kind = DialogKind::Help {
+            scroll_offset: 0,
+            search_query: "v".to_string(),
+            search_cursor: 1,
+            search_mode: true,
+        };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        };
+        let mut buf = Buffer::empty(area);
+        Dialog::new(&kind).render(area, &mut buf);
+
+        let mut found_search_line = false;
+        for y in 0..area.height {
+            let mut line = String::new();
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    line.push_str(cell.symbol());
+                }
+            }
+            if line.contains("Search*:") && line.contains('v') {
+                found_search_line = true;
+                break;
+            }
+        }
+
+        assert!(
+            found_search_line,
+            "help dialog should keep search query line visible when results exist"
         );
     }
 

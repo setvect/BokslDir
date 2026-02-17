@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
 **현재 상태**: Phase 6.4 완료 (경로 입력 및 자동완성) + Phase 6.3 완료 (북마크 시스템) + Phase 6.2 완료 (디렉토리 히스토리) + Phase 6.1 완료 (탭 시스템) + Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
-**다음 단계**: Phase 7 - 파일 뷰어
+**다음 단계**: Phase 7 - 외부 프로그램 연동
 
 ## 개발 명령어
 

@@ -186,6 +186,44 @@ impl FileSystem {
         path.is_dir()
     }
 
+    /// OS 기본 프로그램으로 파일 열기
+    pub fn open_with_default_app(&self, path: &Path) -> Result<()> {
+        if !path.exists() {
+            return Err(BokslDirError::PathNotFound {
+                path: path.to_path_buf(),
+            });
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+
+            let status = Command::new("open").arg(path).status().map_err(|e| {
+                BokslDirError::ExternalOpenFailed {
+                    path: path.to_path_buf(),
+                    reason: e.to_string(),
+                }
+            })?;
+
+            if status.success() {
+                Ok(())
+            } else {
+                Err(BokslDirError::ExternalOpenFailed {
+                    path: path.to_path_buf(),
+                    reason: format!("open command exited with status {}", status),
+                })
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Err(BokslDirError::ExternalOpenFailed {
+                path: path.to_path_buf(),
+                reason: "Unsupported platform for Phase 7.1 (macOS only)".to_string(),
+            })
+        }
+    }
+
     // === Phase 5.3: 마운트 포인트 ===
 
     /// 시스템 마운트 포인트 목록 반환
@@ -1005,5 +1043,33 @@ mod tests {
                 && f.dest == expected_link_dest
         }));
         assert!(!flattened.iter().any(|f| f.dest == outside_dest));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_open_with_default_app_nonexistent_path_returns_path_not_found() {
+        let fs = FileSystem::new();
+        let missing = PathBuf::from("/tmp/boksldir-open-missing-1234567890.txt");
+
+        let result = fs.open_with_default_app(&missing);
+        match result {
+            Err(BokslDirError::PathNotFound { path }) => assert_eq!(path, missing),
+            other => panic!("expected PathNotFound, got {:?}", other),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn test_open_with_default_app_reports_platform_not_supported() {
+        let fs = FileSystem::new();
+        let current = std::env::current_dir().unwrap();
+
+        let result = fs.open_with_default_app(&current);
+        match result {
+            Err(BokslDirError::ExternalOpenFailed { reason, .. }) => {
+                assert!(reason.contains("macOS only"));
+            }
+            other => panic!("expected ExternalOpenFailed, got {:?}", other),
+        }
     }
 }

@@ -640,6 +640,7 @@ impl App {
             Action::TabClose => self.close_tab_active_panel(),
             Action::Copy => self.start_copy(),
             Action::Move => self.start_move(),
+            Action::OpenDefaultApp => self.start_open_default_app(),
             Action::Delete => self.start_delete(),
             Action::PermanentDelete => self.start_permanent_delete(),
             Action::MakeDirectory => self.start_mkdir(),
@@ -2538,6 +2539,83 @@ impl App {
         }
     }
 
+    fn focused_open_target(&self) -> std::result::Result<PathBuf, String> {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+        let selected_index = panel.selected_index;
+
+        if has_parent && selected_index == 0 {
+            return Err("Cannot open parent entry ('..').".to_string());
+        }
+
+        let entry_index = if has_parent {
+            selected_index.saturating_sub(1)
+        } else {
+            selected_index
+        };
+
+        let Some(entry) = panel.entries.get(entry_index) else {
+            return Err("No file selected.".to_string());
+        };
+
+        if entry.is_directory() || entry.path.is_dir() {
+            return Err("Only files can be opened in Phase 7.1.".to_string());
+        }
+
+        Ok(entry.path.clone())
+    }
+
+    fn apply_open_default_app_result(
+        &mut self,
+        target_path: &Path,
+        result: crate::utils::error::Result<()>,
+    ) {
+        match result {
+            Ok(()) => {
+                let display_name = target_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| target_path.to_string_lossy().to_string());
+                self.set_toast(&format!("Opened: {}", display_name));
+            }
+            Err(e) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error(
+                        "Open with default app",
+                        Some(target_path),
+                        &e.to_string(),
+                        "Check file path and OS application association.",
+                    ),
+                ));
+            }
+        }
+    }
+
+    /// 기본 연결 앱으로 파일 열기 (o)
+    pub fn start_open_default_app(&mut self) {
+        let target_path = match self.focused_open_target() {
+            Ok(path) => path,
+            Err(reason) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error(
+                        "Open with default app",
+                        None,
+                        &reason,
+                        "Select a regular file and try again.",
+                    ),
+                ));
+                return;
+            }
+        };
+
+        let result = self.filesystem.open_with_default_app(&target_path);
+        self.apply_open_default_app_result(&target_path, result);
+    }
+
     /// 이름 변경 확인
     pub fn confirm_rename(&mut self, new_name: String, original_path: PathBuf) {
         let new_name = new_name.trim().to_string();
@@ -4005,6 +4083,7 @@ impl Default for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::error::BokslDirError;
     use std::fs;
     use tempfile::TempDir;
 
@@ -4493,6 +4572,74 @@ mod tests {
         app.confirm_input_dialog("file.txt".to_string());
 
         assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+    }
+
+    #[test]
+    fn test_start_open_default_app_rejects_parent_entry() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+
+        app.go_to_mount_point(base);
+        app.active_panel_state_mut().selected_index = 0;
+        app.start_open_default_app();
+
+        assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+    }
+
+    #[test]
+    fn test_start_open_default_app_rejects_directory() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let dir = base.join("docs");
+        fs::create_dir_all(&dir).unwrap();
+
+        app.go_to_mount_point(base.clone());
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == dir)
+            .expect("directory entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+        app.start_open_default_app();
+
+        assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+    }
+
+    #[test]
+    fn test_apply_open_default_app_result_sets_toast_on_success() {
+        let mut app = make_test_app();
+        let file_path = PathBuf::from("/tmp/example.txt");
+
+        app.apply_open_default_app_result(&file_path, Ok(()));
+
+        assert_eq!(app.toast_display(), Some("Opened: example.txt"));
+        assert!(app.dialog.is_none());
+    }
+
+    #[test]
+    fn test_apply_open_default_app_result_shows_error_on_failure() {
+        let mut app = make_test_app();
+        let file_path = PathBuf::from("/tmp/example.txt");
+        let error = BokslDirError::ExternalOpenFailed {
+            path: file_path.clone(),
+            reason: "mock failure".to_string(),
+        };
+
+        app.apply_open_default_app_result(&file_path, Err(error));
+
+        match &app.dialog {
+            Some(DialogKind::Error { message, .. }) => {
+                assert!(message.contains("Open with default app failed."));
+                assert!(message.contains("mock failure"));
+            }
+            other => panic!("expected error dialog, got {:?}", other),
+        }
     }
 
     #[test]

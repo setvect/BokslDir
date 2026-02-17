@@ -618,6 +618,8 @@ pub fn create_default_menus() -> Vec<Menu> {
         Menu::new("file", "파일(F)").hotkey('f').items(vec![
             menu_action("new_dir", "새 폴더"),
             MenuItem::separator(),
+            menu_action("open_default", "기본 프로그램으로 열기"),
+            MenuItem::separator(),
             menu_action("rename", "이름 변경"),
             menu_action("delete", "삭제"),
             menu_action("perm_delete", "영구 삭제"),

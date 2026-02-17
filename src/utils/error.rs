@@ -54,6 +54,9 @@ pub enum BokslDirError {
         reason: String,
     },
 
+    #[error("Open with default app failed: {path}: {reason}")]
+    ExternalOpenFailed { path: PathBuf, reason: String },
+
     #[error("Operation cancelled")]
     OperationCancelled,
 }

@@ -26,6 +26,7 @@ pub enum Action {
     // File Operations
     Copy,
     Move,
+    OpenDefaultApp,
     Delete,
     PermanentDelete,
     MakeDirectory,
@@ -243,6 +244,14 @@ pub static ACTION_DEFS: &[ActionDef] = &[
             label: "Move",
             priority: 11,
         }),
+    },
+    ActionDef {
+        action: Action::OpenDefaultApp,
+        id: "open_default",
+        label: "Open with default app",
+        category: ActionCategory::FileOperation,
+        shortcut_display: Some("o"),
+        command_bar: None,
     },
     ActionDef {
         action: Action::Delete,
@@ -726,6 +735,11 @@ fn build_key_bindings() -> Vec<KeyBinding> {
             action: Action::Move,
         },
         KeyBinding {
+            code: KeyCode::Char('o'),
+            modifiers: Some(KeyModifiers::NONE),
+            action: Action::OpenDefaultApp,
+        },
+        KeyBinding {
             code: KeyCode::Char('d'),
             modifiers: Some(KeyModifiers::NONE),
             action: Action::Delete,
@@ -893,6 +907,10 @@ mod tests {
         assert_eq!(Action::from_id("tab_list"), Some(Action::ShowTabList));
         assert_eq!(Action::from_id("goto_path"), Some(Action::GoToPath));
         assert_eq!(
+            Action::from_id("open_default"),
+            Some(Action::OpenDefaultApp)
+        );
+        assert_eq!(
             Action::from_id("history_list"),
             Some(Action::ShowHistoryList)
         );
@@ -917,6 +935,10 @@ mod tests {
         assert_eq!(
             find_action(KeyModifiers::NONE, KeyCode::Char('y')),
             Some(Action::Copy)
+        );
+        assert_eq!(
+            find_action(KeyModifiers::NONE, KeyCode::Char('o')),
+            Some(Action::OpenDefaultApp)
         );
         assert_eq!(
             find_action(KeyModifiers::NONE, KeyCode::Char('q')),
@@ -1000,6 +1022,7 @@ mod tests {
         assert_eq!(get_shortcut_display("copy"), Some("y"));
         assert_eq!(get_shortcut_display("quit"), Some("q"));
         assert_eq!(get_shortcut_display("goto_path"), Some("gp"));
+        assert_eq!(get_shortcut_display("open_default"), Some("o"));
         assert_eq!(get_shortcut_display("theme_dark"), None);
     }
 

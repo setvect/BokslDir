@@ -45,6 +45,12 @@ struct PersistedBookmarks {
     bookmarks: Vec<PersistedBookmark>,
 }
 
+#[derive(Debug, Clone)]
+pub struct TerminalEditorRequest {
+    pub editor_command: String,
+    pub target_path: PathBuf,
+}
+
 /// 파일 크기 표시 형식
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SizeFormat {
@@ -91,6 +97,10 @@ pub struct App {
     pub size_format: SizeFormat,
     /// 현재 IME 상태
     pub ime_status: ImeStatus,
+    /// 기본 터미널 에디터 명령 (런타임 프리셋/환경변수 기반)
+    default_terminal_editor: String,
+    /// 메인 루프에서 처리할 터미널 에디터 실행 요청
+    pending_terminal_editor_request: Option<TerminalEditorRequest>,
     /// 전역 북마크 목록
     bookmarks: Vec<PersistedBookmark>,
     /// 테스트에서 북마크 저장 경로를 격리하기 위한 override
@@ -101,6 +111,19 @@ impl App {
     const MAX_TABS_PER_PANEL: usize = 5;
     const HISTORY_STORE_VERSION: u32 = 1;
     const BOOKMARK_STORE_VERSION: u32 = 1;
+    const FALLBACK_TERMINAL_EDITOR: &'static str = "vi";
+
+    fn resolve_default_terminal_editor_from_env() -> String {
+        for key in ["VISUAL", "EDITOR"] {
+            if let Ok(value) = env::var(key) {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+        Self::FALLBACK_TERMINAL_EDITOR.to_string()
+    }
 
     pub fn new() -> Result<Self> {
         let current_dir = env::current_dir().unwrap_or_else(|_| {
@@ -144,6 +167,8 @@ impl App {
             icon_mode: crate::ui::components::panel::IconMode::default(),
             size_format: SizeFormat::default(),
             ime_status: crate::system::get_current_ime(),
+            default_terminal_editor: Self::resolve_default_terminal_editor_from_env(),
+            pending_terminal_editor_request: None,
             bookmarks: Vec::new(),
             bookmarks_store_override: None,
         };
@@ -182,6 +207,8 @@ impl App {
             icon_mode: crate::ui::components::panel::IconMode::default(),
             size_format: SizeFormat::default(),
             ime_status: ImeStatus::Unknown,
+            default_terminal_editor: Self::FALLBACK_TERMINAL_EDITOR.to_string(),
+            pending_terminal_editor_request: None,
             bookmarks: Vec::new(),
             bookmarks_store_override: Some(bookmarks_store_override),
         }
@@ -641,6 +668,7 @@ impl App {
             Action::Copy => self.start_copy(),
             Action::Move => self.start_move(),
             Action::OpenDefaultApp => self.start_open_default_app(),
+            Action::OpenTerminalEditor => self.start_open_terminal_editor(),
             Action::Delete => self.start_delete(),
             Action::PermanentDelete => self.start_permanent_delete(),
             Action::MakeDirectory => self.start_mkdir(),
@@ -669,6 +697,10 @@ impl App {
                     IconMode::Ascii => IconMode::Emoji,
                 };
             }
+            Action::SetDefaultEditorVi => self.set_default_editor_vi(),
+            Action::SetDefaultEditorVim => self.set_default_editor_vim(),
+            Action::SetDefaultEditorNano => self.set_default_editor_nano(),
+            Action::SetDefaultEditorEmacs => self.set_default_editor_emacs(),
             Action::SortByName => self.sort_active_panel(SortBy::Name),
             Action::SortBySize => self.sort_active_panel(SortBy::Size),
             Action::SortByDate => self.sort_active_panel(SortBy::Modified),
@@ -2616,6 +2648,111 @@ impl App {
         self.apply_open_default_app_result(&target_path, result);
     }
 
+    fn focused_terminal_editor_target(&self) -> std::result::Result<PathBuf, String> {
+        let panel = self.active_panel_state();
+        let has_parent = panel.current_path.parent().is_some();
+        let selected_index = panel.selected_index;
+
+        if has_parent && selected_index == 0 {
+            return Err("Cannot edit parent entry ('..').".to_string());
+        }
+
+        let entry_index = if has_parent {
+            selected_index.saturating_sub(1)
+        } else {
+            selected_index
+        };
+
+        let Some(entry) = panel.entries.get(entry_index) else {
+            return Err("No file selected.".to_string());
+        };
+
+        if entry.is_directory() || entry.path.is_dir() {
+            return Err("Only files can be edited in Phase 7.2.".to_string());
+        }
+
+        Ok(entry.path.clone())
+    }
+
+    /// 터미널 에디터로 파일 열기 (e) - 실행 자체는 main 루프에서 처리
+    pub fn start_open_terminal_editor(&mut self) {
+        let target_path = match self.focused_terminal_editor_target() {
+            Ok(path) => path,
+            Err(reason) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error(
+                        "Open in terminal editor",
+                        None,
+                        &reason,
+                        "Select a regular file and try again.",
+                    ),
+                ));
+                return;
+            }
+        };
+
+        self.pending_terminal_editor_request = Some(TerminalEditorRequest {
+            editor_command: self.default_terminal_editor.clone(),
+            target_path,
+        });
+    }
+
+    pub fn take_pending_terminal_editor_request(&mut self) -> Option<TerminalEditorRequest> {
+        self.pending_terminal_editor_request.take()
+    }
+
+    pub fn apply_terminal_editor_result(
+        &mut self,
+        request: &TerminalEditorRequest,
+        result: std::result::Result<(), String>,
+    ) {
+        match result {
+            Ok(()) => {
+                let display_name = request
+                    .target_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| request.target_path.to_string_lossy().to_string());
+                self.set_toast(&format!("Edited: {}", display_name));
+            }
+            Err(reason) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error(
+                        "Open in terminal editor",
+                        Some(&request.target_path),
+                        &reason,
+                        "Check editor command and file path.",
+                    ),
+                ));
+            }
+        }
+    }
+
+    fn set_default_terminal_editor(&mut self, editor: &str) {
+        self.default_terminal_editor = editor.to_string();
+        self.set_toast(&format!("Default editor: {}", editor));
+    }
+
+    pub fn set_default_editor_vi(&mut self) {
+        self.set_default_terminal_editor("vi");
+    }
+
+    pub fn set_default_editor_vim(&mut self) {
+        self.set_default_terminal_editor("vim");
+    }
+
+    pub fn set_default_editor_nano(&mut self) {
+        self.set_default_terminal_editor("nano");
+    }
+
+    pub fn set_default_editor_emacs(&mut self) {
+        self.set_default_terminal_editor("emacs");
+    }
+
     /// 이름 변경 확인
     pub fn confirm_rename(&mut self, new_name: String, original_path: PathBuf) {
         let new_name = new_name.trim().to_string();
@@ -4073,6 +4210,8 @@ impl Default for App {
                 icon_mode: crate::ui::components::panel::IconMode::default(),
                 size_format: SizeFormat::default(),
                 ime_status: ImeStatus::Unknown,
+                default_terminal_editor: Self::FALLBACK_TERMINAL_EDITOR.to_string(),
+                pending_terminal_editor_request: None,
                 bookmarks: Vec::new(),
                 bookmarks_store_override: None,
             }
@@ -4609,6 +4748,132 @@ mod tests {
         app.start_open_default_app();
 
         assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+    }
+
+    #[test]
+    fn test_start_open_terminal_editor_rejects_parent_entry() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+
+        app.go_to_mount_point(base);
+        app.active_panel_state_mut().selected_index = 0;
+        app.start_open_terminal_editor();
+
+        assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+        assert!(app.take_pending_terminal_editor_request().is_none());
+    }
+
+    #[test]
+    fn test_start_open_terminal_editor_rejects_directory() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let dir = base.join("docs");
+        fs::create_dir_all(&dir).unwrap();
+
+        app.go_to_mount_point(base.clone());
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == dir)
+            .expect("directory entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+        app.start_open_terminal_editor();
+
+        assert!(matches!(app.dialog, Some(DialogKind::Error { .. })));
+        assert!(app.take_pending_terminal_editor_request().is_none());
+    }
+
+    #[test]
+    fn test_start_open_terminal_editor_queues_request_for_file() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let file = base.join("notes.txt");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(&file, "hello").unwrap();
+
+        app.go_to_mount_point(base.clone());
+        app.execute_action(Action::SetDefaultEditorVim);
+
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == file)
+            .expect("file entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+        app.start_open_terminal_editor();
+
+        let request = app
+            .take_pending_terminal_editor_request()
+            .expect("request should be queued");
+        assert_eq!(request.editor_command, "vim");
+        assert_eq!(request.target_path, file);
+    }
+
+    #[test]
+    fn test_apply_terminal_editor_result_sets_toast_on_success() {
+        let mut app = make_test_app();
+        let request = TerminalEditorRequest {
+            editor_command: "vi".to_string(),
+            target_path: PathBuf::from("/tmp/example.txt"),
+        };
+
+        app.apply_terminal_editor_result(&request, Ok(()));
+
+        assert_eq!(app.toast_display(), Some("Edited: example.txt"));
+        assert!(app.dialog.is_none());
+    }
+
+    #[test]
+    fn test_apply_terminal_editor_result_shows_error_on_failure() {
+        let mut app = make_test_app();
+        let request = TerminalEditorRequest {
+            editor_command: "vi".to_string(),
+            target_path: PathBuf::from("/tmp/example.txt"),
+        };
+
+        app.apply_terminal_editor_result(
+            &request,
+            Err("Failed to start 'vi': not found".to_string()),
+        );
+
+        match &app.dialog {
+            Some(DialogKind::Error { message, .. }) => {
+                assert!(message.contains("Open in terminal editor failed."));
+                assert!(message.contains("Failed to start 'vi'"));
+            }
+            other => panic!("expected error dialog, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_editor_preset_actions_update_default_editor() {
+        let mut app = make_test_app();
+
+        app.execute_action(Action::SetDefaultEditorVim);
+        assert_eq!(app.default_terminal_editor, "vim");
+        assert_eq!(app.toast_display(), Some("Default editor: vim"));
+
+        app.execute_action(Action::SetDefaultEditorNano);
+        assert_eq!(app.default_terminal_editor, "nano");
+        assert_eq!(app.toast_display(), Some("Default editor: nano"));
+
+        app.execute_action(Action::SetDefaultEditorEmacs);
+        assert_eq!(app.default_terminal_editor, "emacs");
+        assert_eq!(app.toast_display(), Some("Default editor: emacs"));
+
+        app.execute_action(Action::SetDefaultEditorVi);
+        assert_eq!(app.default_terminal_editor, "vi");
+        assert_eq!(app.toast_display(), Some("Default editor: vi"));
     }
 
     #[test]

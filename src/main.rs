@@ -5,7 +5,7 @@ mod system;
 mod ui;
 mod utils;
 
-use app::App;
+use app::{App, TerminalEditorRequest};
 use core::actions::{find_action, Action};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -14,6 +14,8 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::io;
+use std::path::Path;
+use std::process::Command;
 use system::ime;
 use ui::{
     ActivePanel, CommandBar, Dialog, DialogKind, DropdownMenu, LayoutMode, MenuBar, Panel,
@@ -123,12 +125,78 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
             }
         }
 
+        if let Some(request) = app.take_pending_terminal_editor_request() {
+            let result = run_terminal_editor_request(&request);
+            app.refresh_both_panels();
+            app.apply_terminal_editor_result(&request, result);
+            let _ = terminal.clear();
+        }
+
         if app.should_quit() {
             break;
         }
     }
 
     Ok(())
+}
+
+fn run_terminal_editor_request(request: &TerminalEditorRequest) -> std::result::Result<(), String> {
+    suspend_tui_and_run_editor(&request.editor_command, &request.target_path)
+}
+
+fn suspend_tui_and_run_editor(
+    editor_command: &str,
+    target_path: &Path,
+) -> std::result::Result<(), String> {
+    disable_raw_mode().map_err(|e| format!("Failed to disable raw mode: {}", e))?;
+
+    let mut stdout = io::stdout();
+    if let Err(e) = execute!(stdout, LeaveAlternateScreen) {
+        let _ = enable_raw_mode();
+        return Err(format!("Failed to leave alternate screen: {}", e));
+    }
+
+    let run_result = run_editor_process(editor_command, target_path);
+
+    let mut restore_errors = Vec::new();
+    if let Err(e) = execute!(stdout, EnterAlternateScreen) {
+        restore_errors.push(format!("enter alternate screen: {}", e));
+    }
+    if let Err(e) = enable_raw_mode() {
+        restore_errors.push(format!("enable raw mode: {}", e));
+    }
+
+    if restore_errors.is_empty() {
+        run_result
+    } else {
+        let mut message = format!("Failed to restore terminal: {}", restore_errors.join(", "));
+        if let Err(editor_error) = run_result {
+            message.push_str(&format!(". Editor error: {}", editor_error));
+        }
+        Err(message)
+    }
+}
+
+fn run_editor_process(editor_command: &str, target_path: &Path) -> std::result::Result<(), String> {
+    let mut parts = editor_command.split_whitespace();
+    let Some(program) = parts.next() else {
+        return Err("Editor command is empty.".to_string());
+    };
+
+    let status = Command::new(program)
+        .args(parts)
+        .arg(target_path)
+        .status()
+        .map_err(|e| format!("Failed to start '{}': {}", editor_command, e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Editor '{}' exited with status {}",
+            editor_command, status
+        ))
+    }
 }
 
 /// 일반 모드 키 처리 (액션 레지스트리 기반)

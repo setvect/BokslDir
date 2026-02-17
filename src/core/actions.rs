@@ -27,6 +27,7 @@ pub enum Action {
     Copy,
     Move,
     OpenDefaultApp,
+    OpenTerminalEditor,
     Delete,
     PermanentDelete,
     MakeDirectory,
@@ -58,6 +59,10 @@ pub enum Action {
     ClearFilter,
     // Settings
     ToggleIconMode,
+    SetDefaultEditorVi,
+    SetDefaultEditorVim,
+    SetDefaultEditorNano,
+    SetDefaultEditorEmacs,
     // View (Phase 5.3)
     ToggleHidden,
     ShowMountPoints,
@@ -254,6 +259,14 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         command_bar: None,
     },
     ActionDef {
+        action: Action::OpenTerminalEditor,
+        id: "open_terminal_editor",
+        label: "Open in terminal editor",
+        category: ActionCategory::FileOperation,
+        shortcut_display: Some("e"),
+        command_bar: None,
+    },
+    ActionDef {
         action: Action::Delete,
         id: "delete",
         label: "Delete",
@@ -437,6 +450,38 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         action: Action::ToggleIconMode,
         id: "toggle_icons",
         label: "Toggle icons",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::SetDefaultEditorVi,
+        id: "editor_preset_vi",
+        label: "Default editor: vi",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::SetDefaultEditorVim,
+        id: "editor_preset_vim",
+        label: "Default editor: vim",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::SetDefaultEditorNano,
+        id: "editor_preset_nano",
+        label: "Default editor: nano",
+        category: ActionCategory::System,
+        shortcut_display: None,
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::SetDefaultEditorEmacs,
+        id: "editor_preset_emacs",
+        label: "Default editor: emacs",
         category: ActionCategory::System,
         shortcut_display: None,
         command_bar: None,
@@ -740,6 +785,11 @@ fn build_key_bindings() -> Vec<KeyBinding> {
             action: Action::OpenDefaultApp,
         },
         KeyBinding {
+            code: KeyCode::Char('e'),
+            modifiers: Some(KeyModifiers::NONE),
+            action: Action::OpenTerminalEditor,
+        },
+        KeyBinding {
             code: KeyCode::Char('d'),
             modifiers: Some(KeyModifiers::NONE),
             action: Action::Delete,
@@ -911,6 +961,26 @@ mod tests {
             Some(Action::OpenDefaultApp)
         );
         assert_eq!(
+            Action::from_id("open_terminal_editor"),
+            Some(Action::OpenTerminalEditor)
+        );
+        assert_eq!(
+            Action::from_id("editor_preset_vi"),
+            Some(Action::SetDefaultEditorVi)
+        );
+        assert_eq!(
+            Action::from_id("editor_preset_vim"),
+            Some(Action::SetDefaultEditorVim)
+        );
+        assert_eq!(
+            Action::from_id("editor_preset_nano"),
+            Some(Action::SetDefaultEditorNano)
+        );
+        assert_eq!(
+            Action::from_id("editor_preset_emacs"),
+            Some(Action::SetDefaultEditorEmacs)
+        );
+        assert_eq!(
             Action::from_id("history_list"),
             Some(Action::ShowHistoryList)
         );
@@ -939,6 +1009,10 @@ mod tests {
         assert_eq!(
             find_action(KeyModifiers::NONE, KeyCode::Char('o')),
             Some(Action::OpenDefaultApp)
+        );
+        assert_eq!(
+            find_action(KeyModifiers::NONE, KeyCode::Char('e')),
+            Some(Action::OpenTerminalEditor)
         );
         assert_eq!(
             find_action(KeyModifiers::NONE, KeyCode::Char('q')),
@@ -1023,6 +1097,7 @@ mod tests {
         assert_eq!(get_shortcut_display("quit"), Some("q"));
         assert_eq!(get_shortcut_display("goto_path"), Some("gp"));
         assert_eq!(get_shortcut_display("open_default"), Some("o"));
+        assert_eq!(get_shortcut_display("open_terminal_editor"), Some("e"));
         assert_eq!(get_shortcut_display("theme_dark"), None);
     }
 

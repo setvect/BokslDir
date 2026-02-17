@@ -10,8 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 터미널 환경에서 동작하는 듀얼 패널 파일 매니저. Total Commander/Midnight Commander에서 영감을 받아 Rust + TUI로 구현.
 
-**현재 상태**: Phase 7.2 완료 (터미널 에디터 통합) + Phase 7.1 완료 (파일 연결 프로그램) + Phase 6.4 완료 (경로 입력 및 자동완성) + Phase 6.3 완료 (북마크 시스템) + Phase 6.2 완료 (디렉토리 히스토리) + Phase 6.1 완료 (탭 시스템) + Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
-**다음 단계**: Phase 8 - 압축 파일 처리
+**현재 상태**: Phase 8 완료 (압축 파일 처리) + Phase 7.2 완료 (터미널 에디터 통합) + Phase 7.1 완료 (파일 연결 프로그램) + Phase 6.4 완료 (경로 입력 및 자동완성) + Phase 6.3 완료 (북마크 시스템) + Phase 6.2 완료 (디렉토리 히스토리) + Phase 6.1 완료 (탭 시스템) + Phase 5.3 완료 (기타 탐색 기능) + Phase 5.2 완료 (검색 및 필터링) + Phase 5.1 완료 (파일 정렬) + Phase 4 완료 (Vim 스타일 단축키) + 액션 시스템 일원화 완료
+**다음 단계**: Phase 9 - 커스터마이징
 
 ## 개발 명령어
 
@@ -57,6 +57,7 @@ src/
 │   ├── file_entry.rs   # 파일 정보 (FileEntry, FileType)
 │   └── panel_state.rs  # 패널 상태 (PanelState)
 ├── system/             # System Layer
+│   ├── archive.rs      # 압축/해제/미리보기 백엔드 (zip/tar/tar.gz/tar.zst/7z/jar/war)
 │   └── filesystem.rs   # 파일 시스템 추상화 (FileSystem)
 └── utils/
     ├── error.rs        # 에러 타입 (BokslDirError)
@@ -197,6 +198,16 @@ src/
 - 입력 편집 단축키: `Ctrl+W`로 이전 단어 삭제
 - `~` 확장 및 상대경로 패널 기준 해석
 
+### Phase 8: 압축 파일 처리
+- 포맷 지원: `zip`, `tar`, `tar.gz`(`tgz`), `tar.zst`(`tzst`), `7z`, `jar`, `war`
+- 압축 생성: `zc` (지원 포맷은 확장자로 판단)
+- 압축 생성 다이얼로그: 경로 + 비밀번호 사용 체크박스 + 비밀번호/확인 입력(동일 다이얼로그)
+- 압축 해제: `zx` (기존 파일 충돌 시 덮어쓰기 확인 다이얼로그 후 진행)
+- 알아서 풀기: `za` (단일 루트 디렉토리면 그대로, 그 외는 압축명 폴더 생성 후 해제)
+- 압축 미리보기: 압축 파일 포커스 후 `Enter` (패널 내부 탐색 형태, 최대 5000개 항목 표시)
+- 암호 지원: `zip`/`7z`만 압축/해제 암호 입력 지원
+- 진행률 + 취소: 백그라운드 작업, Progress 다이얼로그에서 `Esc` 취소
+
 ## 단축키 매핑 (Vim 스타일)
 
 **Normal 모드 키바인딩** (F키 제거 완료, Vim only):
@@ -204,7 +215,7 @@ src/
 | 카테고리 | 키 | 동작 |
 |---------|-----|------|
 | 탐색 | `j`/`k` | 커서 아래/위 (↑/↓도 가능) |
-| | `h`/`l` | 상위 디렉토리/진입 (←/Enter도 가능) |
+| | `h`/`l` | 상위 디렉토리/진입 (`Enter`: 압축 파일이면 미리보기) |
 | | `gg`/`G` | 맨 위/맨 아래 (Home/End도 가능) |
 | | `Ctrl+U`/`Ctrl+D` | 반 페이지 위/아래 (PageUp/PageDown도 가능) |
 | | `tn` | 새 탭 |
@@ -223,6 +234,10 @@ src/
 | | `a` | 새 디렉토리 |
 | | `r` | 이름 변경 |
 | | `i` | 파일 속성 |
+| | `zc` | 압축 |
+| | `zx` | 압축 해제 |
+| | `za` | 알아서 풀기 |
+| | `Enter`(압축 파일) | 압축 파일 미리보기 |
 | 선택 | `Space` | 선택 토글 |
 | | `v` | 선택 반전 |
 | | `Ctrl+A` | 전체 선택 |

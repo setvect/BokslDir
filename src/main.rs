@@ -120,6 +120,8 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
         if app.is_operation_processing() {
             if app.is_delete_operation() {
                 app.process_next_delete();
+            } else if app.is_archive_operation() {
+                app.process_next_archive();
             } else {
                 app.process_next_file();
             }
@@ -201,7 +203,7 @@ fn run_editor_process(editor_command: &str, target_path: &Path) -> std::result::
 
 /// 일반 모드 키 처리 (액션 레지스트리 기반)
 fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
-    // 1) pending 키 시퀀스 처리 (gg, s+키, t+키)
+    // 1) pending 키 시퀀스 처리 (gg, s+키, t+키, z+키)
     if let Some(pending) = app.pending_key {
         app.clear_pending_key();
         match (pending, &code) {
@@ -257,15 +259,27 @@ fn handle_normal_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
                 app.execute_action(Action::ShowBookmarkList);
                 return;
             }
+            ('z', KeyCode::Char('c')) => {
+                app.execute_action(Action::ArchiveCompress);
+                return;
+            }
+            ('z', KeyCode::Char('x')) => {
+                app.execute_action(Action::ArchiveExtract);
+                return;
+            }
+            ('z', KeyCode::Char('a')) => {
+                app.execute_action(Action::ArchiveExtractAuto);
+                return;
+            }
             _ => {} // 잘못된 시퀀스, fall through
         }
     }
 
-    // 2) 'g' 또는 's' 또는 't' 시작 시 시퀀스 모드 진입
+    // 2) 'g' 또는 's' 또는 't' 또는 'z' 시작 시 시퀀스 모드 진입
     if modifiers == KeyModifiers::NONE
         && matches!(
             code,
-            KeyCode::Char('g') | KeyCode::Char('s') | KeyCode::Char('t')
+            KeyCode::Char('g') | KeyCode::Char('s') | KeyCode::Char('t') | KeyCode::Char('z')
         )
     {
         if let KeyCode::Char(c) = code {
@@ -299,6 +313,9 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     match dialog_kind {
         DialogKind::Input { value, .. } => {
             handle_input_dialog_keys(app, modifiers, code, &value);
+        }
+        DialogKind::ArchiveCreateOptions { .. } => {
+            handle_archive_create_dialog_keys(app, modifiers, code);
         }
         DialogKind::Confirm { .. } => {
             handle_confirm_dialog_keys(app, modifiers, code);
@@ -347,6 +364,9 @@ fn handle_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
         }
         DialogKind::BookmarkRenameInput { .. } => {
             handle_bookmark_rename_input_dialog_keys(app, modifiers, code);
+        }
+        DialogKind::ArchivePreviewList { .. } => {
+            handle_archive_preview_dialog_keys(app, code);
         }
     }
 }
@@ -415,6 +435,64 @@ fn handle_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCod
         }
         (_, KeyCode::End) => {
             app.dialog_input_end();
+        }
+        _ => {}
+    }
+}
+
+fn handle_archive_create_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
+    if is_prev_word_delete_shortcut(modifiers, code) {
+        app.archive_create_dialog_delete_prev_word();
+        return;
+    }
+
+    match (modifiers, code) {
+        (_, KeyCode::Esc) => app.close_dialog(),
+        (KeyModifiers::NONE, KeyCode::Tab) => app.archive_create_dialog_next_field(),
+        (KeyModifiers::SHIFT, KeyCode::BackTab) => app.archive_create_dialog_prev_field(),
+        (KeyModifiers::NONE, KeyCode::Up) => app.archive_create_dialog_prev_field(),
+        (KeyModifiers::NONE, KeyCode::Down) => app.archive_create_dialog_next_field(),
+        (KeyModifiers::NONE, KeyCode::Char(' ')) => {
+            if let Some(DialogKind::ArchiveCreateOptions { focused_field, .. }) = &app.dialog {
+                if *focused_field == 1 {
+                    app.archive_create_dialog_toggle_password();
+                } else {
+                    app.archive_create_dialog_char(' ');
+                }
+            }
+        }
+        (_, KeyCode::Enter) => {
+            // focused_field == 1 (checkbox) 는 Space와 동일 동작
+            // focused_field == 4 (buttons) 는 selected_button에 따라 동작
+            if let Some(DialogKind::ArchiveCreateOptions {
+                focused_field,
+                selected_button,
+                ..
+            }) = &app.dialog
+            {
+                if *focused_field == 1 {
+                    app.archive_create_dialog_toggle_password();
+                    return;
+                }
+                if *focused_field == 4 {
+                    if *selected_button == 0 {
+                        app.confirm_archive_create_dialog();
+                    } else {
+                        app.close_dialog();
+                    }
+                    return;
+                }
+            }
+            app.confirm_archive_create_dialog();
+        }
+        (_, KeyCode::Backspace) => app.archive_create_dialog_backspace(),
+        (_, KeyCode::Delete) => app.archive_create_dialog_delete(),
+        (_, KeyCode::Left) => app.archive_create_dialog_left(),
+        (_, KeyCode::Right) => app.archive_create_dialog_right(),
+        (_, KeyCode::Home) => app.archive_create_dialog_home(),
+        (_, KeyCode::End) => app.archive_create_dialog_end(),
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            app.archive_create_dialog_char(c);
         }
         _ => {}
     }
@@ -763,6 +841,20 @@ fn handle_bookmark_rename_input_dialog_keys(app: &mut App, modifiers: KeyModifie
     }
 }
 
+/// 압축 미리보기 다이얼로그 키 처리
+fn handle_archive_preview_dialog_keys(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => app.close_dialog(),
+        KeyCode::Char('j') | KeyCode::Down => app.archive_preview_move_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.archive_preview_move_up(),
+        KeyCode::PageDown => app.archive_preview_page_down(),
+        KeyCode::PageUp => app.archive_preview_page_up(),
+        KeyCode::Home => app.archive_preview_go_top(),
+        KeyCode::End => app.archive_preview_go_bottom(),
+        _ => {}
+    }
+}
+
 /// 필터 입력 다이얼로그 키 처리
 fn handle_filter_input_dialog_keys(app: &mut App, modifiers: KeyModifiers, code: KeyCode) {
     if is_prev_word_delete_shortcut(modifiers, code) {
@@ -886,6 +978,36 @@ mod tests {
 
         handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('p'));
         assert!(matches!(app.dialog, Some(DialogKind::Input { .. })));
+    }
+
+    #[test]
+    fn test_z_c_sequence_dispatches_archive_compress() {
+        let mut app = App::new_for_test();
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('z'));
+        assert_eq!(app.pending_key, Some('z'));
+
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('c'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::ArchiveCreateOptions { .. }) | Some(DialogKind::Message { .. })
+        ));
+    }
+
+    #[test]
+    fn test_z_a_sequence_dispatches_archive_auto_extract() {
+        let mut app = App::new_for_test();
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('z'));
+        assert_eq!(app.pending_key, Some('z'));
+
+        handle_normal_keys(&mut app, KeyModifiers::NONE, KeyCode::Char('a'));
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::Error { .. })
+                | Some(DialogKind::Input { .. })
+                | Some(DialogKind::Progress { .. })
+                | Some(DialogKind::Message { .. })
+                | Some(DialogKind::Conflict { .. })
+        ));
     }
 
     #[test]

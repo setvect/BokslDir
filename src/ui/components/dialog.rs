@@ -37,6 +37,12 @@ pub enum InputPurpose {
     OperationDestination,
     /// 경로 직접 이동
     GoToPath,
+    /// 압축 파일 생성 경로 입력
+    ArchiveCreatePath,
+    /// 압축 해제 대상 경로 입력
+    ArchiveExtractDestination,
+    /// 압축 비밀번호 입력
+    ArchivePassword,
 }
 
 /// 다이얼로그 종류
@@ -54,6 +60,20 @@ pub enum DialogKind {
         completion_candidates: Vec<String>,
         completion_index: Option<usize>,
         ghost_suffix: String,
+        mask_input: bool,
+    },
+    /// 압축 생성 입력 다이얼로그 (경로 + 비밀번호 옵션)
+    ArchiveCreateOptions {
+        path_value: String,
+        path_cursor_pos: usize,
+        use_password: bool,
+        password_value: String,
+        password_cursor_pos: usize,
+        password_confirm_value: String,
+        password_confirm_cursor_pos: usize,
+        focused_field: usize, // 0:path, 1:checkbox, 2:password, 3:confirm, 4:buttons
+        selected_button: usize, // 0: OK, 1: Cancel
+        base_path: PathBuf,
     },
     /// 확인 다이얼로그 (Yes/No)
     Confirm {
@@ -134,6 +154,14 @@ pub enum DialogKind {
         selected_button: usize, // 0: OK, 1: Cancel
         bookmark_index: usize,
     },
+    /// 압축 파일 내부 목록 미리보기
+    ArchivePreviewList {
+        archive_name: String,
+        items: Vec<(String, String)>,
+        selected_index: usize,
+        scroll_offset: usize,
+        truncated: bool,
+    },
     /// 파일 속성 다이얼로그
     Properties {
         name: String,
@@ -176,6 +204,7 @@ impl DialogKind {
             completion_candidates: Vec::new(),
             completion_index: None,
             ghost_suffix: String::new(),
+            mask_input: false,
         }
     }
 
@@ -194,6 +223,80 @@ impl DialogKind {
             completion_candidates: Vec::new(),
             completion_index: None,
             ghost_suffix: String::new(),
+            mask_input: false,
+        }
+    }
+
+    /// 압축 생성 대상 경로 입력 다이얼로그 생성
+    pub fn archive_create_path_input(initial: impl Into<String>, base_path: PathBuf) -> Self {
+        let value: String = initial.into();
+        let cursor_pos = value.len();
+        DialogKind::Input {
+            title: "Create Archive".to_string(),
+            prompt: "Archive path:".to_string(),
+            value,
+            cursor_pos,
+            selected_button: 0,
+            purpose: InputPurpose::ArchiveCreatePath,
+            base_path,
+            completion_candidates: Vec::new(),
+            completion_index: None,
+            ghost_suffix: String::new(),
+            mask_input: false,
+        }
+    }
+
+    /// 압축 생성 다이얼로그 생성
+    pub fn archive_create_options_input(initial: impl Into<String>, base_path: PathBuf) -> Self {
+        let path_value: String = initial.into();
+        let path_cursor_pos = path_value.len();
+        DialogKind::ArchiveCreateOptions {
+            path_value,
+            path_cursor_pos,
+            use_password: false,
+            password_value: String::new(),
+            password_cursor_pos: 0,
+            password_confirm_value: String::new(),
+            password_confirm_cursor_pos: 0,
+            focused_field: 0,
+            selected_button: 0,
+            base_path,
+        }
+    }
+
+    /// 압축 해제 대상 경로 입력 다이얼로그 생성
+    pub fn archive_extract_path_input(initial: impl Into<String>, base_path: PathBuf) -> Self {
+        let value: String = initial.into();
+        let cursor_pos = value.len();
+        DialogKind::Input {
+            title: "Extract Archive".to_string(),
+            prompt: "Extract to:".to_string(),
+            value,
+            cursor_pos,
+            selected_button: 0,
+            purpose: InputPurpose::ArchiveExtractDestination,
+            base_path,
+            completion_candidates: Vec::new(),
+            completion_index: None,
+            ghost_suffix: String::new(),
+            mask_input: false,
+        }
+    }
+
+    /// 압축 비밀번호 입력 다이얼로그 생성
+    pub fn archive_password_input(title: impl Into<String>) -> Self {
+        DialogKind::Input {
+            title: title.into(),
+            prompt: "Password (empty = none):".to_string(),
+            value: String::new(),
+            cursor_pos: 0,
+            selected_button: 0,
+            purpose: InputPurpose::ArchivePassword,
+            base_path: PathBuf::from("."),
+            completion_candidates: Vec::new(),
+            completion_index: None,
+            ghost_suffix: String::new(),
+            mask_input: true,
         }
     }
 
@@ -322,6 +425,21 @@ impl DialogKind {
             cursor_pos,
             selected_button: 0,
             bookmark_index,
+        }
+    }
+
+    /// 압축 파일 내부 목록 다이얼로그 생성
+    pub fn archive_preview_list(
+        archive_name: impl Into<String>,
+        items: Vec<(String, String)>,
+        truncated: bool,
+    ) -> Self {
+        DialogKind::ArchivePreviewList {
+            archive_name: archive_name.into(),
+            items,
+            selected_index: 0,
+            scroll_offset: 0,
+            truncated,
         }
     }
 
@@ -462,6 +580,11 @@ impl<'a> Dialog<'a> {
                 let h = 12u16;
                 (w, h)
             }
+            DialogKind::ArchiveCreateOptions { .. } => {
+                let w = ((sw as f32 * 0.72) as u16).clamp(56, 110);
+                let h = 15u16;
+                (w, h)
+            }
             DialogKind::MkdirInput { .. }
             | DialogKind::RenameInput { .. }
             | DialogKind::BookmarkRenameInput { .. }
@@ -508,6 +631,12 @@ impl<'a> Dialog<'a> {
                 let list_lines = items.len().min(12) as u16;
                 let w = 70u16.min(sw.saturating_sub(4)).max(40);
                 let h = (4 + list_lines).min(sh.saturating_sub(4)).max(8);
+                (w, h)
+            }
+            DialogKind::ArchivePreviewList { items, .. } => {
+                let list_lines = items.len().min(16) as u16;
+                let w = 90u16.min(sw.saturating_sub(4)).max(48);
+                let h = (5 + list_lines).min(sh.saturating_sub(4)).max(10);
                 (w, h)
             }
             DialogKind::Properties { children_info, .. } => {
@@ -577,6 +706,7 @@ impl<'a> Dialog<'a> {
         cursor_pos: usize,
         selected_button: usize,
         show_suggestions_panel: bool,
+        mask_input: bool,
     ) {
         // 테두리
         let block = Block::default()
@@ -614,33 +744,43 @@ impl<'a> Dialog<'a> {
         // 입력값 표시 (unicode-width 기반)
         // cursor_pos는 바이트 인덱스, 화면 표시는 display width 기반
         let max_display = input_width as usize - 2;
-        let value_display_width = UnicodeWidthStr::width(value);
+        let visible_value = if mask_input {
+            "*".repeat(value.chars().count())
+        } else {
+            value.to_string()
+        };
+        let visible_cursor_pos = if mask_input {
+            value[..cursor_pos].chars().count()
+        } else {
+            cursor_pos
+        };
+        let value_display_width = UnicodeWidthStr::width(visible_value.as_str());
 
         // 스크롤 처리: 커서가 보이도록 표시 시작점 결정
         let (display_value, cursor_display_col) = if value_display_width <= max_display {
             // 전체 표시 가능
-            let cursor_col: usize = value[..cursor_pos]
+            let cursor_col: usize = visible_value[..visible_cursor_pos]
                 .chars()
                 .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
                 .sum();
-            (value, cursor_col)
+            (visible_value.as_str(), cursor_col)
         } else {
             // 스크롤 필요: 커서 위치를 기준으로 표시 범위 계산
-            let cursor_col_from_start: usize = value[..cursor_pos]
+            let cursor_col_from_start: usize = visible_value[..visible_cursor_pos]
                 .chars()
                 .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
                 .sum();
 
             if cursor_col_from_start < max_display {
                 // 커서가 앞쪽이면 앞에서부터 표시
-                (value, cursor_col_from_start)
+                (visible_value.as_str(), cursor_col_from_start)
             } else {
                 // 커서가 화면 밖이면 커서가 오른쪽 끝에 오도록 스크롤
                 let mut start_byte = 0;
                 let mut width_sum = 0;
                 // 뒤에서부터 max_display만큼의 너비를 찾음
                 let target_start_width = cursor_col_from_start.saturating_sub(max_display - 1);
-                for (i, c) in value.char_indices() {
+                for (i, c) in visible_value.char_indices() {
                     let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
                     if width_sum >= target_start_width {
                         start_byte = i;
@@ -648,7 +788,7 @@ impl<'a> Dialog<'a> {
                     }
                     width_sum += cw;
                 }
-                let display = &value[start_byte..];
+                let display = &visible_value[start_byte..];
                 let cursor_col = cursor_col_from_start - width_sum;
                 (display, cursor_col)
             }
@@ -658,7 +798,7 @@ impl<'a> Dialog<'a> {
 
         // Ghost text 미리보기
         let mut ghost_starts_at: Option<u16> = None;
-        if !ghost_suffix.is_empty() {
+        if !mask_input && !ghost_suffix.is_empty() {
             let text_width = UnicodeWidthStr::width(display_value).min(max_display);
             let ghost_start_x = inner.x + 1 + text_width as u16;
             let remaining = max_display.saturating_sub(text_width);
@@ -703,38 +843,24 @@ impl<'a> Dialog<'a> {
         }
 
         // 자동완성 목록 (표시 가능한 높이만 렌더, 선택 항목 기준 스크롤)
-        if show_suggestions_panel && inner.height >= 5 {
+        if show_suggestions_panel && !mask_input && inner.height >= 5 {
             let title_y = inner.y + 2;
             let list_y = inner.y + 3;
             let button_y = area.y + area.height.saturating_sub(2);
             let visible_rows = button_y.saturating_sub(list_y) as usize;
             let total_candidates = completion_candidates.len();
-            let selected = if total_candidates == 0 {
-                0usize
-            } else {
-                completion_index.unwrap_or(0).min(total_candidates - 1)
-            };
-            let selected_display = if total_candidates == 0 {
-                0
-            } else {
-                selected + 1
-            };
+            if total_candidates > 0 {
+                let selected = completion_index.unwrap_or(0).min(total_candidates - 1);
+                let selected_display = selected + 1;
 
-            let title_style = Style::default()
-                .fg(self.border_color)
-                .bg(self.bg_color)
-                .add_modifier(Modifier::DIM);
-            let title = format!("Suggestions ({}/{})", selected_display, total_candidates);
-            buf.set_string(inner.x, title_y, title, title_style);
+                let title_style = Style::default()
+                    .fg(self.border_color)
+                    .bg(self.bg_color)
+                    .add_modifier(Modifier::DIM);
+                let title = format!("Suggestions ({}/{})", selected_display, total_candidates);
+                buf.set_string(inner.x, title_y, title, title_style);
 
-            if visible_rows > 0 {
-                if completion_candidates.is_empty() {
-                    let none_style = Style::default()
-                        .fg(self.border_color)
-                        .bg(self.bg_color)
-                        .add_modifier(Modifier::DIM);
-                    buf.set_string(inner.x, list_y, "No suggestions", none_style);
-                } else {
+                if visible_rows > 0 {
                     let mut scroll = 0usize;
                     if selected >= visible_rows {
                         scroll = selected + 1 - visible_rows;
@@ -1488,6 +1614,221 @@ impl<'a> Dialog<'a> {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn render_archive_preview_list(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        archive_name: &str,
+        items: &[(String, String)],
+        selected_index: usize,
+        scroll_offset: usize,
+        truncated: bool,
+    ) {
+        let title = format!(" Archive Preview: {} ", archive_name);
+        let block = Block::default()
+            .title(title)
+            .title_style(
+                Style::default()
+                    .fg(self.title_color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        block.render(area, buf);
+
+        let inner = Rect {
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(3),
+        };
+
+        let normal_style = Style::default().fg(self.fg_color);
+        let selected_style = Style::default()
+            .fg(self.button_selected_fg)
+            .bg(self.button_selected_bg);
+
+        let visible_height = inner.height as usize;
+        let scroll = scroll_offset.min(items.len().saturating_sub(visible_height));
+        let size_col = 12usize.min(inner.width as usize / 3);
+
+        for (row, (path, size_text)) in items.iter().skip(scroll).take(visible_height).enumerate() {
+            let actual_index = scroll + row;
+            let style = if actual_index == selected_index {
+                selected_style
+            } else {
+                normal_style
+            };
+            let y = inner.y + row as u16;
+            let path_width = inner.width as usize - size_col - 2;
+            let path_display = path_display::truncate_middle(path, path_width);
+            let left = path_display::pad_right_to_width(&path_display, path_width);
+            let line = format!("{}  {:>width$}", left, size_text, width = size_col);
+            buf.set_string(inner.x, y, line, style);
+        }
+
+        let mut hint = format!(
+            " j/k:Move  PgUp/PgDn:Scroll  Home/End  Esc:Close  [{} items] ",
+            items.len()
+        );
+        if truncated {
+            hint.push_str("[showing first 5000]");
+        }
+        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint_y = area.y + area.height - 1;
+        buf.set_string(
+            hint_x,
+            hint_y,
+            hint,
+            Style::default().fg(Color::Rgb(100, 100, 100)),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_archive_create_options(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        path_value: &str,
+        path_cursor_pos: usize,
+        use_password: bool,
+        password_value: &str,
+        password_cursor_pos: usize,
+        password_confirm_value: &str,
+        password_confirm_cursor_pos: usize,
+        focused_field: usize,
+        selected_button: usize,
+    ) {
+        let block = Block::default()
+            .title(" Create Archive ")
+            .title_style(
+                Style::default()
+                    .fg(self.title_color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.border_color))
+            .style(Style::default().bg(self.bg_color));
+        block.render(area, buf);
+
+        let inner = Rect {
+            x: area.x + DIALOG_H_PADDING,
+            y: area.y + DIALOG_V_PADDING,
+            width: area.width.saturating_sub(DIALOG_H_PADDING * 2),
+            height: area.height.saturating_sub(DIALOG_V_PADDING * 2),
+        };
+
+        let label_style = Style::default().fg(self.fg_color);
+        let dim_style = Style::default().fg(Color::Rgb(120, 120, 120));
+        let focused_label_style = label_style.add_modifier(Modifier::BOLD);
+
+        let path_label_style = if focused_field == 0 {
+            focused_label_style
+        } else {
+            label_style
+        };
+        buf.set_string(inner.x, inner.y, "Archive path:", path_label_style);
+        self.render_text_field(
+            buf,
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            path_value,
+            if focused_field == 0 {
+                Some(path_cursor_pos)
+            } else {
+                None
+            },
+        );
+
+        let checkbox_style = if focused_field == 1 {
+            focused_label_style
+        } else {
+            label_style
+        };
+        let checkbox = if use_password { "[x]" } else { "[ ]" };
+        let checkbox_line = format!("{} Use password", checkbox);
+        buf.set_string(inner.x, inner.y + 3, checkbox_line, checkbox_style);
+
+        let password_label_style = if use_password {
+            if focused_field == 2 {
+                focused_label_style
+            } else {
+                label_style
+            }
+        } else {
+            dim_style
+        };
+        buf.set_string(inner.x, inner.y + 5, "Password:", password_label_style);
+        let masked_password = "*".repeat(password_value.chars().count());
+        self.render_text_field(
+            buf,
+            inner.x,
+            inner.y + 6,
+            inner.width,
+            &masked_password,
+            if use_password && focused_field == 2 {
+                Some(password_cursor_pos)
+            } else {
+                None
+            },
+        );
+
+        let confirm_label_style = if use_password {
+            if focused_field == 3 {
+                focused_label_style
+            } else {
+                label_style
+            }
+        } else {
+            dim_style
+        };
+        buf.set_string(
+            inner.x,
+            inner.y + 8,
+            "Confirm password:",
+            confirm_label_style,
+        );
+        let masked_confirm = "*".repeat(password_confirm_value.chars().count());
+        self.render_text_field(
+            buf,
+            inner.x,
+            inner.y + 9,
+            inner.width,
+            &masked_confirm,
+            if use_password && focused_field == 3 {
+                Some(password_confirm_cursor_pos)
+            } else {
+                None
+            },
+        );
+
+        let hint = "Tab/Shift+Tab:Move  Space:Toggle password  Enter:OK  Esc:Cancel  (zip/7z only)";
+        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint_y = area.y + area.height.saturating_sub(3);
+        buf.set_string(
+            hint_x,
+            hint_y,
+            hint,
+            Style::default().fg(Color::Rgb(100, 100, 100)),
+        );
+
+        let button_y = area.y + area.height.saturating_sub(2);
+        let buttons_selected = focused_field == 4;
+        let ok_selected = buttons_selected && selected_button == 0;
+        let cancel_selected = buttons_selected && selected_button == 1;
+        let ok_width = self.render_button(buf, inner.x, button_y, "OK", ok_selected);
+        self.render_button(
+            buf,
+            inner.x + ok_width + 2,
+            button_y,
+            "Cancel",
+            cancel_selected,
+        );
+    }
+
     fn render_help(
         &self,
         buf: &mut Buffer,
@@ -1755,6 +2096,7 @@ impl Widget for Dialog<'_> {
                 completion_candidates,
                 completion_index,
                 ghost_suffix,
+                mask_input,
                 ..
             } => {
                 self.render_input(
@@ -1769,6 +2111,33 @@ impl Widget for Dialog<'_> {
                     *cursor_pos,
                     *selected_button,
                     true,
+                    *mask_input,
+                );
+            }
+            DialogKind::ArchiveCreateOptions {
+                path_value,
+                path_cursor_pos,
+                use_password,
+                password_value,
+                password_cursor_pos,
+                password_confirm_value,
+                password_confirm_cursor_pos,
+                focused_field,
+                selected_button,
+                ..
+            } => {
+                self.render_archive_create_options(
+                    buf,
+                    dialog_area,
+                    path_value,
+                    *path_cursor_pos,
+                    *use_password,
+                    password_value,
+                    *password_cursor_pos,
+                    password_confirm_value,
+                    *password_confirm_cursor_pos,
+                    *focused_field,
+                    *selected_button,
                 );
             }
             DialogKind::Confirm {
@@ -1819,6 +2188,7 @@ impl Widget for Dialog<'_> {
                     *cursor_pos,
                     *selected_button,
                     false,
+                    false,
                 );
             }
             DialogKind::RenameInput {
@@ -1838,6 +2208,7 @@ impl Widget for Dialog<'_> {
                     None,
                     *cursor_pos,
                     *selected_button,
+                    false,
                     false,
                 );
             }
@@ -1859,6 +2230,7 @@ impl Widget for Dialog<'_> {
                     *cursor_pos,
                     *selected_button,
                     false,
+                    false,
                 );
             }
             DialogKind::FilterInput {
@@ -1877,6 +2249,7 @@ impl Widget for Dialog<'_> {
                     None,
                     *cursor_pos,
                     *selected_button,
+                    false,
                     false,
                 );
             }
@@ -1903,6 +2276,23 @@ impl Widget for Dialog<'_> {
                 selected_index,
             } => {
                 self.render_bookmark_list(buf, dialog_area, items, *selected_index);
+            }
+            DialogKind::ArchivePreviewList {
+                archive_name,
+                items,
+                selected_index,
+                scroll_offset,
+                truncated,
+            } => {
+                self.render_archive_preview_list(
+                    buf,
+                    dialog_area,
+                    archive_name,
+                    items,
+                    *selected_index,
+                    *scroll_offset,
+                    *truncated,
+                );
             }
             DialogKind::Help {
                 scroll_offset,
@@ -1956,6 +2346,7 @@ mod tests {
                 completion_candidates,
                 completion_index,
                 ghost_suffix,
+                ..
             } => {
                 assert_eq!(title, "Copy");
                 assert_eq!(prompt, "Copy to:");
@@ -1997,6 +2388,34 @@ mod tests {
                 assert!(ghost_suffix.is_empty());
             }
             _ => panic!("Expected Input dialog"),
+        }
+    }
+
+    #[test]
+    fn test_archive_create_options_input_creation() {
+        let dialog = DialogKind::archive_create_options_input("/tmp/a.zip", PathBuf::from("/tmp"));
+        match dialog {
+            DialogKind::ArchiveCreateOptions {
+                path_value,
+                path_cursor_pos,
+                use_password,
+                password_value,
+                password_confirm_value,
+                focused_field,
+                selected_button,
+                base_path,
+                ..
+            } => {
+                assert_eq!(path_value, "/tmp/a.zip");
+                assert_eq!(path_cursor_pos, "/tmp/a.zip".len());
+                assert!(!use_password);
+                assert!(password_value.is_empty());
+                assert!(password_confirm_value.is_empty());
+                assert_eq!(focused_field, 0);
+                assert_eq!(selected_button, 0);
+                assert_eq!(base_path, PathBuf::from("/tmp"));
+            }
+            _ => panic!("Expected ArchiveCreateOptions dialog"),
         }
     }
 

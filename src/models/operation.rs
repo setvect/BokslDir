@@ -42,6 +42,10 @@ pub enum OperationType {
     Move,
     /// 삭제
     Delete,
+    /// 압축 생성
+    ArchiveCompress,
+    /// 압축 해제
+    ArchiveExtract,
 }
 
 impl OperationType {
@@ -51,6 +55,8 @@ impl OperationType {
             OperationType::Copy => "Copy",
             OperationType::Move => "Move",
             OperationType::Delete => "Delete",
+            OperationType::ArchiveCompress => "Archive",
+            OperationType::ArchiveExtract => "Extract",
         }
     }
 
@@ -60,6 +66,8 @@ impl OperationType {
             OperationType::Copy => "복사",
             OperationType::Move => "이동",
             OperationType::Delete => "삭제",
+            OperationType::ArchiveCompress => "압축",
+            OperationType::ArchiveExtract => "해제",
         }
     }
 }
@@ -122,7 +130,7 @@ impl OperationProgress {
     pub fn percentage(&self) -> u8 {
         if self.total_bytes == 0 {
             if self.total_files == 0 {
-                100
+                0
             } else {
                 ((self.files_completed as f64 / self.total_files as f64) * 100.0) as u8
             }
@@ -319,9 +327,13 @@ mod tests {
         assert_eq!(OperationType::Copy.name(), "Copy");
         assert_eq!(OperationType::Move.name(), "Move");
         assert_eq!(OperationType::Delete.name(), "Delete");
+        assert_eq!(OperationType::ArchiveCompress.name(), "Archive");
+        assert_eq!(OperationType::ArchiveExtract.name(), "Extract");
         assert_eq!(OperationType::Copy.name_ko(), "복사");
         assert_eq!(OperationType::Move.name_ko(), "이동");
         assert_eq!(OperationType::Delete.name_ko(), "삭제");
+        assert_eq!(OperationType::ArchiveCompress.name_ko(), "압축");
+        assert_eq!(OperationType::ArchiveExtract.name_ko(), "해제");
     }
 
     #[test]
@@ -347,6 +359,12 @@ mod tests {
         // 바이트 기준이 없으면 파일 수 기준
         progress.files_completed = 2;
         assert_eq!(progress.percentage(), 50);
+    }
+
+    #[test]
+    fn test_operation_progress_percentage_unknown_totals_starts_at_zero() {
+        let progress = OperationProgress::new(OperationType::ArchiveCompress, 0, 0);
+        assert_eq!(progress.percentage(), 0);
     }
 
     #[test]

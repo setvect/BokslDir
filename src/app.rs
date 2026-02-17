@@ -2,22 +2,31 @@
 
 use crate::core::actions::Action;
 use crate::models::operation::{
-    ConflictResolution, FlattenedEntryKind, FlattenedFile, OperationState, OperationType,
-    PendingOperation,
+    ConflictResolution, FlattenedEntryKind, FlattenedFile, OperationProgress, OperationState,
+    OperationType, PendingOperation,
 };
 use crate::models::panel_state::{SortBy, SortOrder};
-use crate::models::{PanelState, PanelTabs};
-use crate::system::{FileSystem, ImeStatus};
+use crate::models::{FileEntry, PanelState, PanelTabs};
+use crate::system::{
+    create_archive, detect_archive_format, extract_archive, list_entries, list_extract_conflicts,
+    supports_password, ArchiveCreateRequest, ArchiveEntry, ArchiveExtractRequest, ArchiveFormat,
+    ArchiveProgressEvent, ArchiveSummary, FileSystem, ImeStatus,
+};
 use crate::ui::{
     create_default_menus, ActivePanel, DialogKind, InputPurpose, LayoutManager, LayoutMode, Menu,
     MenuState, ThemeManager,
 };
-use crate::utils::error::Result;
+use crate::utils::error::{BokslDirError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +58,78 @@ struct PersistedBookmarks {
 pub struct TerminalEditorRequest {
     pub editor_command: String,
     pub target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArchiveWorkerKind {
+    Compress,
+    Extract,
+}
+
+#[derive(Debug)]
+struct ArchiveWorkerState {
+    kind: ArchiveWorkerKind,
+    progress_rx: Receiver<ArchiveProgressEvent>,
+    join_handle:
+        Option<JoinHandle<std::result::Result<ArchiveSummary, crate::utils::error::BokslDirError>>>,
+    cancel_flag: Arc<AtomicBool>,
+    progress: OperationProgress,
+}
+
+#[derive(Debug, Clone)]
+enum ArchiveFlowContext {
+    CreatePending {
+        sources: Vec<PathBuf>,
+    },
+    ExtractPending {
+        archive_path: PathBuf,
+        format: ArchiveFormat,
+    },
+    ExtractNeedsPassword {
+        request: ArchiveExtractRequest,
+    },
+    ExtractConflictPrompt {
+        request: ArchiveExtractRequest,
+        conflicts: Vec<String>,
+        current_index: usize,
+    },
+    ExtractAutoNeedsPassword {
+        archive_path: PathBuf,
+        base_dir: PathBuf,
+    },
+    PreviewNeedsPassword {
+        archive_path: PathBuf,
+        panel: ActivePanel,
+    },
+    CopyFromPanel {
+        view: ArchivePanelView,
+        selected_entries: Vec<FileEntry>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PanelSlot {
+    Left,
+    Right,
+}
+
+impl From<ActivePanel> for PanelSlot {
+    fn from(value: ActivePanel) -> Self {
+        match value {
+            ActivePanel::Left => PanelSlot::Left,
+            ActivePanel::Right => PanelSlot::Right,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ArchivePanelView {
+    panel: PanelSlot,
+    archive_path: PathBuf,
+    base_dir: PathBuf,
+    current_dir: String,
+    all_entries: Vec<ArchiveEntry>,
+    password: Option<String>,
 }
 
 /// 파일 크기 표시 형식
@@ -84,6 +165,14 @@ pub struct App {
     pub dialog: Option<DialogKind>,
     /// 대기 중인 파일 작업
     pub pending_operation: Option<PendingOperation>,
+    /// 진행 중인 압축 작업 워커
+    archive_worker: Option<ArchiveWorkerState>,
+    /// 압축 관련 다이얼로그 흐름 상태
+    archive_flow: Option<ArchiveFlowContext>,
+    /// 압축 패널 탐색 상태 (활성 패널 기준)
+    archive_panel_view: Option<ArchivePanelView>,
+    /// 압축 내부 복사용 임시 디렉토리 (작업 종료/취소 시 정리)
+    archive_copy_temp_dir: Option<PathBuf>,
     // Phase 4: Vim 스타일 키 시퀀스
     /// 대기 중인 키 (예: 'g' for 'gg')
     pub pending_key: Option<char>,
@@ -161,6 +250,10 @@ impl App {
             theme_manager: ThemeManager::new(),
             dialog: None,
             pending_operation: None,
+            archive_worker: None,
+            archive_flow: None,
+            archive_panel_view: None,
+            archive_copy_temp_dir: None,
             pending_key: None,
             pending_key_time: None,
             toast_message: None,
@@ -201,6 +294,10 @@ impl App {
             theme_manager: ThemeManager::new(),
             dialog: None,
             pending_operation: None,
+            archive_worker: None,
+            archive_flow: None,
+            archive_panel_view: None,
+            archive_copy_temp_dir: None,
             pending_key: None,
             pending_key_time: None,
             toast_message: None,
@@ -674,6 +771,10 @@ impl App {
             Action::MakeDirectory => self.start_mkdir(),
             Action::Rename => self.start_rename(),
             Action::ShowProperties => self.show_properties(),
+            Action::ArchiveCompress => self.start_archive_compress(),
+            Action::ArchiveExtract => self.start_archive_extract(),
+            Action::ArchiveExtractAuto => self.start_archive_extract_auto(),
+            Action::ArchivePreview => self.start_archive_preview(),
             Action::ToggleSelection => self.toggle_selection_and_move_down(),
             Action::InvertSelection => self.invert_selection(),
             Action::SelectAll => self.select_all(),
@@ -946,6 +1047,9 @@ impl App {
 
     /// 상위 디렉토리로 이동 (h / Left)
     pub fn go_to_parent(&mut self) {
+        if self.archive_view_go_parent() {
+            return;
+        }
         let panel = self.active_panel_state();
         let current_path = panel.current_path.clone();
 
@@ -1366,8 +1470,11 @@ impl App {
         let _ = self.change_active_dir(path, true, None);
     }
 
-    /// Enter 키 처리: 디렉토리 진입 또는 상위 디렉토리 이동
+    /// Enter 키 처리: 디렉토리 진입 / 상위 디렉토리 이동 / 압축 파일 미리보기
     pub fn enter_selected(&mut self) {
+        if self.archive_view_enter_selected() {
+            return;
+        }
         let panel = self.active_panel_state();
         let current_path = panel.current_path.clone();
         let selected_index = panel.selected_index;
@@ -1391,8 +1498,12 @@ impl App {
                 .map(|e| (e.is_directory(), e.path.clone()))
         };
 
-        if let Some((true, path)) = entry_info {
-            self.enter_directory(path);
+        if let Some((is_dir, path)) = entry_info {
+            if is_dir {
+                self.enter_directory(path);
+            } else if detect_archive_format(&path).is_some() {
+                self.start_archive_preview();
+            }
         }
     }
 
@@ -1539,13 +1650,21 @@ impl App {
     pub fn close_dialog(&mut self) {
         self.dialog = None;
         self.pending_operation = None;
+        self.archive_flow = None;
     }
 
     /// 진행 중인 작업 취소
     pub fn cancel_operation(&mut self) {
+        if let Some(worker) = &self.archive_worker {
+            worker.cancel_flag.store(true, Ordering::Relaxed);
+            self.set_toast("Archive cancel requested...");
+            return;
+        }
+
         if let Some(pending) = self.pending_operation.take() {
             // 패널 새로고침 (일부 복사된 파일 반영)
             self.refresh_both_panels();
+            self.cleanup_archive_copy_temp_dir();
 
             // 취소 토스트 표시
             self.dialog = None;
@@ -1562,12 +1681,769 @@ impl App {
 
     /// 복사 시작 (y)
     pub fn start_copy(&mut self) {
+        if self.is_active_panel_archive_view() {
+            self.start_archive_copy_dialog();
+            return;
+        }
         self.start_file_operation(OperationType::Copy);
     }
 
     /// 이동 시작 (x)
     pub fn start_move(&mut self) {
         self.start_file_operation(OperationType::Move);
+    }
+
+    /// 압축 시작 (zc)
+    pub fn start_archive_compress(&mut self) {
+        let sources = self.get_operation_sources();
+        if sources.is_empty() {
+            self.dialog = Some(DialogKind::message(
+                "Information",
+                "No files selected for archive.",
+            ));
+            return;
+        }
+
+        let base_path = self.active_panel_state().current_path.clone();
+        let suggested = if sources.len() == 1 {
+            let stem = sources[0]
+                .file_name()
+                .and_then(OsStr::to_str)
+                .unwrap_or("archive");
+            format!("{}.zip", stem)
+        } else {
+            Self::default_multi_archive_name(&base_path)
+        };
+        let suggested_path = Self::next_unique_archive_path(&base_path, &suggested);
+        let initial = suggested_path.to_string_lossy().to_string();
+        self.dialog = Some(DialogKind::archive_create_options_input(initial, base_path));
+        self.archive_flow = Some(ArchiveFlowContext::CreatePending { sources });
+    }
+
+    fn default_multi_archive_name(current_dir: &Path) -> String {
+        if current_dir.parent().is_none() {
+            return "archive.zip".to_string();
+        }
+        let Some(name) = current_dir.file_name().and_then(OsStr::to_str) else {
+            return "archive.zip".to_string();
+        };
+        if name.trim().is_empty() {
+            "archive.zip".to_string()
+        } else {
+            format!("{}.zip", name)
+        }
+    }
+
+    fn next_unique_archive_path(base_dir: &Path, desired_filename: &str) -> PathBuf {
+        let desired = Path::new(desired_filename);
+        let stem = desired
+            .file_stem()
+            .and_then(OsStr::to_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("archive");
+        let extension = desired.extension().and_then(OsStr::to_str);
+
+        let make_name = |index: usize| -> String {
+            let base = if index == 0 {
+                stem.to_string()
+            } else {
+                format!("{}_({})", stem, index)
+            };
+            if let Some(ext) = extension {
+                if ext.is_empty() {
+                    base
+                } else {
+                    format!("{}.{}", base, ext)
+                }
+            } else {
+                base
+            }
+        };
+
+        let mut index = 0usize;
+        loop {
+            let candidate = base_dir.join(make_name(index));
+            if !candidate.exists() {
+                return candidate;
+            }
+            index += 1;
+        }
+    }
+
+    /// 압축 해제 시작 (zx)
+    pub fn start_archive_extract(&mut self) {
+        let archive_path = match self.focused_open_target() {
+            Ok(path) => path,
+            Err(reason) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error("Extract archive", None, &reason, ""),
+                ));
+                return;
+            }
+        };
+        let Some(format) = detect_archive_format(&archive_path) else {
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                Self::format_user_error(
+                    "Extract archive",
+                    Some(&archive_path),
+                    "Unsupported archive format",
+                    "Supported: zip/tar/tar.gz/tar.zst/7z/jar/war",
+                ),
+            ));
+            return;
+        };
+
+        let base_path = self.inactive_panel_state().current_path.clone();
+        let initial = base_path.to_string_lossy().to_string();
+        self.dialog = Some(DialogKind::archive_extract_path_input(initial, base_path));
+        self.archive_flow = Some(ArchiveFlowContext::ExtractPending {
+            archive_path,
+            format,
+        });
+        self.update_input_completion_state();
+    }
+
+    fn detect_single_root_dir(entries: &[ArchiveEntry]) -> Option<String> {
+        use std::collections::BTreeSet;
+
+        let mut top_levels = BTreeSet::new();
+        for entry in entries {
+            let normalized = Self::normalize_archive_entry_path(&entry.path);
+            if normalized.is_empty() {
+                continue;
+            }
+            if let Some(first) = normalized.split('/').next() {
+                top_levels.insert(first.to_string());
+            }
+        }
+
+        if top_levels.len() != 1 {
+            return None;
+        }
+        let root = top_levels.into_iter().next()?;
+
+        let has_nested = entries.iter().any(|entry| {
+            let normalized = Self::normalize_archive_entry_path(&entry.path);
+            normalized.starts_with(&format!("{}/", root))
+        });
+        let has_root_dir_entry = entries
+            .iter()
+            .any(|entry| entry.is_dir && Self::normalize_archive_entry_path(&entry.path).eq(&root));
+
+        if has_nested || has_root_dir_entry {
+            Some(root)
+        } else {
+            None
+        }
+    }
+
+    fn auto_extract_base_name(archive_path: &Path) -> String {
+        let file_name = archive_path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or("archive")
+            .to_string();
+        let lower = file_name.to_ascii_lowercase();
+
+        let suffixes = [
+            ".tar.gz", ".tar.zst", ".tgz", ".tzst", ".zip", ".7z", ".jar", ".war", ".tar",
+        ];
+        for suffix in suffixes {
+            if lower.ends_with(suffix) && file_name.len() > suffix.len() {
+                let base = &file_name[..file_name.len() - suffix.len()];
+                if !base.trim().is_empty() {
+                    return base.to_string();
+                }
+            }
+        }
+
+        archive_path
+            .file_stem()
+            .and_then(OsStr::to_str)
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("archive")
+            .to_string()
+    }
+
+    fn next_unique_extract_dir(base_dir: &Path, desired_name: &str) -> PathBuf {
+        let seed = desired_name.trim();
+        let base_name = if seed.is_empty() { "archive" } else { seed };
+        let mut index = 0usize;
+        loop {
+            let name = if index == 0 {
+                base_name.to_string()
+            } else {
+                format!("{}_({})", base_name, index)
+            };
+            let candidate = base_dir.join(name);
+            if !candidate.exists() {
+                return candidate;
+            }
+            index += 1;
+        }
+    }
+
+    fn build_auto_extract_request(
+        archive_path: &Path,
+        base_dir: &Path,
+        password: Option<&str>,
+    ) -> Result<ArchiveExtractRequest> {
+        if !base_dir.exists() || !base_dir.is_dir() {
+            return Err(BokslDirError::ArchiveExtractFailed {
+                path: archive_path.to_path_buf(),
+                reason: format!(
+                    "Destination directory does not exist: {}",
+                    base_dir.display()
+                ),
+            });
+        }
+
+        let entries = list_entries(archive_path, password)?;
+        let single_root_dir = Self::detect_single_root_dir(&entries);
+        let dest_dir = if single_root_dir.is_some() {
+            base_dir.to_path_buf()
+        } else {
+            let desired = Self::auto_extract_base_name(archive_path);
+            let target_dir = Self::next_unique_extract_dir(base_dir, &desired);
+            fs::create_dir_all(&target_dir).map_err(BokslDirError::Io)?;
+            target_dir
+        };
+
+        Ok(ArchiveExtractRequest {
+            archive_path: archive_path.to_path_buf(),
+            dest_dir,
+            password: password.map(|s| s.to_string()),
+            overwrite_existing: false,
+            overwrite_entries: Vec::new(),
+            skip_existing_entries: Vec::new(),
+            skip_all_existing: false,
+        })
+    }
+
+    /// 압축 해제 시작 (za, 자동 대상 폴더)
+    pub fn start_archive_extract_auto(&mut self) {
+        let archive_path = match self.focused_open_target() {
+            Ok(path) => path,
+            Err(reason) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error("Auto extract archive", None, &reason, ""),
+                ));
+                return;
+            }
+        };
+        let Some(format) = detect_archive_format(&archive_path) else {
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                Self::format_user_error(
+                    "Auto extract archive",
+                    Some(&archive_path),
+                    "Unsupported archive format",
+                    "Supported: zip/tar/tar.gz/tar.zst/7z/jar/war",
+                ),
+            ));
+            return;
+        };
+
+        let base_dir = self.active_panel_state().current_path.clone();
+        match Self::build_auto_extract_request(&archive_path, &base_dir, None) {
+            Ok(request) => {
+                self.prepare_archive_extract_request(request);
+            }
+            Err(BokslDirError::ArchivePasswordRequired { .. }) if supports_password(format) => {
+                self.archive_flow = Some(ArchiveFlowContext::ExtractAutoNeedsPassword {
+                    archive_path,
+                    base_dir,
+                });
+                self.dialog = Some(DialogKind::archive_password_input("Archive Password"));
+            }
+            Err(err) => {
+                self.archive_flow = None;
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error(
+                        "Auto extract archive",
+                        Some(&archive_path),
+                        &err.to_string(),
+                        "",
+                    ),
+                ));
+            }
+        }
+    }
+
+    fn show_archive_extract_conflict_dialog(
+        &mut self,
+        request: ArchiveExtractRequest,
+        conflicts: Vec<String>,
+        current_index: usize,
+    ) {
+        if let Some(source_rel_path) = conflicts.get(current_index) {
+            self.archive_flow = Some(ArchiveFlowContext::ExtractConflictPrompt {
+                request: request.clone(),
+                conflicts: conflicts.clone(),
+                current_index,
+            });
+            self.dialog = Some(DialogKind::conflict(
+                PathBuf::from(source_rel_path),
+                request.dest_dir.join(source_rel_path),
+            ));
+            return;
+        }
+
+        self.archive_flow = None;
+        self.start_archive_extract_worker(request);
+    }
+
+    fn prepare_archive_extract_request(&mut self, request: ArchiveExtractRequest) {
+        match list_extract_conflicts(
+            &request.archive_path,
+            &request.dest_dir,
+            request.password.as_deref(),
+        ) {
+            Ok(conflicts) if conflicts.is_empty() => {
+                self.archive_flow = None;
+                self.start_archive_extract_worker(request);
+            }
+            Ok(conflicts) => {
+                self.show_archive_extract_conflict_dialog(request, conflicts, 0);
+            }
+            Err(err) => {
+                self.archive_flow = None;
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error("Extract archive", None, &err.to_string(), ""),
+                ));
+            }
+        }
+    }
+
+    /// 압축 파일 미리보기 시작 (포커스된 압축 파일에서 Enter)
+    pub fn start_archive_preview(&mut self) {
+        let archive_path = match self.focused_open_target() {
+            Ok(path) => path,
+            Err(reason) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error("Preview archive", None, &reason, ""),
+                ));
+                return;
+            }
+        };
+        let Some(format) = detect_archive_format(&archive_path) else {
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                Self::format_user_error(
+                    "Preview archive",
+                    Some(&archive_path),
+                    "Unsupported archive format",
+                    "Supported: zip/tar/tar.gz/tar.zst/7z/jar/war",
+                ),
+            ));
+            return;
+        };
+
+        match self.enter_archive_panel_view(&archive_path, None) {
+            Ok(()) => {}
+            Err(err) => {
+                if supports_password(format)
+                    && matches!(err, BokslDirError::ArchivePasswordRequired { .. })
+                {
+                    self.archive_flow = Some(ArchiveFlowContext::PreviewNeedsPassword {
+                        archive_path,
+                        panel: self.active_panel(),
+                    });
+                    self.dialog = Some(DialogKind::archive_password_input("Archive Password"));
+                } else {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        Self::format_user_error(
+                            "Preview archive",
+                            Some(&archive_path),
+                            &err.to_string(),
+                            "",
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn panel_state_by_slot_mut(&mut self, slot: PanelSlot) -> &mut PanelState {
+        match slot {
+            PanelSlot::Left => self.left_tabs.active_mut(),
+            PanelSlot::Right => self.right_tabs.active_mut(),
+        }
+    }
+
+    fn panel_state_by_slot(&self, slot: PanelSlot) -> &PanelState {
+        match slot {
+            PanelSlot::Left => self.left_tabs.active(),
+            PanelSlot::Right => self.right_tabs.active(),
+        }
+    }
+
+    fn is_active_panel_archive_view(&self) -> bool {
+        self.archive_panel_view
+            .as_ref()
+            .is_some_and(|v| v.panel == PanelSlot::from(self.active_panel()))
+    }
+
+    fn normalize_archive_entry_path(path: &str) -> String {
+        let trimmed = path.replace('\\', "/");
+        trimmed.trim_matches('/').to_string()
+    }
+
+    fn build_archive_panel_entries(
+        all_entries: &[ArchiveEntry],
+        current_dir: &str,
+    ) -> Vec<crate::models::file_entry::FileEntry> {
+        use crate::models::file_entry::{FileEntry, FileType};
+        use std::collections::BTreeMap;
+        use std::time::SystemTime;
+
+        let mut map: BTreeMap<String, (bool, u64)> = BTreeMap::new();
+        let prefix = if current_dir.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", current_dir)
+        };
+
+        for entry in all_entries {
+            let normalized = Self::normalize_archive_entry_path(&entry.path);
+            if normalized.is_empty() {
+                continue;
+            }
+            if !prefix.is_empty() && !normalized.starts_with(&prefix) {
+                continue;
+            }
+            let rest = if prefix.is_empty() {
+                normalized.as_str()
+            } else {
+                &normalized[prefix.len()..]
+            };
+            if rest.is_empty() {
+                continue;
+            }
+            let mut split = rest.splitn(2, '/');
+            let first = split.next().unwrap_or_default();
+            let has_more = split.next().is_some();
+            let full_rel = if current_dir.is_empty() {
+                first.to_string()
+            } else {
+                format!("{}/{}", current_dir, first)
+            };
+            let is_dir = entry.is_dir || has_more;
+            let size = if is_dir { 0 } else { entry.size };
+            map.entry(full_rel)
+                .and_modify(|v| {
+                    v.0 = v.0 || is_dir;
+                    if !v.0 {
+                        v.1 = size;
+                    }
+                })
+                .or_insert((is_dir, size));
+        }
+
+        let mut entries: Vec<FileEntry> = map
+            .into_iter()
+            .map(|(rel, (is_dir, size))| {
+                let name = rel
+                    .rsplit('/')
+                    .next()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| rel.clone());
+                FileEntry::new(
+                    name,
+                    PathBuf::from(rel),
+                    if is_dir {
+                        FileType::Directory
+                    } else {
+                        FileType::File
+                    },
+                    size,
+                    SystemTime::now(),
+                    None,
+                    false,
+                )
+            })
+            .collect();
+
+        entries.sort_by(|a, b| {
+            let dir_cmp = b.is_directory().cmp(&a.is_directory());
+            if dir_cmp != std::cmp::Ordering::Equal {
+                return dir_cmp;
+            }
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        });
+        entries
+    }
+
+    fn apply_archive_view_to_panel(&mut self, view: &ArchivePanelView) {
+        let display_path = if view.current_dir.is_empty() {
+            format!("{}::/", view.archive_path.display())
+        } else {
+            format!("{}::/{}", view.archive_path.display(), view.current_dir)
+        };
+        let entries = Self::build_archive_panel_entries(&view.all_entries, &view.current_dir);
+        let panel = self.panel_state_by_slot_mut(view.panel);
+        panel.current_path = PathBuf::from(display_path);
+        panel.entries = entries;
+        panel.selected_items.clear();
+        panel.selected_index = 0;
+        panel.scroll_offset = 0;
+    }
+
+    fn enter_archive_panel_view(
+        &mut self,
+        archive_path: &Path,
+        password: Option<&str>,
+    ) -> Result<()> {
+        let entries = list_entries(archive_path, password)?;
+        let panel = PanelSlot::from(self.active_panel());
+        let base_dir = archive_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        let view = ArchivePanelView {
+            panel,
+            archive_path: archive_path.to_path_buf(),
+            base_dir,
+            current_dir: String::new(),
+            all_entries: entries,
+            password: password.map(|s| s.to_string()),
+        };
+        self.apply_archive_view_to_panel(&view);
+        self.archive_panel_view = Some(view);
+        self.dialog = None;
+        Ok(())
+    }
+
+    fn archive_view_go_parent(&mut self) -> bool {
+        let active = PanelSlot::from(self.active_panel());
+        let Some(mut view) = self.archive_panel_view.clone() else {
+            return false;
+        };
+        if view.panel != active {
+            return false;
+        }
+
+        if view.current_dir.is_empty() {
+            let archive_name = view
+                .archive_path
+                .file_name()
+                .and_then(OsStr::to_str)
+                .map(|s| s.to_string());
+            let filesystem = FileSystem::new();
+            let panel = self.panel_state_by_slot_mut(view.panel);
+            if panel
+                .change_directory(view.base_dir.clone(), &filesystem)
+                .is_ok()
+            {
+                if let Some(name) = archive_name {
+                    let has_parent = panel.current_path.parent().is_some();
+                    let offset = if has_parent { 1 } else { 0 };
+                    if let Some(idx) = panel.entries.iter().position(|e| e.name == name) {
+                        panel.selected_index = idx + offset;
+                    }
+                }
+            }
+            self.archive_panel_view = None;
+            return true;
+        }
+
+        if let Some(pos) = view.current_dir.rfind('/') {
+            view.current_dir = view.current_dir[..pos].to_string();
+        } else {
+            view.current_dir.clear();
+        }
+        self.apply_archive_view_to_panel(&view);
+        self.archive_panel_view = Some(view);
+        true
+    }
+
+    fn archive_view_enter_selected(&mut self) -> bool {
+        let active = PanelSlot::from(self.active_panel());
+        let Some(mut view) = self.archive_panel_view.clone() else {
+            return false;
+        };
+        if view.panel != active {
+            return false;
+        }
+
+        let panel = self.panel_state_by_slot(active);
+        let has_parent = true;
+        if panel.selected_index == 0 && has_parent {
+            return self.archive_view_go_parent();
+        }
+        let entry_index = panel.selected_index.saturating_sub(1);
+        let Some(entry) = panel.entries.get(entry_index) else {
+            return true;
+        };
+        if entry.is_directory() {
+            view.current_dir = entry.path.to_string_lossy().to_string();
+            self.apply_archive_view_to_panel(&view);
+            self.archive_panel_view = Some(view);
+        }
+        true
+    }
+
+    fn start_archive_copy_dialog(&mut self) {
+        let Some(view) = self.archive_panel_view.clone() else {
+            return;
+        };
+        if view.panel != PanelSlot::from(self.active_panel()) {
+            self.start_file_operation(OperationType::Copy);
+            return;
+        }
+        let panel = self.panel_state_by_slot(view.panel);
+        let has_parent = true;
+        let selected_entries: Vec<FileEntry> = if !panel.selected_items.is_empty() {
+            panel.selected_entries().into_iter().cloned().collect()
+        } else {
+            let idx = panel.selected_index;
+            if has_parent && idx == 0 {
+                Vec::new()
+            } else {
+                panel
+                    .entries
+                    .get(idx.saturating_sub(1))
+                    .cloned()
+                    .into_iter()
+                    .collect()
+            }
+        };
+        if selected_entries.is_empty() {
+            self.dialog = Some(DialogKind::message(
+                "Information",
+                "No archive entries selected for copy.",
+            ));
+            return;
+        }
+        let dest_dir = self.inactive_panel_state().current_path.clone();
+        let dest_path = dest_dir.to_string_lossy().to_string();
+        self.archive_flow = Some(ArchiveFlowContext::CopyFromPanel {
+            view,
+            selected_entries,
+        });
+        self.dialog = Some(DialogKind::operation_path_input(
+            "Copy", "Copy to:", dest_path, dest_dir,
+        ));
+        self.update_input_completion_state();
+    }
+
+    fn copy_from_archive_view_to_dest(
+        &mut self,
+        view: &ArchivePanelView,
+        selected_entries: &[FileEntry],
+        dest_dir: &Path,
+    ) {
+        let temp_root = std::env::temp_dir().join(format!(
+            "boksldir-archive-copy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        if std::fs::create_dir_all(&temp_root).is_err() {
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                "Failed to prepare temporary extraction directory.",
+            ));
+            return;
+        }
+
+        let (tx, _rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let extract_result = extract_archive(
+            &ArchiveExtractRequest {
+                archive_path: view.archive_path.clone(),
+                dest_dir: temp_root.clone(),
+                password: view.password.clone(),
+                overwrite_existing: false,
+                overwrite_entries: Vec::new(),
+                skip_existing_entries: Vec::new(),
+                skip_all_existing: false,
+            },
+            tx,
+            cancel,
+        );
+        if let Err(err) = extract_result {
+            let _ = std::fs::remove_dir_all(&temp_root);
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                Self::format_user_error(
+                    "Copy from archive",
+                    Some(&view.archive_path),
+                    &err.to_string(),
+                    "",
+                ),
+            ));
+            return;
+        }
+
+        let sources: Vec<PathBuf> = selected_entries
+            .iter()
+            .map(|entry| temp_root.join(&entry.path))
+            .filter(|path| path.exists())
+            .collect();
+        if sources.is_empty() {
+            let _ = std::fs::remove_dir_all(&temp_root);
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                "No extractable archive entries were found.",
+            ));
+            return;
+        }
+
+        self.archive_copy_temp_dir = Some(temp_root);
+        let mut pending =
+            PendingOperation::new(OperationType::Copy, sources, dest_dir.to_path_buf());
+        self.prepare_and_start_operation(&mut pending, dest_dir);
+        self.pending_operation = Some(pending);
+    }
+
+    fn cleanup_archive_copy_temp_dir(&mut self) {
+        if let Some(path) = self.archive_copy_temp_dir.take() {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+
+    fn open_archive_preview_list(
+        &mut self,
+        archive_path: &Path,
+        password: Option<&str>,
+    ) -> Result<()> {
+        let mut entries = list_entries(archive_path, password)?;
+        let truncated = entries.len() > 5000;
+        if truncated {
+            entries.truncate(5000);
+        }
+        let items: Vec<(String, String)> = entries
+            .into_iter()
+            .map(|e| {
+                let size = if e.is_dir {
+                    "<DIR>".to_string()
+                } else {
+                    crate::utils::formatter::format_file_size(e.size)
+                };
+                (e.path, size)
+            })
+            .collect();
+        let archive_name = archive_path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or("archive")
+            .to_string();
+        self.dialog = Some(DialogKind::archive_preview_list(
+            archive_name,
+            items,
+            truncated,
+        ));
+        Ok(())
     }
 
     /// 경로 직접 이동 시작 (gp)
@@ -1738,17 +2614,30 @@ impl App {
     }
 
     fn update_input_completion_state(&mut self) {
-        let (value, cursor_pos, base_path) = match &self.dialog {
+        let (value, cursor_pos, base_path, purpose, mask_input) = match &self.dialog {
             Some(DialogKind::Input {
                 value,
                 cursor_pos,
                 base_path,
+                purpose,
+                mask_input,
                 ..
-            }) => (value.clone(), *cursor_pos, base_path.clone()),
+            }) => (
+                value.clone(),
+                *cursor_pos,
+                base_path.clone(),
+                *purpose,
+                *mask_input,
+            ),
             _ => return,
         };
 
-        let completion_candidates = self.collect_input_completion_candidates(&value, &base_path);
+        let use_completion = !mask_input && !matches!(purpose, InputPurpose::ArchivePassword);
+        let completion_candidates = if use_completion {
+            self.collect_input_completion_candidates(&value, &base_path)
+        } else {
+            Vec::new()
+        };
         let completion_index = if completion_candidates.is_empty() {
             None
         } else {
@@ -1988,6 +2877,9 @@ impl App {
                         .filesystem
                         .move_file(&file_entry.source, &file_entry.dest),
                     OperationType::Delete => unreachable!("Delete uses process_next_delete"),
+                    OperationType::ArchiveCompress | OperationType::ArchiveExtract => {
+                        unreachable!("Archive uses process_next_archive")
+                    }
                 }
             }
             FlattenedEntryKind::SymlinkDirectory => {
@@ -2004,6 +2896,9 @@ impl App {
                         reason: message.to_string(),
                     }),
                     OperationType::Delete => unreachable!("Delete uses process_next_delete"),
+                    OperationType::ArchiveCompress | OperationType::ArchiveExtract => {
+                        unreachable!("Archive uses process_next_archive")
+                    }
                 }
             }
         };
@@ -2149,25 +3044,51 @@ impl App {
 
         match purpose {
             InputPurpose::OperationDestination => {
-                let Some(mut pending) = self.pending_operation.take() else {
-                    self.close_dialog();
-                    return;
-                };
+                if let Some(mut pending) = self.pending_operation.take() {
+                    if let Err(error_msg) = Self::validate_operation_destination(
+                        &pending.sources,
+                        pending.operation_type,
+                        &resolved_path,
+                        &resolved_path_str,
+                    ) {
+                        self.dialog = Some(DialogKind::error("Error", error_msg));
+                        self.pending_operation = Some(pending);
+                        return;
+                    }
 
-                if let Err(error_msg) = Self::validate_operation_destination(
-                    &pending.sources,
-                    pending.operation_type,
-                    &resolved_path,
-                    &resolved_path_str,
-                ) {
-                    self.dialog = Some(DialogKind::error("Error", error_msg));
+                    pending.dest_dir = resolved_path.clone();
+                    self.prepare_and_start_operation(&mut pending, &resolved_path);
                     self.pending_operation = Some(pending);
                     return;
                 }
 
-                pending.dest_dir = resolved_path.clone();
-                self.prepare_and_start_operation(&mut pending, &resolved_path);
-                self.pending_operation = Some(pending);
+                if let Some(ArchiveFlowContext::CopyFromPanel {
+                    view,
+                    selected_entries,
+                }) = self.archive_flow.clone()
+                {
+                    if !resolved_path.exists() {
+                        self.dialog = Some(DialogKind::error(
+                            "Error",
+                            format!("Destination path does not exist:\n{}", resolved_path_str),
+                        ));
+                        return;
+                    }
+                    if !resolved_path.is_dir() {
+                        self.dialog = Some(DialogKind::error(
+                            "Error",
+                            format!("Destination is not a directory:\n{}", resolved_path_str),
+                        ));
+                        return;
+                    }
+
+                    self.archive_flow = None;
+                    self.dialog = None;
+                    self.copy_from_archive_view_to_dest(&view, &selected_entries, &resolved_path);
+                    return;
+                }
+
+                self.close_dialog();
             }
             InputPurpose::GoToPath => {
                 if !resolved_path.exists() {
@@ -2194,6 +3115,326 @@ impl App {
                     ));
                 }
             }
+            InputPurpose::ArchiveCreatePath => {
+                let Some(flow) = self.archive_flow.clone() else {
+                    self.close_dialog();
+                    return;
+                };
+                let ArchiveFlowContext::CreatePending { sources } = flow else {
+                    self.close_dialog();
+                    return;
+                };
+
+                let Some(format) = detect_archive_format(&resolved_path) else {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!(
+                            "Unsupported archive format:\n{}\n\nSupported: zip/tar/tar.gz/tar.zst/7z/jar/war",
+                            resolved_path_str
+                        ),
+                    ));
+                    return;
+                };
+
+                let request = ArchiveCreateRequest {
+                    sources,
+                    output_path: resolved_path.clone(),
+                    password: None,
+                };
+                if supports_password(format) {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        "Archive create path dialog is deprecated. Use Create Archive dialog.",
+                    ));
+                    return;
+                }
+                self.archive_flow = None;
+                self.start_archive_create_worker(request);
+            }
+            InputPurpose::ArchiveExtractDestination => {
+                let Some(flow) = self.archive_flow.clone() else {
+                    self.close_dialog();
+                    return;
+                };
+                let ArchiveFlowContext::ExtractPending {
+                    archive_path,
+                    format,
+                } = flow
+                else {
+                    self.close_dialog();
+                    return;
+                };
+
+                if !resolved_path.exists() {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!("Destination path does not exist:\n{}", resolved_path_str),
+                    ));
+                    return;
+                }
+                if !resolved_path.is_dir() {
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!("Destination is not a directory:\n{}", resolved_path_str),
+                    ));
+                    return;
+                }
+
+                let request = ArchiveExtractRequest {
+                    archive_path,
+                    dest_dir: resolved_path.clone(),
+                    password: None,
+                    overwrite_existing: false,
+                    overwrite_entries: Vec::new(),
+                    skip_existing_entries: Vec::new(),
+                    skip_all_existing: false,
+                };
+                if supports_password(format) {
+                    match list_entries(&request.archive_path, None) {
+                        Ok(_) => {
+                            self.prepare_archive_extract_request(request);
+                        }
+                        Err(BokslDirError::ArchivePasswordRequired { .. }) => {
+                            self.archive_flow =
+                                Some(ArchiveFlowContext::ExtractNeedsPassword { request });
+                            self.dialog =
+                                Some(DialogKind::archive_password_input("Archive Password"));
+                        }
+                        Err(err) => {
+                            self.archive_flow = None;
+                            self.dialog = Some(DialogKind::error(
+                                "Error",
+                                Self::format_user_error(
+                                    "Extract archive",
+                                    None,
+                                    &err.to_string(),
+                                    "",
+                                ),
+                            ));
+                        }
+                    }
+                } else {
+                    self.prepare_archive_extract_request(request);
+                }
+            }
+            InputPurpose::ArchivePassword => {
+                self.confirm_archive_password_input(dest_path_str);
+            }
+        }
+    }
+
+    fn start_archive_create_worker(&mut self, request: ArchiveCreateRequest) {
+        let (progress_tx, progress_rx) = mpsc::channel::<ArchiveProgressEvent>();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = Arc::clone(&cancel_flag);
+        let handle =
+            std::thread::spawn(move || create_archive(&request, progress_tx, cancel_for_worker));
+
+        let progress = OperationProgress::new(OperationType::ArchiveCompress, 0, 0);
+        self.archive_worker = Some(ArchiveWorkerState {
+            kind: ArchiveWorkerKind::Compress,
+            progress_rx,
+            join_handle: Some(handle),
+            cancel_flag,
+            progress: progress.clone(),
+        });
+        self.dialog = Some(DialogKind::progress(progress));
+    }
+
+    fn start_archive_extract_worker(&mut self, request: ArchiveExtractRequest) {
+        let (progress_tx, progress_rx) = mpsc::channel::<ArchiveProgressEvent>();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = Arc::clone(&cancel_flag);
+        let handle =
+            std::thread::spawn(move || extract_archive(&request, progress_tx, cancel_for_worker));
+
+        let progress = OperationProgress::new(OperationType::ArchiveExtract, 0, 0);
+        self.archive_worker = Some(ArchiveWorkerState {
+            kind: ArchiveWorkerKind::Extract,
+            progress_rx,
+            join_handle: Some(handle),
+            cancel_flag,
+            progress: progress.clone(),
+        });
+        self.dialog = Some(DialogKind::progress(progress));
+    }
+
+    pub fn confirm_archive_password_input(&mut self, password_input: String) {
+        let password = if password_input.is_empty() {
+            None
+        } else {
+            Some(password_input)
+        };
+        let Some(flow) = self.archive_flow.clone() else {
+            self.close_dialog();
+            return;
+        };
+
+        match flow {
+            ArchiveFlowContext::ExtractNeedsPassword { mut request } => {
+                request.password = password;
+                self.prepare_archive_extract_request(request);
+            }
+            ArchiveFlowContext::ExtractConflictPrompt { mut request, .. } => {
+                request.password = password;
+                self.prepare_archive_extract_request(request);
+            }
+            ArchiveFlowContext::ExtractAutoNeedsPassword {
+                archive_path,
+                base_dir,
+            } => match Self::build_auto_extract_request(
+                &archive_path,
+                &base_dir,
+                password.as_deref(),
+            ) {
+                Ok(request) => self.prepare_archive_extract_request(request),
+                Err(err) => {
+                    self.archive_flow = None;
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        Self::format_user_error(
+                            "Auto extract archive",
+                            Some(&archive_path),
+                            &err.to_string(),
+                            "Check password and archive integrity.",
+                        ),
+                    ));
+                }
+            },
+            ArchiveFlowContext::PreviewNeedsPassword {
+                archive_path,
+                panel,
+            } => {
+                self.archive_flow = None;
+                if panel != self.active_panel() {
+                    self.layout.set_active_panel(panel);
+                }
+                match self.enter_archive_panel_view(&archive_path, password.as_deref()) {
+                    Ok(()) => {}
+                    Err(err) => {
+                        self.dialog = Some(DialogKind::error(
+                            "Error",
+                            Self::format_user_error(
+                                "Preview archive",
+                                Some(&archive_path),
+                                &err.to_string(),
+                                "Check password and archive integrity.",
+                            ),
+                        ));
+                    }
+                }
+            }
+            _ => {
+                self.close_dialog();
+            }
+        }
+    }
+
+    /// 다음 압축 작업 진행 상태 반영 (메인 루프에서 호출)
+    pub fn process_next_archive(&mut self) {
+        let Some(worker) = &mut self.archive_worker else {
+            return;
+        };
+
+        while let Ok(event) = worker.progress_rx.try_recv() {
+            worker.progress.current_file = event.current_file;
+            worker.progress.files_completed = event.files_completed;
+            worker.progress.total_files = event.total_files;
+            worker.progress.bytes_copied = event.bytes_processed;
+            worker.progress.total_bytes = event.total_bytes;
+            worker.progress.items_processed = event.items_processed;
+            worker.progress.items_failed = event.items_failed;
+            self.dialog = Some(DialogKind::progress(worker.progress.clone()));
+        }
+
+        let is_finished = worker
+            .join_handle
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished);
+        if !is_finished {
+            return;
+        }
+
+        let mut worker = self.archive_worker.take().unwrap_or_else(|| unreachable!());
+        let Some(handle) = worker.join_handle.take() else {
+            return;
+        };
+        let kind = worker.kind;
+        let result =
+            handle.join().map_err(
+                |_| crate::utils::error::BokslDirError::ArchiveCreateFailed {
+                    path: PathBuf::from("archive"),
+                    reason: "Archive worker thread panicked".to_string(),
+                },
+            );
+        self.finish_archive_operation(kind, result);
+    }
+
+    fn finish_archive_operation(
+        &mut self,
+        kind: ArchiveWorkerKind,
+        join_result: std::result::Result<
+            std::result::Result<ArchiveSummary, crate::utils::error::BokslDirError>,
+            crate::utils::error::BokslDirError,
+        >,
+    ) {
+        self.refresh_both_panels();
+        self.active_panel_state_mut().deselect_all();
+        self.dialog = None;
+
+        let operation_name = match kind {
+            ArchiveWorkerKind::Compress => "Archive create",
+            ArchiveWorkerKind::Extract => "Archive extract",
+        };
+
+        match join_result {
+            Ok(Ok(summary)) => {
+                if summary.cancelled {
+                    self.set_toast(&format!(
+                        "{} cancelled ({}/{})",
+                        operation_name, summary.items_processed, summary.total_files
+                    ));
+                    return;
+                }
+                if summary.errors.is_empty() {
+                    self.set_toast(&format!(
+                        "{} completed: {}",
+                        operation_name,
+                        crate::utils::formatter::pluralize(
+                            summary.items_processed,
+                            "item",
+                            "items"
+                        )
+                    ));
+                } else {
+                    let preview: Vec<String> = summary.errors.iter().take(5).cloned().collect();
+                    let detail = if summary.errors.len() > 5 {
+                        format!(
+                            "{}\n... and {} more errors",
+                            preview.join("\n"),
+                            summary.errors.len() - 5
+                        )
+                    } else {
+                        preview.join("\n")
+                    };
+                    self.dialog = Some(DialogKind::error(
+                        "Error",
+                        format!(
+                            "{} completed with errors.\nSucceeded: {}\nFailed: {}\n\n{}",
+                            operation_name,
+                            summary.items_processed.saturating_sub(summary.items_failed),
+                            summary.items_failed,
+                            detail
+                        ),
+                    ));
+                }
+            }
+            Ok(Err(err)) | Err(err) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error(operation_name, None, &err.to_string(), ""),
+                ));
+            }
         }
     }
 
@@ -2202,11 +3443,13 @@ impl App {
         self.pending_operation
             .as_ref()
             .is_some_and(|p| p.state == OperationState::Processing)
+            || self.archive_worker.is_some()
     }
 
     /// 작업 완료 처리
     fn finish_operation(&mut self, mut pending: PendingOperation) {
         self.cleanup_moved_directories(&mut pending);
+        self.cleanup_archive_copy_temp_dir();
 
         // 패널 새로고침
         self.refresh_both_panels();
@@ -2273,6 +3516,51 @@ impl App {
 
     /// 충돌 해결 처리
     pub fn handle_conflict(&mut self, resolution: ConflictResolution) {
+        if let Some(ArchiveFlowContext::ExtractConflictPrompt {
+            mut request,
+            conflicts,
+            current_index,
+        }) = self.archive_flow.clone()
+        {
+            let current_path = conflicts.get(current_index).cloned();
+            match resolution {
+                ConflictResolution::Cancel => {
+                    self.close_dialog();
+                }
+                ConflictResolution::Overwrite => {
+                    if let Some(path) = current_path {
+                        request.overwrite_entries.push(path);
+                    }
+                    self.show_archive_extract_conflict_dialog(
+                        request,
+                        conflicts,
+                        current_index + 1,
+                    );
+                }
+                ConflictResolution::Skip => {
+                    if let Some(path) = current_path {
+                        request.skip_existing_entries.push(path);
+                    }
+                    self.show_archive_extract_conflict_dialog(
+                        request,
+                        conflicts,
+                        current_index + 1,
+                    );
+                }
+                ConflictResolution::OverwriteAll => {
+                    request.overwrite_existing = true;
+                    self.archive_flow = None;
+                    self.start_archive_extract_worker(request);
+                }
+                ConflictResolution::SkipAll => {
+                    request.skip_all_existing = true;
+                    self.archive_flow = None;
+                    self.start_archive_extract_worker(request);
+                }
+            }
+            return;
+        }
+
         match resolution {
             ConflictResolution::Cancel => {
                 if let Some(pending) = self.pending_operation.take() {
@@ -2463,6 +3751,11 @@ impl App {
         self.pending_operation
             .as_ref()
             .is_some_and(|p| p.operation_type == OperationType::Delete)
+    }
+
+    /// Archive 작업 여부 확인
+    pub fn is_archive_operation(&self) -> bool {
+        self.archive_worker.is_some()
     }
 
     // === DeleteConfirm 다이얼로그 입력 처리 ===
@@ -3599,6 +4892,105 @@ impl App {
         self.set_toast("History cleared");
     }
 
+    fn archive_preview_adjust_scroll(selected: usize, scroll: &mut usize, visible_height: usize) {
+        if visible_height == 0 {
+            *scroll = 0;
+            return;
+        }
+        if selected < *scroll {
+            *scroll = selected;
+        } else if selected >= *scroll + visible_height {
+            *scroll = selected + 1 - visible_height;
+        }
+    }
+
+    pub fn archive_preview_move_down(&mut self) {
+        if let Some(DialogKind::ArchivePreviewList {
+            items,
+            selected_index,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            if *selected_index + 1 < items.len() {
+                *selected_index += 1;
+                Self::archive_preview_adjust_scroll(*selected_index, scroll_offset, 12);
+            }
+        }
+    }
+
+    pub fn archive_preview_move_up(&mut self) {
+        if let Some(DialogKind::ArchivePreviewList {
+            selected_index,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            if *selected_index > 0 {
+                *selected_index -= 1;
+                Self::archive_preview_adjust_scroll(*selected_index, scroll_offset, 12);
+            }
+        }
+    }
+
+    pub fn archive_preview_page_down(&mut self) {
+        if let Some(DialogKind::ArchivePreviewList {
+            items,
+            selected_index,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            if items.is_empty() {
+                return;
+            }
+            *selected_index = (*selected_index + 12).min(items.len().saturating_sub(1));
+            Self::archive_preview_adjust_scroll(*selected_index, scroll_offset, 12);
+        }
+    }
+
+    pub fn archive_preview_page_up(&mut self) {
+        if let Some(DialogKind::ArchivePreviewList {
+            selected_index,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            *selected_index = selected_index.saturating_sub(12);
+            Self::archive_preview_adjust_scroll(*selected_index, scroll_offset, 12);
+        }
+    }
+
+    pub fn archive_preview_go_top(&mut self) {
+        if let Some(DialogKind::ArchivePreviewList {
+            selected_index,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            *selected_index = 0;
+            *scroll_offset = 0;
+        }
+    }
+
+    pub fn archive_preview_go_bottom(&mut self) {
+        if let Some(DialogKind::ArchivePreviewList {
+            items,
+            selected_index,
+            scroll_offset,
+            ..
+        }) = &mut self.dialog
+        {
+            if items.is_empty() {
+                *selected_index = 0;
+                *scroll_offset = 0;
+                return;
+            }
+            *selected_index = items.len() - 1;
+            Self::archive_preview_adjust_scroll(*selected_index, scroll_offset, 12);
+        }
+    }
+
     /// 히스토리 뒤로 이동 (Alt+Left)
     pub fn history_back(&mut self) {
         let (target_path, old_index) = {
@@ -4112,6 +5504,442 @@ impl App {
         }
     }
 
+    fn archive_create_field_count(use_password: bool) -> usize {
+        if use_password {
+            5
+        } else {
+            3
+        }
+    }
+
+    pub fn archive_create_dialog_next_field(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            use_password,
+            ..
+        }) = &mut self.dialog
+        {
+            let count = Self::archive_create_field_count(*use_password);
+            *focused_field = (*focused_field + 1) % count;
+        }
+    }
+
+    pub fn archive_create_dialog_prev_field(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            use_password,
+            ..
+        }) = &mut self.dialog
+        {
+            let count = Self::archive_create_field_count(*use_password);
+            *focused_field = if *focused_field == 0 {
+                count - 1
+            } else {
+                *focused_field - 1
+            };
+        }
+    }
+
+    pub fn archive_create_dialog_toggle_password(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            use_password,
+            focused_field,
+            ..
+        }) = &mut self.dialog
+        {
+            *use_password = !*use_password;
+            if !*use_password && *focused_field > 2 {
+                *focused_field = 2;
+            }
+        }
+    }
+
+    pub fn archive_create_dialog_toggle_button(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            selected_button, ..
+        }) = &mut self.dialog
+        {
+            *selected_button = if *selected_button == 0 { 1 } else { 0 };
+        }
+    }
+
+    pub fn archive_create_dialog_char(&mut self, c: char) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            path_value,
+            path_cursor_pos,
+            use_password,
+            password_value,
+            password_cursor_pos,
+            password_confirm_value,
+            password_confirm_cursor_pos,
+            ..
+        }) = &mut self.dialog
+        {
+            match *focused_field {
+                0 => {
+                    path_value.insert(*path_cursor_pos, c);
+                    *path_cursor_pos += c.len_utf8();
+                }
+                2 if *use_password => {
+                    password_value.insert(*password_cursor_pos, c);
+                    *password_cursor_pos += c.len_utf8();
+                }
+                3 if *use_password => {
+                    password_confirm_value.insert(*password_confirm_cursor_pos, c);
+                    *password_confirm_cursor_pos += c.len_utf8();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn archive_create_dialog_backspace(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            path_value,
+            path_cursor_pos,
+            use_password,
+            password_value,
+            password_cursor_pos,
+            password_confirm_value,
+            password_confirm_cursor_pos,
+            ..
+        }) = &mut self.dialog
+        {
+            match *focused_field {
+                0 => {
+                    if *path_cursor_pos > 0 {
+                        let prev = path_value[..*path_cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        path_value.remove(prev);
+                        *path_cursor_pos = prev;
+                    }
+                }
+                2 if *use_password => {
+                    if *password_cursor_pos > 0 {
+                        let prev = password_value[..*password_cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        password_value.remove(prev);
+                        *password_cursor_pos = prev;
+                    }
+                }
+                3 if *use_password => {
+                    if *password_confirm_cursor_pos > 0 {
+                        let prev = password_confirm_value[..*password_confirm_cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        password_confirm_value.remove(prev);
+                        *password_confirm_cursor_pos = prev;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn archive_create_dialog_delete(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            path_value,
+            path_cursor_pos,
+            use_password,
+            password_value,
+            password_cursor_pos,
+            password_confirm_value,
+            password_confirm_cursor_pos,
+            ..
+        }) = &mut self.dialog
+        {
+            match *focused_field {
+                0 => {
+                    if *path_cursor_pos < path_value.len() {
+                        path_value.remove(*path_cursor_pos);
+                    }
+                }
+                2 if *use_password => {
+                    if *password_cursor_pos < password_value.len() {
+                        password_value.remove(*password_cursor_pos);
+                    }
+                }
+                3 if *use_password => {
+                    if *password_confirm_cursor_pos < password_confirm_value.len() {
+                        password_confirm_value.remove(*password_confirm_cursor_pos);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn archive_create_dialog_left(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            path_value,
+            path_cursor_pos,
+            use_password,
+            password_value,
+            password_cursor_pos,
+            password_confirm_value,
+            password_confirm_cursor_pos,
+            ..
+        }) = &mut self.dialog
+        {
+            match *focused_field {
+                0 => {
+                    if *path_cursor_pos > 0 {
+                        *path_cursor_pos = path_value[..*path_cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                    }
+                }
+                2 if *use_password => {
+                    if *password_cursor_pos > 0 {
+                        *password_cursor_pos = password_value[..*password_cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                    }
+                }
+                3 if *use_password => {
+                    if *password_confirm_cursor_pos > 0 {
+                        *password_confirm_cursor_pos = password_confirm_value
+                            [..*password_confirm_cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                    }
+                }
+                4 => {
+                    self.archive_create_dialog_toggle_button();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn archive_create_dialog_right(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            path_value,
+            path_cursor_pos,
+            use_password,
+            password_value,
+            password_cursor_pos,
+            password_confirm_value,
+            password_confirm_cursor_pos,
+            ..
+        }) = &mut self.dialog
+        {
+            match *focused_field {
+                0 => {
+                    if *path_cursor_pos < path_value.len() {
+                        *path_cursor_pos = path_value[*path_cursor_pos..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| *path_cursor_pos + i)
+                            .unwrap_or(path_value.len());
+                    }
+                }
+                2 if *use_password => {
+                    if *password_cursor_pos < password_value.len() {
+                        *password_cursor_pos = password_value[*password_cursor_pos..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| *password_cursor_pos + i)
+                            .unwrap_or(password_value.len());
+                    }
+                }
+                3 if *use_password => {
+                    if *password_confirm_cursor_pos < password_confirm_value.len() {
+                        *password_confirm_cursor_pos = password_confirm_value
+                            [*password_confirm_cursor_pos..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| *password_confirm_cursor_pos + i)
+                            .unwrap_or(password_confirm_value.len());
+                    }
+                }
+                4 => {
+                    self.archive_create_dialog_toggle_button();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn archive_create_dialog_home(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            path_cursor_pos,
+            use_password,
+            password_cursor_pos,
+            password_confirm_cursor_pos,
+            ..
+        }) = &mut self.dialog
+        {
+            match *focused_field {
+                0 => *path_cursor_pos = 0,
+                2 if *use_password => *password_cursor_pos = 0,
+                3 if *use_password => *password_confirm_cursor_pos = 0,
+                _ => {}
+            }
+        }
+    }
+
+    pub fn archive_create_dialog_end(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            path_value,
+            path_cursor_pos,
+            use_password,
+            password_value,
+            password_cursor_pos,
+            password_confirm_value,
+            password_confirm_cursor_pos,
+            ..
+        }) = &mut self.dialog
+        {
+            match *focused_field {
+                0 => *path_cursor_pos = path_value.len(),
+                2 if *use_password => *password_cursor_pos = password_value.len(),
+                3 if *use_password => *password_confirm_cursor_pos = password_confirm_value.len(),
+                _ => {}
+            }
+        }
+    }
+
+    pub fn archive_create_dialog_delete_prev_word(&mut self) {
+        if let Some(DialogKind::ArchiveCreateOptions {
+            focused_field,
+            path_value,
+            path_cursor_pos,
+            use_password,
+            password_value,
+            password_cursor_pos,
+            password_confirm_value,
+            password_confirm_cursor_pos,
+            ..
+        }) = &mut self.dialog
+        {
+            match *focused_field {
+                0 => Self::delete_prev_word(path_value, path_cursor_pos),
+                2 if *use_password => Self::delete_prev_word(password_value, password_cursor_pos),
+                3 if *use_password => {
+                    Self::delete_prev_word(password_confirm_value, password_confirm_cursor_pos)
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn confirm_archive_create_dialog(&mut self) {
+        let Some(DialogKind::ArchiveCreateOptions {
+            path_value,
+            use_password,
+            password_value,
+            password_confirm_value,
+            base_path,
+            ..
+        }) = &self.dialog
+        else {
+            self.close_dialog();
+            return;
+        };
+
+        let path_value = path_value.clone();
+        let use_password = *use_password;
+        let password_value = password_value.clone();
+        let password_confirm_value = password_confirm_value.clone();
+        let base_path = base_path.clone();
+
+        let Some(flow) = self.archive_flow.clone() else {
+            self.close_dialog();
+            return;
+        };
+        let ArchiveFlowContext::CreatePending { sources } = flow else {
+            self.close_dialog();
+            return;
+        };
+
+        let resolved_path = self.resolve_input_path(&path_value, &base_path);
+        let resolved_path_str = resolved_path.to_string_lossy().to_string();
+
+        if resolved_path.exists() {
+            self.set_toast(&format!("Archive already exists: {}", resolved_path_str));
+            if let Some(DialogKind::ArchiveCreateOptions { focused_field, .. }) = &mut self.dialog {
+                *focused_field = 0;
+            }
+            return;
+        }
+
+        let Some(format) = detect_archive_format(&resolved_path) else {
+            self.dialog = Some(DialogKind::error(
+                "Error",
+                format!(
+                    "Unsupported archive format:\n{}\n\nSupported: zip/tar/tar.gz/tar.zst/7z/jar/war",
+                    resolved_path_str
+                ),
+            ));
+            return;
+        };
+
+        let password = if use_password {
+            if !supports_password(format) {
+                self.set_toast(&format!(
+                    "Format '{}' does not support password (zip/7z only).",
+                    format.display_name()
+                ));
+                if let Some(DialogKind::ArchiveCreateOptions { focused_field, .. }) =
+                    &mut self.dialog
+                {
+                    *focused_field = 1;
+                }
+                return;
+            }
+            if password_value.is_empty() {
+                self.set_toast("Password is empty.");
+                if let Some(DialogKind::ArchiveCreateOptions { focused_field, .. }) =
+                    &mut self.dialog
+                {
+                    *focused_field = 2;
+                }
+                return;
+            }
+            if password_value != password_confirm_value {
+                self.set_toast("Password and confirmation do not match.");
+                if let Some(DialogKind::ArchiveCreateOptions { focused_field, .. }) =
+                    &mut self.dialog
+                {
+                    *focused_field = 3;
+                }
+                return;
+            }
+            Some(password_value)
+        } else {
+            None
+        };
+
+        self.archive_flow = None;
+        self.start_archive_create_worker(ArchiveCreateRequest {
+            sources,
+            output_path: resolved_path,
+            password,
+        });
+    }
+
     /// 확인 다이얼로그: 버튼 선택 변경
     pub fn dialog_confirm_toggle(&mut self) {
         if let Some(DialogKind::Confirm {
@@ -4120,6 +5948,11 @@ impl App {
         {
             *selected_button = if *selected_button == 0 { 1 } else { 0 };
         }
+    }
+
+    /// 확인 다이얼로그 확정 처리
+    pub fn confirm_confirm_dialog(&mut self) {
+        self.close_dialog();
     }
 
     /// 충돌 다이얼로그: 옵션 이동
@@ -4204,6 +6037,10 @@ impl Default for App {
                 theme_manager: ThemeManager::new(),
                 dialog: None,
                 pending_operation: None,
+                archive_worker: None,
+                archive_flow: None,
+                archive_panel_view: None,
+                archive_copy_temp_dir: None,
                 pending_key: None,
                 pending_key_time: None,
                 toast_message: None,
@@ -4224,7 +6061,10 @@ mod tests {
     use super::*;
     use crate::utils::error::BokslDirError;
     use std::fs;
+    use std::io::Write;
     use tempfile::TempDir;
+    use zip::write::SimpleFileOptions as ZipFileOptions;
+    use zip::{AesMode, CompressionMethod, ZipWriter};
 
     #[cfg(unix)]
     use std::os::unix::fs as unix_fs;
@@ -4240,6 +6080,16 @@ mod tests {
             guard += 1;
         }
         assert!(guard < 10_000, "operation loop guard exceeded");
+    }
+
+    fn run_archive_operation_until_done(app: &mut App) {
+        let mut guard = 0usize;
+        while app.archive_worker.is_some() && guard < 10_000 {
+            app.process_next_archive();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            guard += 1;
+        }
+        assert!(guard < 10_000, "archive operation loop guard exceeded");
     }
 
     /// 재귀 경로 검사 테스트: 디렉토리를 자기 자신 내부로 복사
@@ -4469,6 +6319,469 @@ mod tests {
         let history = &app.active_panel_state().history_entries;
         assert!(history.contains(&root));
         assert!(history.contains(&app.active_panel_state().current_path));
+    }
+
+    #[test]
+    fn test_default_multi_archive_name_uses_current_dir_name_or_archive_for_root() {
+        let regular = App::default_multi_archive_name(Path::new("/tmp/my_docs"));
+        assert_eq!(regular, "my_docs.zip");
+
+        #[cfg(unix)]
+        {
+            let root = App::default_multi_archive_name(Path::new("/"));
+            assert_eq!(root, "archive.zip");
+        }
+    }
+
+    #[test]
+    fn test_next_unique_archive_path_recursively_avoids_duplicates() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        fs::write(base.join("archive.zip"), b"1").unwrap();
+        fs::write(base.join("archive_(1).zip"), b"2").unwrap();
+        fs::write(base.join("archive_(2).zip"), b"3").unwrap();
+
+        let next = App::next_unique_archive_path(base, "archive.zip");
+        assert_eq!(
+            next.file_name().and_then(OsStr::to_str),
+            Some("archive_(3).zip")
+        );
+    }
+
+    #[test]
+    fn test_confirm_archive_create_dialog_blocks_existing_output_path() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+
+        let src_file = base.join("a.txt");
+        fs::write(&src_file, b"a").unwrap();
+        let archive_path = base.join("base.zip");
+        fs::write(&archive_path, b"existing").unwrap();
+
+        app.archive_flow = Some(ArchiveFlowContext::CreatePending {
+            sources: vec![src_file],
+        });
+        app.dialog = Some(DialogKind::ArchiveCreateOptions {
+            path_value: archive_path.to_string_lossy().to_string(),
+            path_cursor_pos: archive_path.to_string_lossy().len(),
+            use_password: false,
+            password_value: String::new(),
+            password_cursor_pos: 0,
+            password_confirm_value: String::new(),
+            password_confirm_cursor_pos: 0,
+            focused_field: 4,
+            selected_button: 0,
+            base_path: base.clone(),
+        });
+
+        app.confirm_archive_create_dialog();
+
+        assert!(
+            app.archive_worker.is_none(),
+            "archive worker must not start"
+        );
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::ArchiveCreateOptions { .. })
+        ));
+        assert!(app
+            .toast_display()
+            .is_some_and(|msg| msg.contains("Archive already exists")));
+    }
+
+    #[test]
+    fn test_enter_selected_opens_archive_preview_for_archive_file() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+
+        let zip_path = base.join("sample.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("inside.txt", options).unwrap();
+        writer.write_all(b"hello").unwrap();
+        writer.finish().unwrap();
+
+        app.go_to_mount_point(base.clone());
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == zip_path)
+            .expect("archive entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+
+        app.enter_selected();
+
+        assert!(app.dialog.is_none());
+        assert!(app.archive_panel_view.is_some());
+        assert!(app
+            .active_panel_state()
+            .current_path
+            .to_string_lossy()
+            .contains("sample.zip::/"));
+    }
+
+    #[test]
+    fn test_start_copy_in_archive_view_opens_copy_destination_dialog() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let target = temp.path().join("target");
+        fs::create_dir_all(&base).unwrap();
+        fs::create_dir_all(&target).unwrap();
+
+        let zip_path = base.join("sample.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("inside.txt", options).unwrap();
+        writer.write_all(b"hello").unwrap();
+        writer.finish().unwrap();
+
+        app.go_to_mount_point(base.clone());
+        app.toggle_panel();
+        app.go_to_mount_point(target.clone());
+        app.toggle_panel();
+
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == zip_path)
+            .expect("archive entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+        app.enter_selected();
+        app.active_panel_state_mut().selected_index = 1;
+
+        app.start_copy();
+
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::Input {
+                purpose: InputPurpose::OperationDestination,
+                ..
+            })
+        ));
+        assert!(matches!(
+            app.archive_flow,
+            Some(ArchiveFlowContext::CopyFromPanel { .. })
+        ));
+    }
+
+    #[test]
+    fn test_archive_copy_shows_conflict_dialog_on_duplicate_destination() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        let target = temp.path().join("target");
+        fs::create_dir_all(&base).unwrap();
+        fs::create_dir_all(&target).unwrap();
+
+        let zip_path = base.join("sample.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("inside.txt", options).unwrap();
+        writer.write_all(b"from-archive").unwrap();
+        writer.finish().unwrap();
+        fs::write(target.join("inside.txt"), "existing").unwrap();
+
+        app.go_to_mount_point(base.clone());
+        app.toggle_panel();
+        app.go_to_mount_point(target.clone());
+        app.toggle_panel();
+
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == zip_path)
+            .expect("archive entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+        app.enter_selected();
+        app.active_panel_state_mut().selected_index = 1;
+
+        app.start_copy();
+        app.confirm_input_dialog(target.to_string_lossy().to_string());
+        app.process_next_file();
+
+        assert!(matches!(app.dialog, Some(DialogKind::Conflict { .. })));
+    }
+
+    #[test]
+    fn test_extract_no_password_zip_does_not_prompt_password() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let archive_path = temp.path().join("plain.zip");
+        let dest_dir = temp.path().join("out");
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("inside.txt", options).unwrap();
+        writer.write_all(b"hello").unwrap();
+        writer.finish().unwrap();
+
+        app.archive_flow = Some(ArchiveFlowContext::ExtractPending {
+            archive_path: archive_path.clone(),
+            format: ArchiveFormat::Zip,
+        });
+        app.dialog = Some(DialogKind::archive_extract_path_input(
+            dest_dir.to_string_lossy().to_string(),
+            temp.path().to_path_buf(),
+        ));
+
+        app.confirm_input_dialog(dest_dir.to_string_lossy().to_string());
+
+        assert!(!matches!(
+            app.dialog,
+            Some(DialogKind::Input {
+                purpose: InputPurpose::ArchivePassword,
+                ..
+            })
+        ));
+        assert!(app.archive_worker.is_some(), "extract worker should start");
+    }
+
+    #[test]
+    fn test_start_archive_extract_uses_inactive_panel_path_as_default() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let left_dir = temp.path().join("left");
+        let right_dir = temp.path().join("right");
+        fs::create_dir_all(&left_dir).unwrap();
+        fs::create_dir_all(&right_dir).unwrap();
+
+        let archive_path = left_dir.join("plain.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("inside.txt", options).unwrap();
+        writer.write_all(b"hello").unwrap();
+        writer.finish().unwrap();
+
+        app.go_to_mount_point(left_dir.clone());
+        app.toggle_panel();
+        app.go_to_mount_point(right_dir.clone());
+        app.toggle_panel();
+
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == archive_path)
+            .expect("archive entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+
+        app.start_archive_extract();
+
+        match &app.dialog {
+            Some(DialogKind::Input {
+                value,
+                base_path,
+                purpose,
+                ..
+            }) => {
+                assert_eq!(*purpose, InputPurpose::ArchiveExtractDestination);
+                assert_eq!(Path::new(value), right_dir.as_path());
+                assert_eq!(base_path, &right_dir);
+            }
+            other => panic!("expected extract input dialog, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_extract_encrypted_zip_prompts_password() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let archive_path = temp.path().join("secret.zip");
+        let dest_dir = temp.path().join("out");
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .with_aes_encryption(AesMode::Aes256, "pw1234");
+        writer.start_file("inside.txt", options).unwrap();
+        writer.write_all(b"secret").unwrap();
+        writer.finish().unwrap();
+
+        app.archive_flow = Some(ArchiveFlowContext::ExtractPending {
+            archive_path: archive_path.clone(),
+            format: ArchiveFormat::Zip,
+        });
+        app.dialog = Some(DialogKind::archive_extract_path_input(
+            dest_dir.to_string_lossy().to_string(),
+            temp.path().to_path_buf(),
+        ));
+
+        app.confirm_input_dialog(dest_dir.to_string_lossy().to_string());
+
+        assert!(matches!(
+            app.dialog,
+            Some(DialogKind::Input {
+                purpose: InputPurpose::ArchivePassword,
+                ..
+            })
+        ));
+        assert!(matches!(
+            app.archive_flow,
+            Some(ArchiveFlowContext::ExtractNeedsPassword { .. })
+        ));
+    }
+
+    #[test]
+    fn test_extract_conflict_prompts_file_exists_dialog() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let archive_path = temp.path().join("plain.zip");
+        let dest_dir = temp.path().join("out");
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("inside.txt", options).unwrap();
+        writer.write_all(b"new-content").unwrap();
+        writer.finish().unwrap();
+        fs::write(dest_dir.join("inside.txt"), "old-content").unwrap();
+
+        app.archive_flow = Some(ArchiveFlowContext::ExtractPending {
+            archive_path: archive_path.clone(),
+            format: ArchiveFormat::Zip,
+        });
+        app.dialog = Some(DialogKind::archive_extract_path_input(
+            dest_dir.to_string_lossy().to_string(),
+            temp.path().to_path_buf(),
+        ));
+
+        app.confirm_input_dialog(dest_dir.to_string_lossy().to_string());
+
+        assert!(matches!(app.dialog, Some(DialogKind::Conflict { .. })));
+        assert!(matches!(
+            app.archive_flow,
+            Some(ArchiveFlowContext::ExtractConflictPrompt { .. })
+        ));
+    }
+
+    #[test]
+    fn test_extract_conflict_confirm_overwrites_destination() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let archive_path = temp.path().join("plain.zip");
+        let dest_dir = temp.path().join("out");
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("inside.txt", options).unwrap();
+        writer.write_all(b"new-content").unwrap();
+        writer.finish().unwrap();
+        fs::write(dest_dir.join("inside.txt"), "old-content").unwrap();
+
+        app.archive_flow = Some(ArchiveFlowContext::ExtractPending {
+            archive_path: archive_path.clone(),
+            format: ArchiveFormat::Zip,
+        });
+        app.dialog = Some(DialogKind::archive_extract_path_input(
+            dest_dir.to_string_lossy().to_string(),
+            temp.path().to_path_buf(),
+        ));
+
+        app.confirm_input_dialog(dest_dir.to_string_lossy().to_string());
+        app.handle_conflict(ConflictResolution::Overwrite);
+        run_archive_operation_until_done(&mut app);
+
+        assert_eq!(
+            fs::read_to_string(dest_dir.join("inside.txt")).unwrap(),
+            "new-content"
+        );
+    }
+
+    #[test]
+    fn test_auto_extract_multi_root_uses_archive_name_directory() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+
+        let archive_path = base.join("multi.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("a.txt", options).unwrap();
+        writer.write_all(b"a").unwrap();
+        writer.start_file("b.txt", options).unwrap();
+        writer.write_all(b"b").unwrap();
+        writer.finish().unwrap();
+
+        app.go_to_mount_point(base.clone());
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == archive_path)
+            .expect("archive entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+
+        app.start_archive_extract_auto();
+        run_archive_operation_until_done(&mut app);
+
+        assert!(base.join("multi").join("a.txt").exists());
+        assert!(base.join("multi").join("b.txt").exists());
+        assert!(!base.join("a.txt").exists());
+    }
+
+    #[test]
+    fn test_auto_extract_single_root_extracts_into_root_directory() {
+        let mut app = make_test_app();
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+
+        let archive_path = base.join("single.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let options = ZipFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("docs/a.txt", options).unwrap();
+        writer.write_all(b"a").unwrap();
+        writer.finish().unwrap();
+
+        app.go_to_mount_point(base.clone());
+        let has_parent = app.active_panel_state().current_path.parent().is_some();
+        let offset = if has_parent { 1 } else { 0 };
+        let entry_index = app
+            .active_panel_state()
+            .entries
+            .iter()
+            .position(|e| e.path == archive_path)
+            .expect("archive entry should exist");
+        app.active_panel_state_mut().selected_index = entry_index + offset;
+
+        app.start_archive_extract_auto();
+        run_archive_operation_until_done(&mut app);
+
+        assert!(base.join("docs").join("a.txt").exists());
+        assert!(!base.join("single").join("docs").join("a.txt").exists());
     }
 
     #[test]

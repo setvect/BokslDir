@@ -57,6 +57,24 @@ pub enum BokslDirError {
     #[error("Open with default app failed: {path}: {reason}")]
     ExternalOpenFailed { path: PathBuf, reason: String },
 
+    #[error("Unsupported archive format: {path}")]
+    ArchiveUnsupportedFormat { path: PathBuf },
+
+    #[error("Archive create failed: {path}: {reason}")]
+    ArchiveCreateFailed { path: PathBuf, reason: String },
+
+    #[error("Archive extract failed: {path}: {reason}")]
+    ArchiveExtractFailed { path: PathBuf, reason: String },
+
+    #[error("Archive list failed: {path}: {reason}")]
+    ArchiveListFailed { path: PathBuf, reason: String },
+
+    #[error("Archive password required: {path}")]
+    ArchivePasswordRequired { path: PathBuf },
+
+    #[error("Archive invalid password: {path}: {reason}")]
+    ArchiveInvalidPassword { path: PathBuf, reason: String },
+
     #[error("Operation cancelled")]
     OperationCancelled,
 }

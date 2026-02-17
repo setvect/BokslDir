@@ -33,6 +33,10 @@ pub enum Action {
     MakeDirectory,
     Rename,
     ShowProperties,
+    ArchiveCompress,
+    ArchiveExtract,
+    ArchiveExtractAuto,
+    ArchivePreview,
     // Selection
     ToggleSelection,
     InvertSelection,
@@ -325,6 +329,38 @@ pub static ACTION_DEFS: &[ActionDef] = &[
             label: "Info",
             priority: 15,
         }),
+    },
+    ActionDef {
+        action: Action::ArchiveCompress,
+        id: "archive_compress",
+        label: "Compress archive",
+        category: ActionCategory::FileOperation,
+        shortcut_display: Some("zc"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::ArchiveExtract,
+        id: "archive_extract",
+        label: "Extract archive",
+        category: ActionCategory::FileOperation,
+        shortcut_display: Some("zx"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::ArchiveExtractAuto,
+        id: "archive_extract_auto",
+        label: "Auto extract archive",
+        category: ActionCategory::FileOperation,
+        shortcut_display: Some("za"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::ArchivePreview,
+        id: "archive_preview",
+        label: "Preview archive",
+        category: ActionCategory::FileOperation,
+        shortcut_display: None,
+        command_bar: None,
     },
     // Selection
     ActionDef {
@@ -965,6 +1001,22 @@ mod tests {
             Some(Action::OpenTerminalEditor)
         );
         assert_eq!(
+            Action::from_id("archive_compress"),
+            Some(Action::ArchiveCompress)
+        );
+        assert_eq!(
+            Action::from_id("archive_extract"),
+            Some(Action::ArchiveExtract)
+        );
+        assert_eq!(
+            Action::from_id("archive_extract_auto"),
+            Some(Action::ArchiveExtractAuto)
+        );
+        assert_eq!(
+            Action::from_id("archive_preview"),
+            Some(Action::ArchivePreview)
+        );
+        assert_eq!(
             Action::from_id("editor_preset_vi"),
             Some(Action::SetDefaultEditorVi)
         );
@@ -1089,6 +1141,15 @@ mod tests {
         assert_eq!(entries[0].0, "Navigation");
         let nav_items = &entries[0].1;
         assert!(nav_items.iter().any(|(k, _)| *k == "tn"));
+        let file_ops = entries
+            .iter()
+            .find(|(category, _)| *category == "File Operations")
+            .map(|(_, items)| items)
+            .expect("file operations section should exist");
+        assert!(file_ops.iter().any(|(k, _)| *k == "zc"));
+        assert!(file_ops.iter().any(|(k, _)| *k == "zx"));
+        assert!(file_ops.iter().any(|(k, _)| *k == "za"));
+        assert!(!file_ops.iter().any(|(k, _)| *k == "zl"));
     }
 
     #[test]
@@ -1098,6 +1159,10 @@ mod tests {
         assert_eq!(get_shortcut_display("goto_path"), Some("gp"));
         assert_eq!(get_shortcut_display("open_default"), Some("o"));
         assert_eq!(get_shortcut_display("open_terminal_editor"), Some("e"));
+        assert_eq!(get_shortcut_display("archive_compress"), Some("zc"));
+        assert_eq!(get_shortcut_display("archive_extract"), Some("zx"));
+        assert_eq!(get_shortcut_display("archive_extract_auto"), Some("za"));
+        assert_eq!(get_shortcut_display("archive_preview"), None);
         assert_eq!(get_shortcut_display("theme_dark"), None);
     }
 

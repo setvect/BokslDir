@@ -3,6 +3,8 @@
 Rust로 작성된 터미널 기반 듀얼 패널 파일 매니저입니다.
 키보드 중심으로 파일 탐색, 선택, 복사/이동/삭제 작업을 빠르게 수행할 수 있습니다.
 
+이 프로젝트는 [Claude Code](https://www.anthropic.com/claude-code)와 [Codex](https://openai.com/codex/)를 활용해 100% 바이브코딩으로 개발했습니다.
+
 ![복슬Dir 기본 화면](docs/images/user-manual/03-copy-dialog.png)
 
 ## 주요 기능

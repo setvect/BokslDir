@@ -81,6 +81,7 @@ impl App {
         match action {
             Action::Quit => self.quit(),
             Action::TogglePanel => self.toggle_panel(),
+            Action::ToggleLayout => self.toggle_layout_mode(),
             Action::MoveDown => self.move_selection_down(),
             Action::MoveUp => self.move_selection_up(),
             Action::GoToParent => self.go_to_parent(),

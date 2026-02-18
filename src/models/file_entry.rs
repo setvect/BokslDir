@@ -30,8 +30,14 @@ pub struct FileEntry {
     pub size: u64,
     /// 수정 시간
     pub modified: SystemTime,
+    /// 생성 시간 (플랫폼/파일시스템 미지원 시 modified와 동일)
+    pub created: SystemTime,
     /// 권한 (Unix 계열)
     pub permissions: Option<Permissions>,
+    /// 소유자 (표시 문자열, 예: uid 또는 username)
+    pub owner: Option<String>,
+    /// 그룹 (표시 문자열, 예: gid 또는 group name)
+    pub group: Option<String>,
     /// 숨김 파일 여부
     pub is_hidden: bool,
 }
@@ -44,6 +50,7 @@ impl FileEntry {
         file_type: FileType,
         size: u64,
         modified: SystemTime,
+        created: SystemTime,
         permissions: Option<Permissions>,
         is_hidden: bool,
     ) -> Self {
@@ -53,7 +60,10 @@ impl FileEntry {
             file_type,
             size,
             modified,
+            created,
             permissions,
+            owner: None,
+            group: None,
             is_hidden,
         }
     }
@@ -91,6 +101,7 @@ mod tests {
             FileType::File,
             1024,
             SystemTime::now(),
+            SystemTime::now(),
             None,
             false,
         );
@@ -109,6 +120,7 @@ mod tests {
             FileType::Directory,
             0,
             SystemTime::now(),
+            SystemTime::now(),
             None,
             false,
         );
@@ -121,6 +133,7 @@ mod tests {
             PathBuf::from("/tmp/file.txt"),
             FileType::File,
             100,
+            SystemTime::now(),
             SystemTime::now(),
             None,
             false,

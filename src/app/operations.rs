@@ -610,6 +610,7 @@ impl App {
                     },
                     size,
                     SystemTime::now(),
+                    SystemTime::now(),
                     None,
                     false,
                 )

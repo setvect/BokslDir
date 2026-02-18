@@ -25,8 +25,6 @@ pub struct StatusBar<'a> {
     selected_count: usize,
     /// 선택된 항목 총 크기 (포맷된 문자열)
     selected_size: &'a str,
-    /// 레이아웃 모드 표시 (싱글/듀얼)
-    layout_mode: &'a str,
     /// 대기 키 표시 (Phase 4)
     pending_key: Option<&'a str>,
     /// 토스트 메시지 (한글 IME 등)
@@ -62,7 +60,6 @@ impl<'a> Default for StatusBar<'a> {
             total_size: "0B",
             selected_count: 0,
             selected_size: "0B",
-            layout_mode: "DUAL",
             pending_key: None,
             toast: None,
             sort_info: None,
@@ -112,12 +109,6 @@ impl<'a> StatusBar<'a> {
     /// 선택된 항목 총 크기 설정
     pub fn selected_size(mut self, size: &'a str) -> Self {
         self.selected_size = size;
-        self
-    }
-
-    /// 레이아웃 모드 설정
-    pub fn layout_mode(mut self, mode: &'a str) -> Self {
-        self.layout_mode = mode;
         self
     }
 
@@ -279,19 +270,11 @@ impl Widget for StatusBar<'_> {
             String::new()
         };
 
-        // 오른쪽 정보: 레이아웃 모드 (넓은 화면에서만)
-        let layout_info = if w >= 60 {
-            format!("[{}] ", self.layout_mode)
-        } else {
-            String::new()
-        };
-
         // 가용 공간 계산 (unicode width 사용)
         let right_total_width = UnicodeWidthStr::width(ime_info_str.as_str())
             + UnicodeWidthStr::width(hidden_info_str.as_str())
             + UnicodeWidthStr::width(filter_info_str.as_str())
-            + UnicodeWidthStr::width(sort_info_str.as_str())
-            + UnicodeWidthStr::width(layout_info.as_str());
+            + UnicodeWidthStr::width(sort_info_str.as_str());
 
         let left_len = left_info.len() + selected_info.len() + pending_info.len();
         let padding_len =
@@ -311,11 +294,10 @@ impl Widget for StatusBar<'_> {
             Span::styled(&selected_info, Style::default().fg(self.warning_color)),
             Span::styled(&pending_info, Style::default().fg(self.accent_color)),
             Span::raw(padding),
-            Span::styled(ime_info_str, Style::default().fg(ime_color)),
             Span::styled(hidden_info_str, Style::default().fg(self.warning_color)),
             Span::styled(filter_info_str, Style::default().fg(self.success_color)),
             Span::styled(sort_info_str, Style::default().fg(self.accent_color)),
-            Span::styled(layout_info, Style::default().fg(self.muted_color)),
+            Span::styled(ime_info_str, Style::default().fg(ime_color)),
         ];
 
         let line = Line::from(spans);

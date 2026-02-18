@@ -22,6 +22,7 @@ pub enum Action {
     PageUp,
     PageDown,
     TogglePanel,
+    ToggleLayout,
     TabNew,
     TabClose,
     // File Operations
@@ -222,6 +223,14 @@ pub static ACTION_DEFS: &[ActionDef] = &[
             label: "Panel",
             priority: 54,
         }),
+    },
+    ActionDef {
+        action: Action::ToggleLayout,
+        id: "toggle_layout",
+        label: "Toggle panel layout",
+        category: ActionCategory::Navigation,
+        shortcut_display: Some("Ctrl+W"),
+        command_bar: None,
     },
     ActionDef {
         action: Action::TabNew,
@@ -738,6 +747,11 @@ fn build_key_bindings() -> Vec<KeyBinding> {
             action: Action::TogglePanel,
         },
         KeyBinding {
+            code: KeyCode::Char('w'),
+            modifiers: Some(KeyModifiers::CONTROL),
+            action: Action::ToggleLayout,
+        },
+        KeyBinding {
             code: KeyCode::F(9),
             modifiers: None,
             action: Action::OpenMenu,
@@ -1203,6 +1217,7 @@ mod tests {
             Action::from_id("bookmark_list"),
             Some(Action::ShowBookmarkList)
         );
+        assert_eq!(Action::from_id("toggle_layout"), Some(Action::ToggleLayout));
         assert_eq!(Action::from_id("nonexistent"), None);
     }
 
@@ -1259,6 +1274,10 @@ mod tests {
         assert_eq!(
             find_action(KeyModifiers::CONTROL, KeyCode::Char('b')),
             Some(Action::AddBookmark)
+        );
+        assert_eq!(
+            find_action(KeyModifiers::CONTROL, KeyCode::Char('w')),
+            Some(Action::ToggleLayout)
         );
     }
 

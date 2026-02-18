@@ -12,6 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 /// 커맨드 항목
 #[derive(Debug, Clone)]
@@ -35,7 +36,7 @@ impl CommandItem {
 
     /// 렌더링 시 필요한 너비 계산 ("key:label" + 구분자 1)
     fn display_width(&self) -> usize {
-        self.key.len() + 1 + self.label.len()
+        UnicodeWidthStr::width(self.key.as_str()) + 1 + UnicodeWidthStr::width(self.label.as_str())
     }
 }
 
@@ -111,7 +112,7 @@ impl Widget for CommandBar {
 
         // 우선순위 순서로 항목을 채워넣기 (화면 너비에 맞게)
         let padding = 1; // 왼쪽 패딩
-        let separator = 2; // 항목 간 구분자 " | "
+        let separator = 3; // 항목 간 구분자 " | "
         let mut used_width = padding;
         let mut visible_count = 0;
 
@@ -189,6 +190,13 @@ mod tests {
     fn test_display_width() {
         let item = CommandItem::new("y", "Copy");
         assert_eq!(item.display_width(), 6); // "y:Copy"
+    }
+
+    #[test]
+    fn test_display_width_uses_unicode_width() {
+        let item = CommandItem::new("키", "한글");
+        // "키:한글" => 2 + 1 + 4 = 7 (한글 1글자 폭=2)
+        assert_eq!(item.display_width(), 7);
     }
 
     #[test]

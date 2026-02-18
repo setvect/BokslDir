@@ -78,6 +78,9 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                         .theme(app.theme_manager.current());
                     f.render_widget(warning, size);
                 }
+                LayoutMode::SinglePanel => {
+                    render_main_ui(f, app);
+                }
                 LayoutMode::DualPanel => {
                     render_main_ui(f, app);
                 }
@@ -1041,7 +1044,6 @@ fn render_status_bar(f: &mut ratatui::Frame<'_>, app: &App, theme: &ui::Theme, a
         .total_size(&total_size)
         .selected_count(selected_count)
         .selected_size(&selected_size)
-        .layout_mode(app.layout_mode_str())
         .pending_key(pending_display.as_deref())
         .sort_info(Some(&sort_display))
         .filter_info(filter_display.as_deref())
@@ -1195,19 +1197,21 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
     let left_tab_count = app.panel_tab_count(ActivePanel::Left);
     let right_tab_count = app.panel_tab_count(ActivePanel::Right);
 
-    render_panel(
-        f,
-        app.left_active_panel_state(),
-        left_tab_count,
-        active_panel == ActivePanel::Left,
-        app.language(),
-        theme,
-        areas.left_panel,
-        app.icon_mode,
-        app.size_format,
-    );
+    if app.layout.is_dual_panel() || active_panel == ActivePanel::Left {
+        render_panel(
+            f,
+            app.left_active_panel_state(),
+            left_tab_count,
+            active_panel == ActivePanel::Left,
+            app.language(),
+            theme,
+            areas.left_panel,
+            app.icon_mode,
+            app.size_format,
+        );
+    }
 
-    if app.layout.is_dual_panel() {
+    if app.layout.is_dual_panel() || active_panel == ActivePanel::Right {
         render_panel(
             f,
             app.right_active_panel_state(),

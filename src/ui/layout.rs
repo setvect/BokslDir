@@ -2,7 +2,7 @@
 // Layout system - 반응형 레이아웃 시스템
 //
 // 터미널 크기에 따른 레이아웃 모드:
-// - 80+ cols: 듀얼 패널 모드
+// - 80+ cols: 듀얼/싱글 패널 모드 (사용자 전환)
 // - <80 cols: 경고 메시지 표시 (최소 요구사항 미충족)
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -18,6 +18,8 @@ pub const STANDARD_HEIGHT: u16 = 24;
 pub enum LayoutMode {
     /// 듀얼 패널 모드 (80+ cols)
     DualPanel,
+    /// 싱글 패널 모드 (80+ cols, 사용자 선택)
+    SinglePanel,
     /// 경고 모드 (터미널이 너무 작음)
     TooSmall,
 }
@@ -104,6 +106,8 @@ pub struct LayoutState {
     pub active_panel: ActivePanel,
     /// 패널 비율
     pub panel_ratio: PanelRatio,
+    /// 싱글 패널 선호 여부 (크기 조건 충족 시 적용)
+    pub single_panel_preferred: bool,
     /// 터미널 크기
     pub terminal_size: (u16, u16),
     /// 계산된 레이아웃 영역
@@ -116,6 +120,7 @@ impl Default for LayoutState {
             mode: LayoutMode::DualPanel,
             active_panel: ActivePanel::default(),
             panel_ratio: PanelRatio::default(),
+            single_panel_preferred: false,
             terminal_size: (80, 24),
             areas: LayoutAreas::default(),
         }
@@ -141,10 +146,12 @@ impl LayoutManager {
         }
     }
 
-    /// 터미널 크기에 따라 레이아웃 모드 결정
-    fn determine_mode(width: u16, height: u16) -> LayoutMode {
+    /// 터미널 크기/선호 상태에 따라 레이아웃 모드 결정
+    fn determine_mode(width: u16, height: u16, single_panel_preferred: bool) -> LayoutMode {
         if width < MIN_WIDTH || height < MIN_HEIGHT {
             LayoutMode::TooSmall
+        } else if single_panel_preferred {
+            LayoutMode::SinglePanel
         } else {
             LayoutMode::DualPanel
         }
@@ -156,7 +163,7 @@ impl LayoutManager {
         let height = area.height;
 
         self.state.terminal_size = (width, height);
-        self.state.mode = Self::determine_mode(width, height);
+        self.state.mode = Self::determine_mode(width, height, self.state.single_panel_preferred);
         self.state.areas = self.calculate_areas(area);
     }
 
@@ -167,6 +174,7 @@ impl LayoutManager {
                 warning: area,
                 ..Default::default()
             },
+            LayoutMode::SinglePanel => self.calculate_single_panel_areas(area),
             LayoutMode::DualPanel => self.calculate_dual_panel_areas(area),
         }
     }
@@ -259,6 +267,13 @@ impl LayoutManager {
         self.state.active_panel.toggle();
     }
 
+    /// 레이아웃 모드 전환 (듀얼 <-> 싱글)
+    pub fn toggle_layout_mode(&mut self) {
+        self.state.single_panel_preferred = !self.state.single_panel_preferred;
+        let (width, height) = self.state.terminal_size;
+        self.state.mode = Self::determine_mode(width, height, self.state.single_panel_preferred);
+    }
+
     /// 활성 패널 설정
     pub fn set_active_panel(&mut self, panel: ActivePanel) {
         self.state.active_panel = panel;
@@ -279,9 +294,9 @@ impl LayoutManager {
         matches!(self.state.mode, LayoutMode::DualPanel)
     }
 
-    /// 싱글 패널 모드인지 확인 (더 이상 지원하지 않음, 항상 false 반환)
+    /// 싱글 패널 모드인지 확인
     pub fn is_single_panel(&self) -> bool {
-        false
+        matches!(self.state.mode, LayoutMode::SinglePanel)
     }
 
     /// 터미널이 너무 작은지 확인
@@ -313,16 +328,32 @@ mod tests {
     #[test]
     fn test_determine_mode() {
         // 듀얼 패널 모드 (80+ cols)
-        assert_eq!(LayoutManager::determine_mode(80, 24), LayoutMode::DualPanel);
         assert_eq!(
-            LayoutManager::determine_mode(120, 30),
+            LayoutManager::determine_mode(80, 24, false),
             LayoutMode::DualPanel
+        );
+        assert_eq!(
+            LayoutManager::determine_mode(120, 30, false),
+            LayoutMode::DualPanel
+        );
+        assert_eq!(
+            LayoutManager::determine_mode(120, 30, true),
+            LayoutMode::SinglePanel
         );
 
         // TooSmall 모드 (80 미만 또는 24 미만)
-        assert_eq!(LayoutManager::determine_mode(79, 24), LayoutMode::TooSmall);
-        assert_eq!(LayoutManager::determine_mode(40, 24), LayoutMode::TooSmall);
-        assert_eq!(LayoutManager::determine_mode(80, 23), LayoutMode::TooSmall);
+        assert_eq!(
+            LayoutManager::determine_mode(79, 24, false),
+            LayoutMode::TooSmall
+        );
+        assert_eq!(
+            LayoutManager::determine_mode(40, 24, true),
+            LayoutMode::TooSmall
+        );
+        assert_eq!(
+            LayoutManager::determine_mode(80, 23, false),
+            LayoutMode::TooSmall
+        );
     }
 
     #[test]
@@ -346,5 +377,23 @@ mod tests {
         let wide_left = PanelRatio::wide_left();
         assert_eq!(wide_left.left, 70);
         assert_eq!(wide_left.right, 30);
+    }
+
+    #[test]
+    fn test_toggle_layout_mode() {
+        let mut manager = LayoutManager::new();
+        manager.update(Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 40,
+        });
+        assert!(manager.is_dual_panel());
+
+        manager.toggle_layout_mode();
+        assert!(manager.is_single_panel());
+
+        manager.toggle_layout_mode();
+        assert!(manager.is_dual_panel());
     }
 }

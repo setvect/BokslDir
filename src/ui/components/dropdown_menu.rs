@@ -679,6 +679,7 @@ pub fn create_default_menus(language: Language) -> Vec<Menu> {
             .hotkey('v')
             .items(vec![
                 menu_action("refresh", i18n.menu_item("refresh")),
+                menu_action("toggle_layout", i18n.menu_item("toggle_layout")),
                 menu_action("file_info", i18n.menu_item("file_info")),
                 MenuItem::separator(),
                 MenuItem::submenu(

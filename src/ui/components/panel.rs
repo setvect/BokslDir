@@ -308,9 +308,13 @@ impl<'a> Panel<'a> {
 /// 컬럼 레이아웃 정보
 struct ColumnLayout {
     show_permissions: bool,
+    show_created: bool,
+    show_owner: bool,
     show_size: bool,
     date_format: &'static str,
     name_width: usize,
+    created_width: usize,
+    owner_width: usize,
     size_width: usize,
     date_width: usize,
     perm_width: usize,
@@ -321,18 +325,33 @@ impl Panel<'_> {
     fn calculate_column_layout(width: usize, has_scrollbar: bool) -> ColumnLayout {
         let scrollbar_width = if has_scrollbar { 1 } else { 0 };
 
-        let (show_permissions, show_size, date_format) = match width {
-            w if w >= 70 => (true, true, "long"),
-            w if w >= 45 => (false, true, "short"),
-            _ => (false, false, "short"),
+        // 우선순위: 생성일 > 소유
+        let (show_permissions, show_created, show_owner, show_size, date_format) = match width {
+            w if w >= 120 => (true, true, true, true, "long"),
+            w if w >= 100 => (true, true, false, true, "long"),
+            w if w >= 70 => (true, false, false, true, "long"),
+            w if w >= 45 => (false, false, false, true, "short"),
+            _ => (false, false, false, false, "short"),
         };
 
         let perm_width = if show_permissions { 12 } else { 0 };
+        let created_width = if show_created {
+            if date_format == "long" {
+                17
+            } else {
+                12
+            }
+        } else {
+            0
+        };
+        let owner_width = if show_owner { 10 } else { 0 };
         let date_width = if date_format == "long" { 17 } else { 12 };
         let size_width = if show_size { 10 } else { 0 };
         let margins = 6;
         let name_width = width
             .saturating_sub(perm_width)
+            .saturating_sub(created_width)
+            .saturating_sub(owner_width)
             .saturating_sub(size_width)
             .saturating_sub(date_width)
             .saturating_sub(margins)
@@ -340,9 +359,13 @@ impl Panel<'_> {
 
         ColumnLayout {
             show_permissions,
+            show_created,
+            show_owner,
             show_size,
             date_format,
             name_width,
+            created_width,
+            owner_width,
             size_width,
             date_width,
             perm_width,
@@ -371,7 +394,7 @@ impl Panel<'_> {
 
         let mut header_spans = vec![Span::raw(" ")];
         header_spans.push(Span::styled(
-            format!("{:<width$}", name_label, width = layout.name_width),
+            Self::fit_cell(&name_label, layout.name_width),
             header_style,
         ));
 
@@ -382,7 +405,10 @@ impl Panel<'_> {
                 i18n.tr(TextKey::PanelHeaderSize).to_string()
             };
             header_spans.push(Span::raw(" "));
-            header_spans.push(Span::styled(format!("{:<10}", size_label), header_style));
+            header_spans.push(Span::styled(
+                Self::fit_cell(&size_label, layout.size_width),
+                header_style,
+            ));
         }
 
         let modified_label = if self.sort_by == SortBy::Modified {
@@ -392,14 +418,30 @@ impl Panel<'_> {
         };
         header_spans.push(Span::raw(" "));
         header_spans.push(Span::styled(
-            format!("{:<width$}", modified_label, width = layout.date_width),
+            Self::fit_cell(&modified_label, layout.date_width),
             header_style,
         ));
+
+        if layout.show_created {
+            header_spans.push(Span::raw(" "));
+            header_spans.push(Span::styled(
+                Self::fit_cell(i18n.tr(TextKey::PanelHeaderCreated), layout.created_width),
+                header_style,
+            ));
+        }
 
         if layout.show_permissions {
             header_spans.push(Span::raw(" "));
             header_spans.push(Span::styled(
-                format!("{:<11}", i18n.tr(TextKey::PanelHeaderPermissions)),
+                Self::fit_cell(i18n.tr(TextKey::PanelHeaderPermissions), layout.perm_width),
+                header_style,
+            ));
+        }
+
+        if layout.show_owner {
+            header_spans.push(Span::raw(" "));
+            header_spans.push(Span::styled(
+                Self::fit_cell(i18n.tr(TextKey::PanelHeaderOwner), layout.owner_width),
                 header_style,
             ));
         }
@@ -571,15 +613,42 @@ impl Panel<'_> {
             full_date.get(5..).unwrap_or(&full_date).to_string()
         };
         line_spans.push(Span::styled(
-            format!("{:<width$}", date_str, width = layout.date_width),
+            Self::fit_cell(&date_str, layout.date_width),
             style,
         ));
+
+        // 생성일
+        if layout.show_created {
+            line_spans.push(Span::styled(" ", style));
+            let full_created = format_date(entry.created);
+            let created_str = if layout.date_format == "long" {
+                full_created
+            } else {
+                full_created.get(5..).unwrap_or(&full_created).to_string()
+            };
+            line_spans.push(Span::styled(
+                Self::fit_cell(&created_str, layout.created_width),
+                style,
+            ));
+        }
 
         // 권한
         if layout.show_permissions {
             line_spans.push(Span::styled(" ", style));
             let perm_str = format_permissions(entry.permissions.as_ref());
-            line_spans.push(Span::styled(format!("{:<11}", perm_str), style));
+            line_spans.push(Span::styled(
+                Self::fit_cell(&perm_str, layout.perm_width),
+                style,
+            ));
+        }
+
+        if layout.show_owner {
+            line_spans.push(Span::styled(" ", style));
+            let owner = self.owner_text(entry);
+            line_spans.push(Span::styled(
+                Self::fit_cell(&owner, layout.owner_width),
+                style,
+            ));
         }
 
         let file_line = Line::from(line_spans);
@@ -770,6 +839,33 @@ impl Panel<'_> {
         truncated.push_str(ellipsis);
         truncated.push_str(ext);
         truncated
+    }
+
+    fn owner_text(&self, entry: &FileEntry) -> String {
+        match (entry.owner.as_deref(), entry.group.as_deref()) {
+            (Some(owner), Some(group)) if owner == group => owner.to_string(),
+            (Some(owner), Some(group)) => format!("{}/{}", owner, group),
+            (Some(owner), None) => owner.to_string(),
+            (None, Some(group)) => group.to_string(),
+            (None, None) => "-".to_string(),
+        }
+    }
+
+    fn fit_cell(text: &str, width: usize) -> String {
+        if width == 0 {
+            return String::new();
+        }
+        let mut out = String::new();
+        let mut used = 0usize;
+        for ch in text.chars() {
+            let w = ch.width().unwrap_or(1);
+            if used + w > width {
+                break;
+            }
+            out.push(ch);
+            used += w;
+        }
+        path_display::pad_right_to_width(&out, width)
     }
 }
 

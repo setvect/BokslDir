@@ -41,6 +41,7 @@ pub enum TextKey {
     Cancel,
     Hidden,
     LayoutDual,
+    LayoutSingle,
     LayoutWarn,
     SortName,
     SortSize,
@@ -61,7 +62,10 @@ pub enum TextKey {
     PanelHeaderNameExt,
     PanelHeaderSize,
     PanelHeaderModified,
+    PanelHeaderCreated,
     PanelHeaderPermissions,
+    PanelHeaderType,
+    PanelHeaderOwner,
     DialogSuggestions,
     DialogSuggestionHint,
     DialogTitleFileExists,
@@ -118,6 +122,8 @@ pub enum MessageKey {
     NoTabIndex,
     StatusLeftLong,
     StatusSelectedLong,
+    LayoutDualToast,
+    LayoutSingleToast,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -144,6 +150,8 @@ impl I18n {
             (Language::Korean, TextKey::Hidden) => "숨김",
             (Language::English, TextKey::LayoutDual) => "DUAL",
             (Language::Korean, TextKey::LayoutDual) => "듀얼",
+            (Language::English, TextKey::LayoutSingle) => "SINGLE",
+            (Language::Korean, TextKey::LayoutSingle) => "싱글",
             (Language::English, TextKey::LayoutWarn) => "WARN",
             (Language::Korean, TextKey::LayoutWarn) => "경고",
             (Language::English, TextKey::SortName) => "Name",
@@ -184,8 +192,14 @@ impl I18n {
             (Language::Korean, TextKey::PanelHeaderSize) => "크기",
             (Language::English, TextKey::PanelHeaderModified) => "Modified",
             (Language::Korean, TextKey::PanelHeaderModified) => "수정일",
+            (Language::English, TextKey::PanelHeaderCreated) => "Created",
+            (Language::Korean, TextKey::PanelHeaderCreated) => "생성일",
             (Language::English, TextKey::PanelHeaderPermissions) => "Permissions",
             (Language::Korean, TextKey::PanelHeaderPermissions) => "권한",
+            (Language::English, TextKey::PanelHeaderType) => "Type",
+            (Language::Korean, TextKey::PanelHeaderType) => "종류",
+            (Language::English, TextKey::PanelHeaderOwner) => "Owner",
+            (Language::Korean, TextKey::PanelHeaderOwner) => "소유",
             (Language::English, TextKey::DialogSuggestions) => "Suggestions",
             (Language::Korean, TextKey::DialogSuggestions) => "추천",
             (Language::English, TextKey::DialogSuggestionHint) => {
@@ -313,6 +327,10 @@ impl I18n {
             }
             (Language::English, MessageKey::StatusSelectedLong) => " | {count} selected ({size})",
             (Language::Korean, MessageKey::StatusSelectedLong) => " | 선택 {count}개 ({size})",
+            (Language::English, MessageKey::LayoutDualToast) => "Layout: Dual panel",
+            (Language::Korean, MessageKey::LayoutDualToast) => "레이아웃: 듀얼 패널",
+            (Language::English, MessageKey::LayoutSingleToast) => "Layout: Single panel",
+            (Language::Korean, MessageKey::LayoutSingleToast) => "레이아웃: 싱글 패널",
         }
     }
 
@@ -390,6 +408,8 @@ impl I18n {
             (Language::Korean, "filter_clear") => "필터 해제",
             (Language::English, "toggle_hidden") => "Show hidden files",
             (Language::Korean, "toggle_hidden") => "숨김 파일 표시",
+            (Language::English, "toggle_layout") => "Toggle single/dual panel",
+            (Language::Korean, "toggle_layout") => "싱글/듀얼 패널 전환",
             (Language::English, "mount_points") => "Mount points",
             (Language::Korean, "mount_points") => "마운트 포인트",
             (Language::English, "goto_path") => "Go to path",
@@ -458,6 +478,7 @@ impl I18n {
             (Language::Korean, "page_up") => "페이지 이동",
             (Language::Korean, "page_down") => "아래 페이지 이동",
             (Language::Korean, "toggle_panel") => "패널 전환",
+            (Language::Korean, "toggle_layout") => "레이아웃 전환",
             (Language::Korean, "tab_new") => "새 탭",
             (Language::Korean, "tab_close") => "탭 닫기",
             (Language::Korean, "copy") => "복사",

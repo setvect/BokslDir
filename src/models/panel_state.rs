@@ -591,6 +591,7 @@ mod tests {
             FileType::File,
             100,
             SystemTime::now(),
+            SystemTime::now(),
             None,
             false,
         )
@@ -605,6 +606,7 @@ mod tests {
             PathBuf::from(format!("/tmp/{}", name)),
             FileType::File,
             size,
+            SystemTime::now(),
             SystemTime::now(),
             None,
             false,
@@ -621,6 +623,7 @@ mod tests {
             FileType::Directory,
             0,
             SystemTime::now(),
+            SystemTime::now(),
             None,
             false,
         )
@@ -635,6 +638,7 @@ mod tests {
             PathBuf::from(format!("/tmp/{}", name)),
             FileType::File,
             100,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(secs_offset),
             SystemTime::UNIX_EPOCH + Duration::from_secs(secs_offset),
             None,
             false,

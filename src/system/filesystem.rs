@@ -95,6 +95,8 @@ impl FileSystem {
             let modified = display_metadata
                 .modified()
                 .unwrap_or_else(|_| std::time::SystemTime::now());
+            // 생성 시간 (없으면 수정 시간 fallback)
+            let created = display_metadata.created().unwrap_or(modified);
 
             // 권한 (Unix 계열에서만)
             let permissions = Some(display_metadata.permissions());
@@ -102,15 +104,25 @@ impl FileSystem {
             // 숨김 파일 여부
             let is_hidden = self.is_hidden(&entry_path);
 
-            entries.push(FileEntry::new(
+            let mut file_entry = FileEntry::new(
                 name,
                 entry_path,
                 file_type,
                 size,
                 modified,
+                created,
                 permissions,
                 is_hidden,
-            ));
+            );
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                file_entry.owner = Some(display_metadata.uid().to_string());
+                file_entry.group = Some(display_metadata.gid().to_string());
+            }
+
+            entries.push(file_entry);
         }
 
         Ok(entries)

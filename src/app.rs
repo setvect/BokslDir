@@ -492,6 +492,18 @@ impl App {
         self.layout.toggle_panel();
     }
 
+    /// 레이아웃 전환 (듀얼 <-> 싱글)
+    pub fn toggle_layout_mode(&mut self) {
+        self.layout.toggle_layout_mode();
+        let i18n = I18n::new(self.language);
+        let toast = if self.layout.is_single_panel() {
+            i18n.msg(MessageKey::LayoutSingleToast)
+        } else {
+            i18n.msg(MessageKey::LayoutDualToast)
+        };
+        self.set_toast(toast);
+    }
+
     /// 활성 패널에 새 탭 생성
     pub fn new_tab_active_panel(&mut self) {
         let i18n = I18n::new(self.language);
@@ -669,6 +681,7 @@ impl App {
         let i18n = I18n::new(self.language);
         match self.layout.mode() {
             LayoutMode::DualPanel => i18n.tr(TextKey::LayoutDual),
+            LayoutMode::SinglePanel => i18n.tr(TextKey::LayoutSingle),
             LayoutMode::TooSmall => i18n.tr(TextKey::LayoutWarn),
         }
     }

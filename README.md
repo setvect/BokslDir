@@ -34,7 +34,16 @@ cargo run
 # 릴리스 빌드
 cargo build --release
 ./target/release/boksldir
+
+# 시작 경로 지정 (첫 번째 인자만 사용)
+./target/release/boksldir .
+./target/release/boksldir /tmp
 ```
+
+시작 인자 동작:
+- 인자 없음: 이전 종료 시점 히스토리 경로 복원
+- `.` 또는 유효한 디렉토리: 좌/우 패널 모두 해당 경로로 시작
+- 유효하지 않은 경로: 인자 없음과 동일하게 동작
 
 ## 배포/패키징 (OS별)
 

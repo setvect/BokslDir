@@ -21,7 +21,7 @@ use ratatui::{
     Terminal,
 };
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use system::ime;
 use ui::{
@@ -43,7 +43,8 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app
-    let mut app = App::new()?;
+    let startup_path = resolve_startup_path_arg(std::env::args_os());
+    let mut app = App::new_with_startup_path(startup_path)?;
 
     // Run app
     let res = run_app(&mut terminal, &mut app);
@@ -58,6 +59,15 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn resolve_startup_path_arg<I, S>(mut args: I) -> Option<PathBuf>
+where
+    I: Iterator<Item = S>,
+    S: Into<std::ffi::OsString>,
+{
+    let _ = args.next();
+    args.next().map(|arg| PathBuf::from(arg.into()))
 }
 
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
@@ -1244,6 +1254,7 @@ fn render_main_ui(f: &mut ratatui::Frame<'_>, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
 
     fn dispatch_sequence(app: &mut App, prefix: char, key: char) {
         handle_normal_keys(app, KeyModifiers::NONE, KeyCode::Char(prefix));
@@ -1602,5 +1613,24 @@ mod tests {
             parse_editor_command("\"broken"),
             Err(message) if message.contains("Invalid editor command syntax")
         ));
+    }
+
+    #[test]
+    fn test_resolve_startup_path_arg_uses_first_argument_only() {
+        let args = vec![
+            OsString::from("boksldir"),
+            OsString::from("."),
+            OsString::from("/tmp"),
+        ];
+        assert_eq!(
+            resolve_startup_path_arg(args.into_iter()),
+            Some(PathBuf::from("."))
+        );
+    }
+
+    #[test]
+    fn test_resolve_startup_path_arg_none_when_no_user_argument() {
+        let args = vec![OsString::from("boksldir")];
+        assert_eq!(resolve_startup_path_arg(args.into_iter()), None);
     }
 }

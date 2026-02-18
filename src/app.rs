@@ -229,6 +229,10 @@ impl App {
     }
 
     pub fn new() -> Result<Self> {
+        Self::new_with_startup_path(None)
+    }
+
+    pub fn new_with_startup_path(startup_path: Option<PathBuf>) -> Result<Self> {
         let current_dir = env::current_dir().unwrap_or_else(|_| {
             #[cfg(unix)]
             {
@@ -243,14 +247,16 @@ impl App {
                 std::path::PathBuf::from(".")
             }
         });
+        let startup_path = Self::normalize_startup_path(startup_path);
+        let initial_dir = startup_path.clone().unwrap_or(current_dir);
 
         let filesystem = FileSystem::new();
 
         // 패널 상태 초기화 및 파일 목록 로드
-        let mut left_panel = PanelState::new(current_dir.clone());
+        let mut left_panel = PanelState::new(initial_dir.clone());
         left_panel.refresh(&filesystem)?;
 
-        let mut right_panel = PanelState::new(current_dir);
+        let mut right_panel = PanelState::new(initial_dir);
         right_panel.refresh(&filesystem)?;
 
         let mut app = Self {
@@ -280,8 +286,14 @@ impl App {
             bookmarks: Vec::new(),
             state_store_override: None,
         };
-        app.load_persisted_state();
+        if startup_path.is_none() {
+            app.load_persisted_state();
+        }
         Ok(app)
+    }
+
+    fn normalize_startup_path(startup_path: Option<PathBuf>) -> Option<PathBuf> {
+        startup_path.filter(|path| path.is_dir())
     }
 
     #[cfg(test)]

@@ -14,6 +14,37 @@ fn make_test_app() -> App {
     App::new_for_test()
 }
 
+#[test]
+fn test_normalize_startup_path_accepts_only_existing_directory() {
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path().join("dir");
+    let file = temp.path().join("file.txt");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(&file, b"x").unwrap();
+
+    assert_eq!(
+        App::normalize_startup_path(Some(dir.clone())),
+        Some(dir.clone())
+    );
+    assert_eq!(App::normalize_startup_path(Some(file)), None);
+    assert_eq!(
+        App::normalize_startup_path(Some(temp.path().join("missing"))),
+        None
+    );
+}
+
+#[test]
+fn test_new_with_startup_path_initializes_both_panels_to_given_path() {
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path().join("startup");
+    fs::create_dir_all(&dir).unwrap();
+
+    let app = App::new_with_startup_path(Some(dir.clone())).unwrap();
+
+    assert_eq!(app.left_active_panel_state().current_path, dir);
+    assert_eq!(app.right_active_panel_state().current_path, dir);
+}
+
 fn run_file_operation_until_done(app: &mut App) {
     let mut guard = 0usize;
     while app.pending_operation.is_some() && guard < 10_000 {

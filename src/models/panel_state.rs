@@ -7,6 +7,7 @@ use crate::utils::error::Result;
 use crate::utils::glob;
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::env;
 use std::path::PathBuf;
 
 const MAX_HISTORY_ENTRIES: usize = 100;
@@ -61,6 +62,20 @@ pub struct PanelState {
 }
 
 impl PanelState {
+    fn normalize_directory_path(path: PathBuf) -> PathBuf {
+        if path.as_os_str().is_empty() {
+            return env::current_dir().unwrap_or(path);
+        }
+
+        if path.is_absolute() {
+            path
+        } else {
+            env::current_dir()
+                .map(|cwd| cwd.join(&path))
+                .unwrap_or(path)
+        }
+    }
+
     /// 새 패널 상태 생성
     pub fn new(path: PathBuf) -> Self {
         let history_seed = path.clone();
@@ -129,11 +144,23 @@ impl PanelState {
 
     /// 경로 변경
     pub fn change_directory(&mut self, path: PathBuf, filesystem: &FileSystem) -> Result<()> {
-        self.current_path = path;
+        let previous_path = self.current_path.clone();
+        let previous_selected_index = self.selected_index;
+        let previous_scroll_offset = self.scroll_offset;
+        let previous_selected_items = self.selected_items.clone();
+
+        self.current_path = Self::normalize_directory_path(path);
         self.selected_index = 0;
         self.scroll_offset = 0;
         self.selected_items.clear();
-        self.refresh(filesystem)
+        if let Err(error) = self.refresh(filesystem) {
+            self.current_path = previous_path;
+            self.selected_index = previous_selected_index;
+            self.scroll_offset = previous_scroll_offset;
+            self.selected_items = previous_selected_items;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// 경로 변경 후 특정 항목에 포커스
@@ -143,10 +170,21 @@ impl PanelState {
         focus_name: Option<&str>,
         filesystem: &FileSystem,
     ) -> Result<()> {
-        self.current_path = path;
+        let previous_path = self.current_path.clone();
+        let previous_selected_index = self.selected_index;
+        let previous_scroll_offset = self.scroll_offset;
+        let previous_selected_items = self.selected_items.clone();
+
+        self.current_path = Self::normalize_directory_path(path);
         self.scroll_offset = 0;
         self.selected_items.clear();
-        self.refresh(filesystem)?;
+        if let Err(error) = self.refresh(filesystem) {
+            self.current_path = previous_path;
+            self.selected_index = previous_selected_index;
+            self.scroll_offset = previous_scroll_offset;
+            self.selected_items = previous_selected_items;
+            return Err(error);
+        }
 
         // 포커스할 항목 찾기
         if let Some(name) = focus_name {
@@ -544,6 +582,36 @@ mod tests {
 
         // 숨김 파일 표시할 때 더 많은 파일이 있어야 함 (보통의 경우)
         assert!(total_count >= visible_count);
+    }
+
+    #[test]
+    fn test_change_directory_normalizes_relative_dot() {
+        let fs = FileSystem::new();
+        let current_dir = std::env::current_dir().unwrap();
+        let mut state = PanelState::new(current_dir.clone());
+
+        state.change_directory(PathBuf::from("."), &fs).unwrap();
+        assert_eq!(state.current_path, current_dir);
+    }
+
+    #[test]
+    fn test_change_directory_restores_previous_state_on_failure() {
+        let fs = FileSystem::new();
+        let current_dir = std::env::current_dir().unwrap();
+        let mut state = PanelState::new(current_dir.clone());
+        state.selected_index = 3;
+        state.scroll_offset = 2;
+        state.selected_items.insert(0);
+
+        let invalid_path =
+            std::env::temp_dir().join(format!("boksldir-nonexistent-path-{}", std::process::id()));
+        let result = state.change_directory(invalid_path, &fs);
+
+        assert!(result.is_err());
+        assert_eq!(state.current_path, current_dir);
+        assert_eq!(state.selected_index, 3);
+        assert_eq!(state.scroll_offset, 2);
+        assert!(state.selected_items.contains(&0));
     }
 
     #[test]

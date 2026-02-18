@@ -45,6 +45,29 @@ fn test_new_with_startup_path_initializes_both_panels_to_given_path() {
     assert_eq!(app.right_active_panel_state().current_path, dir);
 }
 
+#[test]
+fn test_new_with_startup_path_dot_is_normalized_to_current_dir() {
+    let expected = std::env::current_dir().unwrap();
+    let app = App::new_with_startup_path(Some(std::path::PathBuf::from("."))).unwrap();
+    assert_eq!(app.left_active_panel_state().current_path, expected);
+    assert_eq!(app.right_active_panel_state().current_path, expected);
+}
+
+#[test]
+fn test_go_to_parent_from_dot_startup_moves_to_actual_parent() {
+    let mut app = App::new_with_startup_path(Some(std::path::PathBuf::from("."))).unwrap();
+    let current = std::env::current_dir().unwrap();
+    let expected_parent = current.parent().map(std::path::Path::to_path_buf);
+
+    app.go_to_parent();
+
+    if let Some(parent) = expected_parent {
+        assert_eq!(app.active_panel_state().current_path, parent);
+    } else {
+        assert_eq!(app.active_panel_state().current_path, current);
+    }
+}
+
 fn run_file_operation_until_done(app: &mut App) {
     let mut guard = 0usize;
     while app.pending_operation.is_some() && guard < 10_000 {

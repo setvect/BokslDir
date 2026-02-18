@@ -362,6 +362,8 @@ impl App {
         }
         let panel = self.active_panel_state();
         let current_path = panel.current_path.clone();
+        let current_path =
+            Self::normalize_existing_directory_path(&current_path).unwrap_or(current_path);
 
         if let Some(parent) = current_path.parent() {
             let parent_path = parent.to_path_buf();
@@ -704,6 +706,8 @@ impl App {
 
     /// ".." 선택 시 상위 디렉토리로 이동 + 포커스 복원
     pub(super) fn navigate_to_parent(&mut self, current_path: &std::path::Path) {
+        let current_path = Self::normalize_existing_directory_path(current_path)
+            .unwrap_or_else(|| current_path.to_path_buf());
         if let Some(parent) = current_path.parent() {
             let parent_path = parent.to_path_buf();
             let current_dir_name = current_path

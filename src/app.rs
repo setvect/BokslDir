@@ -292,8 +292,26 @@ impl App {
         Ok(app)
     }
 
+    pub(super) fn normalize_existing_directory_path(path: &Path) -> Option<PathBuf> {
+        let absolute_path = if path.as_os_str().is_empty() {
+            env::current_dir().ok()?
+        } else if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            env::current_dir().ok()?.join(path)
+        };
+
+        if absolute_path.is_dir() {
+            Some(absolute_path)
+        } else {
+            None
+        }
+    }
+
     fn normalize_startup_path(startup_path: Option<PathBuf>) -> Option<PathBuf> {
-        startup_path.filter(|path| path.is_dir())
+        startup_path
+            .as_deref()
+            .and_then(Self::normalize_existing_directory_path)
     }
 
     #[cfg(test)]

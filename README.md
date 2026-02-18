@@ -53,6 +53,7 @@ cargo build --release
 ## 문서
 
 - [사용자 매뉴얼](docs/User-Manual.md)
+- [OS 셋업 가이드](docs/OS-Setup-Guide.md)
 - [릴리즈 노트](RELEASE_NOTES.md)
 - [Architecture](docs/Architecture.md)
 

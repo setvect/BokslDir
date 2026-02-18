@@ -99,6 +99,29 @@ pub enum TextKey {
     DialogNewBookmarkName,
     DialogFilter,
     DialogFilterPattern,
+    DialogTitleProperties,
+    DialogTitleMountPoints,
+    DialogTitleTabs,
+    DialogTitleHistory,
+    DialogHistoryCurrentMarker,
+    DialogTitleBookmarks,
+    DialogHintMoveGoClose,
+    DialogHintMoveGoClearClose,
+    DialogHintMoveGoRenameDeleteClose,
+    DialogTitleCreateArchive,
+    DialogArchivePath,
+    DialogUsePassword,
+    DialogPassword,
+    DialogConfirmPassword,
+    DialogHintArchiveCreate,
+    DialogArchivePreviewTruncated,
+    DialogTitleGoToPath,
+    DialogPromptPath,
+    DialogTitleExtractArchive,
+    DialogPromptExtractTo,
+    DialogTitleArchivePassword,
+    DialogPromptArchivePassword,
+    DialogEta,
     DialogKeyboardShortcutsTitle,
     AboutTitle,
     AboutBody,
@@ -124,6 +147,8 @@ pub enum MessageKey {
     StatusSelectedLong,
     LayoutDualToast,
     LayoutSingleToast,
+    DialogArchivePreviewTitle,
+    DialogArchivePreviewHint,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -272,6 +297,68 @@ impl I18n {
             (Language::Korean, TextKey::DialogFilter) => "필터",
             (Language::English, TextKey::DialogFilterPattern) => "Pattern (supports * ?):",
             (Language::Korean, TextKey::DialogFilterPattern) => "패턴 (* ? 지원):",
+            (Language::English, TextKey::DialogTitleProperties) => " Properties ",
+            (Language::Korean, TextKey::DialogTitleProperties) => " 파일 속성 ",
+            (Language::English, TextKey::DialogTitleMountPoints) => " Mount Points ",
+            (Language::Korean, TextKey::DialogTitleMountPoints) => " 마운트 포인트 ",
+            (Language::English, TextKey::DialogTitleTabs) => " Tabs ",
+            (Language::Korean, TextKey::DialogTitleTabs) => " 탭 목록 ",
+            (Language::English, TextKey::DialogTitleHistory) => " Directory History ",
+            (Language::Korean, TextKey::DialogTitleHistory) => " 디렉토리 히스토리 ",
+            (Language::English, TextKey::DialogHistoryCurrentMarker) => " (current)",
+            (Language::Korean, TextKey::DialogHistoryCurrentMarker) => " (현재)",
+            (Language::English, TextKey::DialogTitleBookmarks) => " Bookmarks ",
+            (Language::Korean, TextKey::DialogTitleBookmarks) => " 북마크 ",
+            (Language::English, TextKey::DialogHintMoveGoClose) => {
+                " j/k:Move  Enter:Go  Esc:Close "
+            }
+            (Language::Korean, TextKey::DialogHintMoveGoClose) => {
+                " j/k:이동  Enter:열기  Esc:닫기 "
+            }
+            (Language::English, TextKey::DialogHintMoveGoClearClose) => {
+                " j/k:Move  Enter:Go  D:Clear  Esc:Close "
+            }
+            (Language::Korean, TextKey::DialogHintMoveGoClearClose) => {
+                " j/k:이동  Enter:열기  D:비우기  Esc:닫기 "
+            }
+            (Language::English, TextKey::DialogHintMoveGoRenameDeleteClose) => {
+                " j/k:Move  Enter:Go  r:Rename  d:Delete  Esc:Close "
+            }
+            (Language::Korean, TextKey::DialogHintMoveGoRenameDeleteClose) => {
+                " j/k:이동  Enter:열기  r:이름변경  d:삭제  Esc:닫기 "
+            }
+            (Language::English, TextKey::DialogTitleCreateArchive) => " Create Archive ",
+            (Language::Korean, TextKey::DialogTitleCreateArchive) => " 압축 생성 ",
+            (Language::English, TextKey::DialogArchivePath) => "Archive path:",
+            (Language::Korean, TextKey::DialogArchivePath) => "압축 경로:",
+            (Language::English, TextKey::DialogUsePassword) => "Use password",
+            (Language::Korean, TextKey::DialogUsePassword) => "비밀번호 사용",
+            (Language::English, TextKey::DialogPassword) => "Password:",
+            (Language::Korean, TextKey::DialogPassword) => "비밀번호:",
+            (Language::English, TextKey::DialogConfirmPassword) => "Confirm password:",
+            (Language::Korean, TextKey::DialogConfirmPassword) => "비밀번호 확인:",
+            (Language::English, TextKey::DialogHintArchiveCreate) => {
+                "Tab/Shift+Tab:Move  Space:Toggle password  Enter:OK  Esc:Cancel  (zip/7z only)"
+            }
+            (Language::Korean, TextKey::DialogHintArchiveCreate) => {
+                "Tab/Shift+Tab:이동  Space:비밀번호 토글  Enter:확인  Esc:취소  (zip/7z 전용)"
+            }
+            (Language::English, TextKey::DialogArchivePreviewTruncated) => "[showing first 5000]",
+            (Language::Korean, TextKey::DialogArchivePreviewTruncated) => "[최대 5000개 표시]",
+            (Language::English, TextKey::DialogTitleGoToPath) => "Go to Path",
+            (Language::Korean, TextKey::DialogTitleGoToPath) => "경로로 이동",
+            (Language::English, TextKey::DialogPromptPath) => "Path:",
+            (Language::Korean, TextKey::DialogPromptPath) => "경로:",
+            (Language::English, TextKey::DialogTitleExtractArchive) => "Extract Archive",
+            (Language::Korean, TextKey::DialogTitleExtractArchive) => "압축 해제",
+            (Language::English, TextKey::DialogPromptExtractTo) => "Extract to:",
+            (Language::Korean, TextKey::DialogPromptExtractTo) => "해제 경로:",
+            (Language::English, TextKey::DialogTitleArchivePassword) => "Archive Password",
+            (Language::Korean, TextKey::DialogTitleArchivePassword) => "압축 비밀번호",
+            (Language::English, TextKey::DialogPromptArchivePassword) => "Password (empty = none):",
+            (Language::Korean, TextKey::DialogPromptArchivePassword) => "비밀번호 (빈 값=없음):",
+            (Language::English, TextKey::DialogEta) => "ETA",
+            (Language::Korean, TextKey::DialogEta) => "예상",
             (Language::English, TextKey::DialogKeyboardShortcutsTitle) => " Keyboard Shortcuts ",
             (Language::Korean, TextKey::DialogKeyboardShortcutsTitle) => " 단축키 도움말 ",
             (Language::English, TextKey::AboutTitle) => "About BokslDir",
@@ -331,6 +418,16 @@ impl I18n {
             (Language::Korean, MessageKey::LayoutDualToast) => "레이아웃: 듀얼 패널",
             (Language::English, MessageKey::LayoutSingleToast) => "Layout: Single panel",
             (Language::Korean, MessageKey::LayoutSingleToast) => "레이아웃: 싱글 패널",
+            (Language::English, MessageKey::DialogArchivePreviewTitle) => {
+                " Archive Preview: {name} "
+            }
+            (Language::Korean, MessageKey::DialogArchivePreviewTitle) => " 압축 미리보기: {name} ",
+            (Language::English, MessageKey::DialogArchivePreviewHint) => {
+                " j/k:Move  PgUp/PgDn:Scroll  Home/End  Esc:Close  [{count} items] "
+            }
+            (Language::Korean, MessageKey::DialogArchivePreviewHint) => {
+                " j/k:이동  PgUp/PgDn:스크롤  Home/End  Esc:닫기  [{count}개 항목] "
+            }
         }
     }
 
@@ -538,9 +635,43 @@ impl I18n {
     }
 }
 
+fn localize_runtime_action(input: &str) -> Option<&'static str> {
+    match input {
+        "Copy" => Some("복사"),
+        "Move" => Some("이동"),
+        "Delete" => Some("삭제"),
+        "Archive" => Some("압축"),
+        "Extract" => Some("해제"),
+        "Extract archive" => Some("압축 해제"),
+        "Auto extract archive" => Some("자동 압축 해제"),
+        "Preview archive" => Some("압축 미리보기"),
+        "Copy from archive" => Some("압축에서 복사"),
+        "Move to trash" => Some("휴지통으로 이동"),
+        "Create directory" => Some("디렉토리 생성"),
+        "Open with default app" => Some("기본 프로그램으로 열기"),
+        "Open in terminal editor" => Some("터미널 에디터로 열기"),
+        "Rename" => Some("이름 변경"),
+        "Archive create" => Some("압축 생성"),
+        "Archive extract" => Some("압축 해제"),
+        _ => None,
+    }
+}
+
 pub fn localize_runtime_text(language: Language, input: &str) -> String {
     if matches!(language, Language::English) {
         return input.to_string();
+    }
+
+    if input.contains('\n') {
+        return input
+            .split('\n')
+            .map(|line| localize_runtime_text(language, line))
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+
+    if let Some(action) = localize_runtime_action(input) {
+        return action.to_string();
     }
 
     let exact = match input {
@@ -549,6 +680,24 @@ pub fn localize_runtime_text(language: Language, input: &str) -> String {
         "Mount Points" => Some("마운트 포인트"),
         "History" => Some("히스토리"),
         "Bookmarks" => Some("북마크"),
+        "Go to Path" => Some("경로로 이동"),
+        "Path:" => Some("경로:"),
+        "Create Archive" => Some("압축 생성"),
+        "Archive path:" => Some("압축 경로:"),
+        "Extract Archive" => Some("압축 해제"),
+        "Extract to:" => Some("해제 경로:"),
+        "Archive Password" => Some("압축 비밀번호"),
+        "Password (empty = none):" => Some("비밀번호 (빈 값=없음):"),
+        "Properties" => Some("파일 속성"),
+        "Unsupported archive format" => Some("지원하지 않는 압축 형식"),
+        "Unsupported archive format:" => Some("지원하지 않는 압축 형식:"),
+        "No files selected for archive." => Some("압축할 파일이 선택되지 않았습니다."),
+        "No archive entries selected for copy." => Some("복사할 압축 항목이 선택되지 않았습니다."),
+        "No files selected for operation." => Some("작업할 파일이 선택되지 않았습니다."),
+        "No files selected for deletion." => Some("삭제할 파일이 선택되지 않았습니다."),
+        "No mount points found." => Some("마운트 포인트가 없습니다."),
+        "No history entries." => Some("히스토리 항목이 없습니다."),
+        "No bookmarks." => Some("북마크가 없습니다."),
         "Bookmark deleted" => Some("북마크를 삭제했습니다"),
         "Bookmark renamed" => Some("북마크 이름을 변경했습니다"),
         "Bookmark name cannot be empty" => Some("북마크 이름은 비울 수 없습니다"),
@@ -564,6 +713,43 @@ pub fn localize_runtime_text(language: Language, input: &str) -> String {
         "Hidden files shown" => Some("숨김 파일 표시"),
         "Hidden files hidden" => Some("숨김 파일 숨김"),
         "Rename completed" => Some("이름 변경 완료"),
+        "Directory symlink is not supported for copy/move" => {
+            Some("복사/이동에서 디렉토리 심볼릭 링크는 지원하지 않습니다")
+        }
+        "Failed to prepare temporary extraction directory." => {
+            Some("임시 압축 해제 디렉토리 준비에 실패했습니다.")
+        }
+        "No extractable archive entries were found." => Some("추출 가능한 압축 항목이 없습니다."),
+        "Archive create path dialog is deprecated. Use Create Archive dialog." => {
+            Some("압축 경로 입력 다이얼로그는 더 이상 사용하지 않습니다. 압축 생성 다이얼로그를 사용하세요.")
+        }
+        "Archive worker thread panicked" => Some("압축 작업 스레드가 비정상 종료되었습니다"),
+        "Check password and archive integrity." => Some("비밀번호와 압축 파일 무결성을 확인하세요."),
+        "Select a regular file and try again." => Some("일반 파일을 선택한 뒤 다시 시도하세요."),
+        "Check file path and OS application association." => {
+            Some("파일 경로와 OS 기본 프로그램 연결을 확인하세요.")
+        }
+        "Check editor command and file path." => Some("에디터 명령과 파일 경로를 확인하세요."),
+        "Use a valid name and check write permission." => {
+            Some("유효한 이름인지 확인하고 쓰기 권한을 점검하세요.")
+        }
+        "Check duplicate names and write permission." => {
+            Some("중복 이름과 쓰기 권한을 확인하세요.")
+        }
+        "Create directory failed." => Some("디렉토리 생성 실패."),
+        "Rename failed." => Some("이름 변경 실패."),
+        "Name cannot be empty." => Some("이름은 비울 수 없습니다."),
+        "Enter at least one character." => Some("한 글자 이상 입력하세요."),
+        "Cannot open parent entry ('..')." => Some("상위 항목('..')은 열 수 없습니다."),
+        "Cannot edit parent entry ('..')." => Some("상위 항목('..')은 편집할 수 없습니다."),
+        "No file selected." => Some("파일이 선택되지 않았습니다."),
+        "Only files can be opened in Phase 7.1." => Some("현재 버전에서는 파일만 열 수 있습니다."),
+        "Only files can be edited in Phase 7.2." => Some("현재 버전에서는 파일만 편집할 수 있습니다."),
+        "Directory" => Some("폴더"),
+        "File" => Some("파일"),
+        "Symbolic Link" => Some("심볼릭 링크"),
+        "Executable" => Some("실행 파일"),
+        "Unknown" => Some("알 수 없음"),
         "Password is empty." => Some("비밀번호가 비어 있습니다."),
         "Password and confirmation do not match." => Some("비밀번호와 확인 값이 다릅니다."),
         _ => None,
@@ -572,6 +758,21 @@ pub fn localize_runtime_text(language: Language, input: &str) -> String {
         return msg.to_string();
     }
 
+    if let Some(action) = input.strip_suffix(" failed.") {
+        return format!("{} 실패.", localize_runtime_text(language, action));
+    }
+    if let Some(action) = input.strip_suffix(" to:") {
+        return format!("{} 대상:", localize_runtime_text(language, action));
+    }
+    if let Some(value) = input.strip_prefix("Path: ") {
+        return format!("경로: {}", value);
+    }
+    if let Some(value) = input.strip_prefix("Reason: ") {
+        return format!("원인: {}", localize_runtime_text(language, value));
+    }
+    if let Some(value) = input.strip_prefix("Hint: ") {
+        return format!("힌트: {}", localize_runtime_text(language, value));
+    }
     if let Some(value) = input.strip_prefix("Default editor: ") {
         return format!("기본 에디터: {}", value);
     }
@@ -589,6 +790,25 @@ pub fn localize_runtime_text(language: Language, input: &str) -> String {
     }
     if let Some(value) = input.strip_prefix("Archive already exists: ") {
         return format!("압축 파일이 이미 존재합니다: {}", value);
+    }
+    if let Some(value) = input.strip_prefix("Destination directory does not exist: ") {
+        return format!("대상 디렉토리가 없습니다: {}", value);
+    }
+    if let Some(value) = input.strip_prefix("Supported: ") {
+        return format!("지원 형식: {}", value);
+    }
+    if let Some(value) = input.strip_prefix("Directory '") {
+        if let Some(name) = value.strip_suffix("' created.") {
+            return format!("디렉토리 '{}' 생성 완료.", name);
+        }
+    }
+    if let Some(value) = input.strip_prefix("Format '") {
+        if let Some(fmt) = value.strip_suffix("' does not support password (zip/7z only).") {
+            return format!(
+                "형식 '{}'은 비밀번호를 지원하지 않습니다 (zip/7z 전용).",
+                fmt
+            );
+        }
     }
     if input.starts_with("Size format: Auto") {
         return I18n::new(language)

@@ -1,7 +1,7 @@
 use super::{DialogKind, InputPurpose};
 use crate::core::actions::generate_help_entries;
 use crate::models::operation::OperationProgress;
-use crate::ui::{I18n, Language, MessageKey, TextKey, Theme};
+use crate::ui::{localize_runtime_text, I18n, Language, MessageKey, TextKey, Theme};
 use crate::utils::formatter::format_file_size;
 use crate::utils::path_display;
 use ratatui::{
@@ -249,9 +249,40 @@ impl<'a> Dialog<'a> {
         show_suggestions_panel: bool,
         mask_input: bool,
     ) {
+        let (title_text, prompt_text) = match purpose {
+            InputPurpose::GoToPath => (
+                self.i18n().tr(TextKey::DialogTitleGoToPath).to_string(),
+                self.i18n().tr(TextKey::DialogPromptPath).to_string(),
+            ),
+            InputPurpose::ArchiveCreatePath => (
+                self.i18n()
+                    .tr(TextKey::DialogTitleCreateArchive)
+                    .to_string(),
+                self.i18n().tr(TextKey::DialogArchivePath).to_string(),
+            ),
+            InputPurpose::ArchiveExtractDestination => (
+                self.i18n()
+                    .tr(TextKey::DialogTitleExtractArchive)
+                    .to_string(),
+                self.i18n().tr(TextKey::DialogPromptExtractTo).to_string(),
+            ),
+            InputPurpose::ArchivePassword => (
+                self.i18n()
+                    .tr(TextKey::DialogTitleArchivePassword)
+                    .to_string(),
+                self.i18n()
+                    .tr(TextKey::DialogPromptArchivePassword)
+                    .to_string(),
+            ),
+            InputPurpose::OperationDestination => (
+                localize_runtime_text(self.language, title),
+                localize_runtime_text(self.language, prompt),
+            ),
+        };
+
         // 테두리
         let block = Block::default()
-            .title(format!(" {} ", title))
+            .title(format!(" {} ", title_text))
             .title_style(
                 Style::default()
                     .fg(self.title_color)
@@ -271,7 +302,7 @@ impl<'a> Dialog<'a> {
 
         // 프롬프트
         let prompt_style = Style::default().fg(self.fg_color);
-        buf.set_string(inner.x, inner.y, prompt, prompt_style);
+        buf.set_string(inner.x, inner.y, prompt_text, prompt_style);
 
         // 입력 필드 배경
         let input_y = inner.y + 1;
@@ -454,9 +485,12 @@ impl<'a> Dialog<'a> {
         message: &str,
         selected_button: usize,
     ) {
+        let localized_title = localize_runtime_text(self.language, title);
+        let localized_message = localize_runtime_text(self.language, message);
+
         // 테두리
         let block = Block::default()
-            .title(format!(" {} ", title))
+            .title(format!(" {} ", localized_title))
             .title_style(
                 Style::default()
                     .fg(self.title_color)
@@ -475,7 +509,7 @@ impl<'a> Dialog<'a> {
         };
 
         // 메시지
-        let paragraph = Paragraph::new(message)
+        let paragraph = Paragraph::new(localized_message)
             .style(Style::default().fg(self.fg_color))
             .wrap(Wrap { trim: true });
         let msg_area = Rect {
@@ -488,21 +522,18 @@ impl<'a> Dialog<'a> {
 
         // 버튼 (하단 중앙)
         let button_y = area.y + area.height - 2;
-        let buttons_width = 14; // "[ OK ]  [Cancel]"
+        let ok_label = self.i18n().tr(TextKey::Ok);
+        let cancel_label = self.i18n().tr(TextKey::Cancel);
+        let buttons_width =
+            (format!(" {} ", ok_label).width() + 2 + format!(" {} ", cancel_label).width()) as u16;
         let button_x = area.x + (area.width.saturating_sub(buttons_width)) / 2;
 
-        let ok_width = self.render_button(
-            buf,
-            button_x,
-            button_y,
-            self.i18n().tr(TextKey::Ok),
-            selected_button == 0,
-        );
+        let ok_width = self.render_button(buf, button_x, button_y, ok_label, selected_button == 0);
         self.render_button(
             buf,
             button_x + ok_width + 2,
             button_y,
-            self.i18n().tr(TextKey::Cancel),
+            cancel_label,
             selected_button == 1,
         );
     }
@@ -594,7 +625,8 @@ impl<'a> Dialog<'a> {
 
     /// 진행률 다이얼로그 렌더링
     fn render_progress(&self, buf: &mut Buffer, area: Rect, progress: &OperationProgress) {
-        let title = format!(" {} ", progress.operation_type.name());
+        let operation_name = localize_runtime_text(self.language, progress.operation_type.name());
+        let title = format!(" {} ", operation_name);
 
         // 테두리
         let block = Block::default()
@@ -672,8 +704,9 @@ impl<'a> Dialog<'a> {
 
         // 속도 / ETA
         let speed_eta = format!(
-            "{}  ETA: {}",
+            "{}  {}: {}",
             progress.format_speed(),
+            self.i18n().tr(TextKey::DialogEta),
             progress.format_eta()
         );
         let speed_style = Style::default().fg(self.success_color);
@@ -838,9 +871,15 @@ impl<'a> Dialog<'a> {
         permissions: &str,
         children_info: &Option<String>,
     ) {
+        let localized_file_type = localize_runtime_text(self.language, file_type);
+        let localized_size = localize_runtime_text(self.language, size);
+        let localized_children_info = children_info
+            .as_ref()
+            .map(|info| localize_runtime_text(self.language, info));
+
         // 테두리
         let block = Block::default()
-            .title(" Properties ")
+            .title(self.i18n().tr(TextKey::DialogTitleProperties))
             .title_style(
                 Style::default()
                     .fg(self.title_color)
@@ -867,8 +906,8 @@ impl<'a> Dialog<'a> {
         let rows: Vec<(&str, &str)> = vec![
             (self.i18n().tr(TextKey::DialogName), name),
             (self.i18n().tr(TextKey::DialogPath), path),
-            (self.i18n().tr(TextKey::DialogType), file_type),
-            (self.i18n().tr(TextKey::DialogSize), size),
+            (self.i18n().tr(TextKey::DialogType), &localized_file_type),
+            (self.i18n().tr(TextKey::DialogSize), &localized_size),
             (self.i18n().tr(TextKey::DialogModified), modified),
             (self.i18n().tr(TextKey::DialogPermissions), permissions),
         ];
@@ -883,7 +922,7 @@ impl<'a> Dialog<'a> {
             y += 1;
         }
 
-        if let Some(ref info) = children_info {
+        if let Some(ref info) = localized_children_info {
             buf.set_string(
                 inner.x,
                 y,
@@ -895,8 +934,10 @@ impl<'a> Dialog<'a> {
 
         // OK 버튼
         let button_y = area.y + area.height - 2;
-        let button_x = area.x + (area.width - 6) / 2;
-        self.render_button(buf, button_x, button_y, self.i18n().tr(TextKey::Ok), true);
+        let ok_label = self.i18n().tr(TextKey::Ok);
+        let button_width = format!(" {} ", ok_label).width() as u16;
+        let button_x = area.x + (area.width.saturating_sub(button_width)) / 2;
+        self.render_button(buf, button_x, button_y, ok_label, true);
     }
 
     /// 도움말 다이얼로그 렌더링
@@ -908,7 +949,7 @@ impl<'a> Dialog<'a> {
         selected_index: usize,
     ) {
         let block = Block::default()
-            .title(" Mount Points ")
+            .title(self.i18n().tr(TextKey::DialogTitleMountPoints))
             .title_style(
                 Style::default()
                     .fg(self.title_color)
@@ -960,8 +1001,8 @@ impl<'a> Dialog<'a> {
         }
 
         // 하단 힌트
-        let hint = " j/k:Move  Enter:Go  Esc:Close ";
-        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint = self.i18n().tr(TextKey::DialogHintMoveGoClose);
+        let hint_x = area.x + (area.width.saturating_sub(hint.width() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
         buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
@@ -974,7 +1015,7 @@ impl<'a> Dialog<'a> {
         selected_index: usize,
     ) {
         let block = Block::default()
-            .title(" Tabs ")
+            .title(self.i18n().tr(TextKey::DialogTitleTabs))
             .title_style(
                 Style::default()
                     .fg(self.title_color)
@@ -1022,8 +1063,8 @@ impl<'a> Dialog<'a> {
         }
 
         // 하단 힌트
-        let hint = " j/k:Move  Enter:Go  Esc:Close ";
-        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint = self.i18n().tr(TextKey::DialogHintMoveGoClose);
+        let hint_x = area.x + (area.width.saturating_sub(hint.width() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
         buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
@@ -1036,7 +1077,7 @@ impl<'a> Dialog<'a> {
         selected_index: usize,
     ) {
         let block = Block::default()
-            .title(" Directory History ")
+            .title(self.i18n().tr(TextKey::DialogTitleHistory))
             .title_style(
                 Style::default()
                     .fg(self.title_color)
@@ -1079,7 +1120,11 @@ impl<'a> Dialog<'a> {
 
             let y = inner.y + i as u16;
             let prefix = format!(" {}: ", actual_index + 1);
-            let marker = if *is_current { " (current)" } else { "" };
+            let marker = if *is_current {
+                self.i18n().tr(TextKey::DialogHistoryCurrentMarker)
+            } else {
+                ""
+            };
             let total_width = inner.width as usize;
             let reserved = UnicodeWidthStr::width(prefix.as_str()) + UnicodeWidthStr::width(marker);
             let path_max_width = total_width.saturating_sub(reserved);
@@ -1120,8 +1165,8 @@ impl<'a> Dialog<'a> {
             }
         }
 
-        let hint = " j/k:Move  Enter:Go  D:Clear  Esc:Close ";
-        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint = self.i18n().tr(TextKey::DialogHintMoveGoClearClose);
+        let hint_x = area.x + (area.width.saturating_sub(hint.width() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
         buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
@@ -1134,7 +1179,7 @@ impl<'a> Dialog<'a> {
         selected_index: usize,
     ) {
         let block = Block::default()
-            .title(" Bookmarks ")
+            .title(self.i18n().tr(TextKey::DialogTitleBookmarks))
             .title_style(
                 Style::default()
                     .fg(self.title_color)
@@ -1193,8 +1238,8 @@ impl<'a> Dialog<'a> {
             buf.set_string(inner.x, y, &display, style);
         }
 
-        let hint = " j/k:Move  Enter:Go  r:Rename  d:Delete  Esc:Close ";
-        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint = self.i18n().tr(TextKey::DialogHintMoveGoRenameDeleteClose);
+        let hint_x = area.x + (area.width.saturating_sub(hint.width() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
         buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
@@ -1210,7 +1255,10 @@ impl<'a> Dialog<'a> {
         scroll_offset: usize,
         truncated: bool,
     ) {
-        let title = format!(" Archive Preview: {} ", archive_name);
+        let title = self.i18n().fmt(
+            MessageKey::DialogArchivePreviewTitle,
+            &[("name", archive_name.to_string())],
+        );
         let block = Block::default()
             .title(title)
             .title_style(
@@ -1254,14 +1302,14 @@ impl<'a> Dialog<'a> {
             buf.set_string(inner.x, y, line, style);
         }
 
-        let mut hint = format!(
-            " j/k:Move  PgUp/PgDn:Scroll  Home/End  Esc:Close  [{} items] ",
-            items.len()
+        let mut hint = self.i18n().fmt(
+            MessageKey::DialogArchivePreviewHint,
+            &[("count", items.len().to_string())],
         );
         if truncated {
-            hint.push_str("[showing first 5000]");
+            hint.push_str(self.i18n().tr(TextKey::DialogArchivePreviewTruncated));
         }
-        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint_x = area.x + (area.width.saturating_sub(hint.width() as u16)) / 2;
         let hint_y = area.y + area.height - 1;
         buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
     }
@@ -1282,7 +1330,7 @@ impl<'a> Dialog<'a> {
         selected_button: usize,
     ) {
         let block = Block::default()
-            .title(" Create Archive ")
+            .title(self.i18n().tr(TextKey::DialogTitleCreateArchive))
             .title_style(
                 Style::default()
                     .fg(self.title_color)
@@ -1309,7 +1357,12 @@ impl<'a> Dialog<'a> {
         } else {
             label_style
         };
-        buf.set_string(inner.x, inner.y, "Archive path:", path_label_style);
+        buf.set_string(
+            inner.x,
+            inner.y,
+            self.i18n().tr(TextKey::DialogArchivePath),
+            path_label_style,
+        );
         self.render_text_field(
             buf,
             inner.x,
@@ -1329,7 +1382,11 @@ impl<'a> Dialog<'a> {
             label_style
         };
         let checkbox = if use_password { "[x]" } else { "[ ]" };
-        let checkbox_line = format!("{} Use password", checkbox);
+        let checkbox_line = format!(
+            "{} {}",
+            checkbox,
+            self.i18n().tr(TextKey::DialogUsePassword)
+        );
         buf.set_string(inner.x, inner.y + 3, checkbox_line, checkbox_style);
 
         let password_label_style = if use_password {
@@ -1341,7 +1398,12 @@ impl<'a> Dialog<'a> {
         } else {
             dim_style
         };
-        buf.set_string(inner.x, inner.y + 5, "Password:", password_label_style);
+        buf.set_string(
+            inner.x,
+            inner.y + 5,
+            self.i18n().tr(TextKey::DialogPassword),
+            password_label_style,
+        );
         let masked_password = "*".repeat(password_value.chars().count());
         self.render_text_field(
             buf,
@@ -1368,7 +1430,7 @@ impl<'a> Dialog<'a> {
         buf.set_string(
             inner.x,
             inner.y + 8,
-            "Confirm password:",
+            self.i18n().tr(TextKey::DialogConfirmPassword),
             confirm_label_style,
         );
         let masked_confirm = "*".repeat(password_confirm_value.chars().count());
@@ -1385,8 +1447,8 @@ impl<'a> Dialog<'a> {
             },
         );
 
-        let hint = "Tab/Shift+Tab:Move  Space:Toggle password  Enter:OK  Esc:Cancel  (zip/7z only)";
-        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint = self.i18n().tr(TextKey::DialogHintArchiveCreate);
+        let hint_x = area.x + (area.width.saturating_sub(hint.width() as u16)) / 2;
         let hint_y = area.y + area.height.saturating_sub(3);
         buf.set_string(hint_x, hint_y, hint, Style::default().fg(self.muted_color));
 
@@ -1394,12 +1456,18 @@ impl<'a> Dialog<'a> {
         let buttons_selected = focused_field == 4;
         let ok_selected = buttons_selected && selected_button == 0;
         let cancel_selected = buttons_selected && selected_button == 1;
-        let ok_width = self.render_button(buf, inner.x, button_y, "OK", ok_selected);
+        let ok_width = self.render_button(
+            buf,
+            inner.x,
+            button_y,
+            self.i18n().tr(TextKey::Ok),
+            ok_selected,
+        );
         self.render_button(
             buf,
             inner.x + ok_width + 2,
             button_y,
-            "Cancel",
+            self.i18n().tr(TextKey::Cancel),
             cancel_selected,
         );
     }
@@ -1485,7 +1553,7 @@ impl<'a> Dialog<'a> {
                 &[("count", result_count.to_string())],
             )
         };
-        let result_x = area.x + area.width.saturating_sub(result_text.len() as u16 + 3);
+        let result_x = area.x + area.width.saturating_sub(result_text.width() as u16 + 3);
 
         // 검색 표시줄
         let search_y = area.y + 1;
@@ -1497,7 +1565,7 @@ impl<'a> Dialog<'a> {
         let search_label_style = Style::default().fg(self.border_color);
         let search_style = Style::default().fg(self.fg_color).bg(self.input_bg);
         buf.set_string(inner.x, search_y, search_label, search_label_style);
-        let search_field_x = inner.x + 9;
+        let search_field_x = inner.x + search_label.width() as u16 + 1;
         // 우측 결과 텍스트와 겹치지 않도록 검색 필드 폭 예약
         let search_field_end = result_x.saturating_sub(2).max(search_field_x);
         let search_field_width = search_field_end.saturating_sub(search_field_x);
@@ -1526,7 +1594,7 @@ impl<'a> Dialog<'a> {
             buf.set_string(inner.x, y, no_result, Style::default().fg(self.muted_color));
             let hint = self.i18n().tr(TextKey::DialogHelpHint);
             let hint_style = Style::default().fg(self.muted_color);
-            let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+            let hint_x = area.x + (area.width.saturating_sub(hint.width() as u16)) / 2;
             let hint_y = area.y + area.height - 2;
             buf.set_string(hint_x, hint_y, hint, hint_style);
             return;
@@ -1601,7 +1669,7 @@ impl<'a> Dialog<'a> {
         // 하단 힌트
         let hint = self.i18n().tr(TextKey::DialogHelpHint);
         let hint_style = Style::default().fg(self.muted_color);
-        let hint_x = area.x + (area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hint_x = area.x + (area.width.saturating_sub(hint.width() as u16)) / 2;
         let hint_y = area.y + area.height - 2;
         buf.set_string(hint_x, hint_y, hint, hint_style);
     }
@@ -1615,6 +1683,9 @@ impl<'a> Dialog<'a> {
         message: &str,
         is_error: bool,
     ) {
+        let localized_title = localize_runtime_text(self.language, title);
+        let localized_message = localize_runtime_text(self.language, message);
+
         let title_color = if is_error {
             self.error_color
         } else {
@@ -1628,7 +1699,7 @@ impl<'a> Dialog<'a> {
 
         // 테두리
         let block = Block::default()
-            .title(format!(" {} ", title))
+            .title(format!(" {} ", localized_title))
             .title_style(
                 Style::default()
                     .fg(title_color)
@@ -1647,15 +1718,17 @@ impl<'a> Dialog<'a> {
         };
 
         // 메시지
-        let paragraph = Paragraph::new(message)
+        let paragraph = Paragraph::new(localized_message)
             .style(Style::default().fg(self.fg_color))
             .wrap(Wrap { trim: true });
         paragraph.render(inner, buf);
 
         // OK 버튼
         let button_y = area.y + area.height - 2;
-        let button_x = area.x + (area.width - 6) / 2;
-        self.render_button(buf, button_x, button_y, self.i18n().tr(TextKey::Ok), true);
+        let ok_label = self.i18n().tr(TextKey::Ok);
+        let button_width = format!(" {} ", ok_label).width() as u16;
+        let button_x = area.x + (area.width.saturating_sub(button_width)) / 2;
+        self.render_button(buf, button_x, button_y, ok_label, true);
     }
 }
 
@@ -1996,6 +2069,47 @@ mod tests {
             }
             _ => panic!("Expected ArchiveCreateOptions dialog"),
         }
+    }
+
+    #[test]
+    fn test_archive_create_options_localized_in_korean() {
+        let dialog = DialogKind::archive_create_options_input("/tmp/a.zip", PathBuf::from("/tmp"));
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 30,
+        };
+        let mut buf = Buffer::empty(area);
+        Dialog::new(&dialog)
+            .language(Language::Korean)
+            .render(area, &mut buf);
+
+        let mut rendered = String::new();
+        for y in 0..area.height {
+            let mut line = String::new();
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    line.push_str(cell.symbol());
+                }
+            }
+            rendered.push_str(&line);
+            rendered.push('\n');
+        }
+
+        let normalized: String = rendered.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(normalized.contains("압축경로:"), "rendered=\n{}", rendered);
+        assert!(normalized.contains("비밀번호"), "rendered=\n{}", rendered);
+        assert!(
+            !rendered.contains("Archive path:"),
+            "rendered=\n{}",
+            rendered
+        );
+        assert!(
+            !rendered.contains("Use password"),
+            "rendered=\n{}",
+            rendered
+        );
     }
 
     #[test]

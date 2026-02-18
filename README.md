@@ -36,6 +36,70 @@ cargo build --release
 ./target/release/boksldir
 ```
 
+## 배포/패키징 (OS별)
+
+공통: 먼저 릴리스 바이너리를 생성합니다.
+
+```bash
+cargo build --release
+```
+
+빌드 결과물:
+- `target/release/boksldir` (Linux/macOS)
+- `target/release/boksldir.exe` (Windows)
+
+### macOS
+
+가장 단순한 배포 형태는 `.tar.gz`입니다.
+
+```bash
+mkdir -p dist/boksldir-macos
+cp target/release/boksldir dist/boksldir-macos/
+tar -czf dist/boksldir-macos.tar.gz -C dist boksldir-macos
+```
+
+배포 정책이 필요한 경우:
+- Apple Developer 인증서로 `codesign`
+- 외부 배포 시 `notarize`/`staple` 적용
+
+### Linux
+
+기본 배포는 `.tar.gz` 또는 `.zip`을 권장합니다.
+
+```bash
+mkdir -p dist/boksldir-linux
+cp target/release/boksldir dist/boksldir-linux/
+tar -czf dist/boksldir-linux.tar.gz -C dist boksldir-linux
+```
+
+배포판 패키지 생성 예시:
+- Debian/Ubuntu: `cargo-deb`
+- RHEL/Fedora: `cargo-generate-rpm`
+
+```bash
+cargo install cargo-deb cargo-generate-rpm
+cargo deb
+cargo generate-rpm
+```
+
+### Windows
+
+기본 배포는 `.zip`이 가장 간단합니다.
+
+```powershell
+New-Item -ItemType Directory -Force dist\boksldir-windows | Out-Null
+Copy-Item target\release\boksldir.exe dist\boksldir-windows\
+Compress-Archive -Path dist\boksldir-windows\* -DestinationPath dist\boksldir-windows.zip -Force
+```
+
+설치형 배포판(MSI) 예시:
+- WiX Toolset + `cargo-wix` 사용
+
+```powershell
+cargo install cargo-wix
+cargo wix
+```
+
 ## 개발
 
 ### 코드 품질 도구

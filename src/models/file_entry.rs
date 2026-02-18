@@ -44,6 +44,7 @@ pub struct FileEntry {
 
 impl FileEntry {
     /// 새 파일 엔트리 생성
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         path: PathBuf,

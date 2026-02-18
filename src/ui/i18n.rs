@@ -1,15 +1,10 @@
 #![allow(dead_code)]
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Language {
+    #[default]
     English,
     Korean,
-}
-
-impl Default for Language {
-    fn default() -> Self {
-        Self::English
-    }
 }
 
 impl Language {

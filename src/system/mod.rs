@@ -9,4 +9,6 @@ pub use archive::{
     ArchiveProgressEvent, ArchiveSummary,
 };
 pub use filesystem::FileSystem;
-pub use ime::{get_current_ime, ImeStatus};
+#[cfg(not(test))]
+pub use ime::get_current_ime;
+pub use ime::ImeStatus;

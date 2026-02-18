@@ -280,7 +280,7 @@ impl App {
             toast_message: None,
             icon_mode: crate::ui::components::panel::IconMode::default(),
             size_format: SizeFormat::default(),
-            ime_status: crate::system::get_current_ime(),
+            ime_status: Self::initial_ime_status(),
             default_terminal_editor: Self::resolve_default_terminal_editor_from_env(),
             pending_terminal_editor_request: None,
             bookmarks: Vec::new(),
@@ -312,6 +312,17 @@ impl App {
         startup_path
             .as_deref()
             .and_then(Self::normalize_existing_directory_path)
+    }
+
+    #[cfg(test)]
+    fn initial_ime_status() -> ImeStatus {
+        // 테스트에서는 OS IME 조회 FFI를 건너뛰어 병렬 실행 시 불안정성을 피한다.
+        ImeStatus::Unknown
+    }
+
+    #[cfg(not(test))]
+    fn initial_ime_status() -> ImeStatus {
+        crate::system::get_current_ime()
     }
 
     #[cfg(test)]

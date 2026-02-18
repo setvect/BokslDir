@@ -358,9 +358,9 @@ impl I18n {
             (Language::Korean, TextKey::DialogKeyboardShortcutsTitle) => " 단축키 도움말 ",
             (Language::English, TextKey::AboutTitle) => "About BokslDir",
             (Language::Korean, TextKey::AboutTitle) => "복슬Dir 정보",
-            (Language::English, TextKey::AboutBody) => "BokslDir\nRust TUI dual-panel file manager",
+            (Language::English, TextKey::AboutBody) => "BokslDir(ver 0.1.0)\n\nMy love Boksl\n\nGitHub: https://github.com/setvect/BokslDir",
             (Language::Korean, TextKey::AboutBody) => {
-                "복슬Dir\nRust 기반 TUI 듀얼 패널 파일 매니저"
+                "복슬Dir(ver 0.1.0)\n\n내 사랑 복슬이\n\nGitHub: https://github.com/setvect/BokslDir"
             }
         }
     }

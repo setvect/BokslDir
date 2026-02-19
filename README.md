@@ -65,6 +65,17 @@ cargo clippy --all-targets --all-features
 cargo test
 ```
 
+## 보안 취약점 점검
+
+```bash
+cargo install cargo-audit
+cargo audit
+```
+
+GitHub Actions에서도 `cargo audit`를 자동 실행합니다.
+- 파일: `.github/workflows/security-audit.yml`
+- 트리거: `main` push/PR, 매주 월요일(UTC), 수동 실행
+
 ## 라이선스
 
 MIT

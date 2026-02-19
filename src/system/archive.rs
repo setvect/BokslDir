@@ -1223,7 +1223,7 @@ fn extract_7z_archive(
     let mut bytes_processed = 0u64;
     let dest_root = request.dest_dir.clone();
 
-    let mut extract_fn = |entry: &sevenz_rust2::SevenZArchiveEntry,
+    let mut extract_fn = |entry: &sevenz_rust2::ArchiveEntry,
                           reader: &mut dyn Read,
                           _output_path: &PathBuf|
      -> std::result::Result<bool, sevenz_rust2::Error> {
@@ -1232,7 +1232,7 @@ fn extract_7z_archive(
             return Ok(false);
         }
 
-        let entry_name = entry.name.clone();
+        let entry_name = entry.name().to_string();
         let Some(safe_dest) = sanitize_extract_path(&dest_root, Path::new(&entry_name)) else {
             summary.items_processed += 1;
             summary.items_failed += 1;
@@ -1243,7 +1243,7 @@ fn extract_7z_archive(
         };
 
         if safe_dest.exists() {
-            if entry.is_directory && safe_dest.is_dir() {
+            if entry.is_directory() && safe_dest.is_dir() {
                 files_completed += 1;
                 summary.items_processed += 1;
                 send_progress(
@@ -1293,7 +1293,7 @@ fn extract_7z_archive(
             }
         }
 
-        if entry.is_directory {
+        if entry.is_directory() {
             if let Err(e) = fs::create_dir_all(&safe_dest) {
                 summary.items_processed += 1;
                 summary.items_failed += 1;
@@ -1335,7 +1335,7 @@ fn extract_7z_archive(
         }
 
         files_completed += 1;
-        bytes_processed = bytes_processed.saturating_add(entry.size);
+        bytes_processed = bytes_processed.saturating_add(entry.size());
         summary.items_processed += 1;
         send_progress(
             progress_tx,
@@ -1438,7 +1438,7 @@ fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<Vec<ArchiveEnt
     let password = password
         .map(SevenZPassword::from)
         .unwrap_or_else(SevenZPassword::empty);
-    let reader = sevenz_rust2::SevenZReader::new(file, password)
+    let reader = sevenz_rust2::ArchiveReader::new(file, password)
         .map_err(|e| map_7z_list_error(path, e, password_hint))?;
 
     Ok(reader
@@ -1446,9 +1446,9 @@ fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<Vec<ArchiveEnt
         .files
         .iter()
         .map(|e| ArchiveEntry {
-            path: e.name.clone(),
-            size: e.size,
-            is_dir: e.is_directory,
+            path: e.name().to_string(),
+            size: e.size(),
+            is_dir: e.is_directory(),
         })
         .collect())
 }

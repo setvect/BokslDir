@@ -274,6 +274,7 @@ impl<'a> Dialog<'a> {
                     .tr(TextKey::DialogPromptArchivePassword)
                     .to_string(),
             ),
+            InputPurpose::TerminalCommand => ("Run Command".to_string(), "Command:".to_string()),
             InputPurpose::OperationDestination => (
                 localize_runtime_text(self.language, title),
                 localize_runtime_text(self.language, prompt),

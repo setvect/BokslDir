@@ -14,6 +14,8 @@ pub enum InputPurpose {
     ArchiveExtractDestination,
     /// 압축 비밀번호 입력
     ArchivePassword,
+    /// 터미널 명령 실행
+    TerminalCommand,
 }
 
 /// 다이얼로그 종류

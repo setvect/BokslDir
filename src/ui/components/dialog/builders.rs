@@ -123,6 +123,24 @@ impl DialogKind {
         }
     }
 
+    /// 터미널 명령 입력 다이얼로그 생성
+    pub fn terminal_command_input(initial: impl Into<String>, base_path: PathBuf) -> Self {
+        let value: String = initial.into();
+        let cursor_pos = value.len();
+        DialogKind::Input {
+            title: "Run Command".to_string(),
+            prompt: "Command:".to_string(),
+            value,
+            cursor_pos,
+            selected_button: 0,
+            purpose: InputPurpose::TerminalCommand,
+            base_path,
+            completion_candidates: Vec::new(),
+            completion_index: None,
+            mask_input: false,
+        }
+    }
+
     /// 새 확인 다이얼로그 생성
     pub fn confirm(title: impl Into<String>, message: impl Into<String>) -> Self {
         DialogKind::Confirm {

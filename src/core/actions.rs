@@ -30,6 +30,7 @@ pub enum Action {
     Move,
     OpenDefaultApp,
     OpenTerminalEditor,
+    RunShellCommand,
     Delete,
     PermanentDelete,
     MakeDirectory,
@@ -287,6 +288,14 @@ pub static ACTION_DEFS: &[ActionDef] = &[
         label: "Open in terminal editor",
         category: ActionCategory::FileOperation,
         shortcut_display: Some("e"),
+        command_bar: None,
+    },
+    ActionDef {
+        action: Action::RunShellCommand,
+        id: "run_shell_command",
+        label: "Run shell command",
+        category: ActionCategory::FileOperation,
+        shortcut_display: Some(":"),
         command_bar: None,
     },
     ActionDef {
@@ -866,6 +875,16 @@ fn build_key_bindings() -> Vec<KeyBinding> {
             action: Action::OpenTerminalEditor,
         },
         KeyBinding {
+            code: KeyCode::Char(':'),
+            modifiers: Some(KeyModifiers::NONE),
+            action: Action::RunShellCommand,
+        },
+        KeyBinding {
+            code: KeyCode::Char(':'),
+            modifiers: Some(KeyModifiers::SHIFT),
+            action: Action::RunShellCommand,
+        },
+        KeyBinding {
             code: KeyCode::Char('d'),
             modifiers: Some(KeyModifiers::NONE),
             action: Action::Delete,
@@ -1177,6 +1196,10 @@ mod tests {
             Some(Action::OpenTerminalEditor)
         );
         assert_eq!(
+            Action::from_id("run_shell_command"),
+            Some(Action::RunShellCommand)
+        );
+        assert_eq!(
             Action::from_id("archive_compress"),
             Some(Action::ArchiveCompress)
         );
@@ -1242,6 +1265,14 @@ mod tests {
         assert_eq!(
             find_action(KeyModifiers::NONE, KeyCode::Char('e')),
             Some(Action::OpenTerminalEditor)
+        );
+        assert_eq!(
+            find_action(KeyModifiers::NONE, KeyCode::Char(':')),
+            Some(Action::RunShellCommand)
+        );
+        assert_eq!(
+            find_action(KeyModifiers::SHIFT, KeyCode::Char(':')),
+            Some(Action::RunShellCommand)
         );
         assert_eq!(
             find_action(KeyModifiers::NONE, KeyCode::Char('q')),
@@ -1386,6 +1417,7 @@ mod tests {
         assert_eq!(get_shortcut_display("goto_path"), Some("gp"));
         assert_eq!(get_shortcut_display("open_default"), Some("o"));
         assert_eq!(get_shortcut_display("open_terminal_editor"), Some("e"));
+        assert_eq!(get_shortcut_display("run_shell_command"), Some(":"));
         assert_eq!(get_shortcut_display("archive_compress"), Some("zc"));
         assert_eq!(get_shortcut_display("archive_extract"), Some("zx"));
         assert_eq!(get_shortcut_display("archive_extract_auto"), Some("za"));

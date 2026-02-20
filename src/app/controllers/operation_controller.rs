@@ -7,6 +7,7 @@ pub(in crate::app) fn execute(app: &mut App, action: Action) {
         Action::Move => app.start_move(),
         Action::OpenDefaultApp => app.start_open_default_app(),
         Action::OpenTerminalEditor => app.start_open_terminal_editor(),
+        Action::RunShellCommand => app.start_run_shell_command(),
         Action::Delete => app.start_delete(),
         Action::PermanentDelete => app.start_permanent_delete(),
         Action::MakeDirectory => app.start_mkdir(),

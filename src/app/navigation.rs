@@ -110,6 +110,7 @@ impl App {
             | Action::Move
             | Action::OpenDefaultApp
             | Action::OpenTerminalEditor
+            | Action::RunShellCommand
             | Action::Delete
             | Action::PermanentDelete
             | Action::MakeDirectory

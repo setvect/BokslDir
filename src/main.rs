@@ -5,7 +5,7 @@ mod system;
 mod ui;
 mod utils;
 
-use app::{App, TerminalEditorRequest};
+use app::{App, TerminalCommandRequest, TerminalEditorRequest};
 use core::actions::{find_action, find_sequence_action, is_sequence_prefix};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -159,6 +159,12 @@ fn run_app<B: ratatui::backend::Backend<Error = io::Error>>(
             app.apply_terminal_editor_result(&request, result);
             let _ = terminal.clear();
         }
+        if let Some(request) = app.take_pending_terminal_command_request() {
+            let result = run_terminal_command_request(&request);
+            app.refresh_both_panels();
+            app.apply_terminal_command_result(&request, result);
+            let _ = terminal.clear();
+        }
 
         if app.should_quit() {
             break;
@@ -169,13 +175,19 @@ fn run_app<B: ratatui::backend::Backend<Error = io::Error>>(
 }
 
 fn run_terminal_editor_request(request: &TerminalEditorRequest) -> std::result::Result<(), String> {
-    suspend_tui_and_run_editor(&request.editor_command, &request.target_path)
+    suspend_tui_and_run(|| run_editor_process(&request.editor_command, &request.target_path))
 }
 
-fn suspend_tui_and_run_editor(
-    editor_command: &str,
-    target_path: &Path,
+fn run_terminal_command_request(
+    request: &TerminalCommandRequest,
 ) -> std::result::Result<(), String> {
+    suspend_tui_and_run(|| run_shell_command(&request.command, &request.working_dir))
+}
+
+fn suspend_tui_and_run<F>(run: F) -> std::result::Result<(), String>
+where
+    F: FnOnce() -> std::result::Result<(), String>,
+{
     disable_raw_mode().map_err(|e| format!("Failed to disable raw mode: {}", e))?;
 
     let mut stdout = io::stdout();
@@ -184,7 +196,7 @@ fn suspend_tui_and_run_editor(
         return Err(format!("Failed to leave alternate screen: {}", e));
     }
 
-    let run_result = run_editor_process(editor_command, target_path);
+    let run_result = run();
 
     let mut restore_errors = Vec::new();
     if let Err(e) = execute!(stdout, EnterAlternateScreen) {
@@ -203,6 +215,14 @@ fn suspend_tui_and_run_editor(
         }
         Err(message)
     }
+}
+
+fn resolve_shell_for_command() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "/bin/sh".to_string())
 }
 
 fn parse_editor_command(
@@ -238,6 +258,25 @@ fn run_editor_process(editor_command: &str, target_path: &Path) -> std::result::
         Err(format!(
             "Editor '{}' exited with status {}",
             editor_command, status
+        ))
+    }
+}
+
+fn run_shell_command(command: &str, working_dir: &Path) -> std::result::Result<(), String> {
+    let shell = resolve_shell_for_command();
+    let status = Command::new(&shell)
+        .arg("-lc")
+        .arg(command)
+        .current_dir(working_dir)
+        .status()
+        .map_err(|e| format!("Failed to start shell '{}': {}", shell, e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Command '{}' exited with status {}",
+            command, status
         ))
     }
 }
@@ -1616,6 +1655,19 @@ mod tests {
             parse_editor_command("\"broken"),
             Err(message) if message.contains("Invalid editor command syntax")
         ));
+    }
+
+    #[test]
+    fn test_resolve_shell_for_command_returns_non_empty() {
+        let shell = resolve_shell_for_command();
+        assert!(!shell.trim().is_empty());
+    }
+
+    #[test]
+    fn test_run_shell_command_success_and_failure() {
+        let cwd = std::path::Path::new(".");
+        assert!(run_shell_command("true", cwd).is_ok());
+        assert!(run_shell_command("false", cwd).is_err());
     }
 
     #[test]

@@ -73,6 +73,12 @@ pub struct TerminalEditorRequest {
     pub target_path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct TerminalCommandRequest {
+    pub command: String,
+    pub working_dir: PathBuf,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArchiveWorkerKind {
     Compress,
@@ -205,6 +211,8 @@ pub struct App {
     default_terminal_editor: String,
     /// 메인 루프에서 처리할 터미널 에디터 실행 요청
     pending_terminal_editor_request: Option<TerminalEditorRequest>,
+    /// 메인 루프에서 처리할 터미널 명령 실행 요청
+    pending_terminal_command_request: Option<TerminalCommandRequest>,
     /// 전역 북마크 목록
     bookmarks: Vec<PersistedBookmark>,
     /// 테스트에서 설정 저장 경로를 격리하기 위한 override
@@ -283,6 +291,7 @@ impl App {
             ime_status: Self::initial_ime_status(),
             default_terminal_editor: Self::resolve_default_terminal_editor_from_env(),
             pending_terminal_editor_request: None,
+            pending_terminal_command_request: None,
             bookmarks: Vec::new(),
             state_store_override: None,
         };
@@ -362,6 +371,7 @@ impl App {
             ime_status: ImeStatus::Unknown,
             default_terminal_editor: Self::FALLBACK_TERMINAL_EDITOR.to_string(),
             pending_terminal_editor_request: None,
+            pending_terminal_command_request: None,
             bookmarks: Vec::new(),
             state_store_override: Some(state_store_override),
         }
@@ -759,6 +769,7 @@ impl Default for App {
                 ime_status: ImeStatus::Unknown,
                 default_terminal_editor: Self::FALLBACK_TERMINAL_EDITOR.to_string(),
                 pending_terminal_editor_request: None,
+                pending_terminal_command_request: None,
                 bookmarks: Vec::new(),
                 state_store_override: None,
             }

@@ -650,6 +650,7 @@ pub fn create_default_menus(language: Language) -> Vec<Menu> {
                     "open_terminal_editor",
                     i18n.menu_item("open_terminal_editor"),
                 ),
+                menu_action("run_shell_command", i18n.menu_item("run_shell_command")),
                 MenuItem::separator(),
                 menu_action("archive_compress", i18n.menu_item("archive_compress")),
                 menu_action("archive_extract", i18n.menu_item("archive_extract")),
@@ -810,6 +811,7 @@ mod tests {
         let menu = Menu::new("test", "테스트").items(vec![
             MenuItem::action("open_default", "기본 프로그램으로 열기").shortcut("o"),
             MenuItem::action("open_terminal_editor", "터미널 에디터로 열기").shortcut("e"),
+            MenuItem::action("run_shell_command", "명령 실행").shortcut(":"),
         ]);
         let state = MenuState::new();
         let dropdown = DropdownMenu::new(&menu, &state);

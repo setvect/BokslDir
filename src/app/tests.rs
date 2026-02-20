@@ -1217,6 +1217,57 @@ fn test_start_open_terminal_editor_queues_request_for_file() {
 }
 
 #[test]
+fn test_start_run_shell_command_opens_input_dialog() {
+    let mut app = make_test_app();
+    let temp = TempDir::new().unwrap();
+    let base = temp.path().join("base");
+    fs::create_dir_all(&base).unwrap();
+    app.go_to_mount_point(base.clone());
+
+    app.start_run_shell_command();
+
+    match &app.dialog {
+        Some(DialogKind::Input {
+            purpose, base_path, ..
+        }) => {
+            assert_eq!(*purpose, InputPurpose::TerminalCommand);
+            assert_eq!(base_path, &base);
+        }
+        other => panic!("expected terminal command input dialog, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_confirm_input_dialog_terminal_command_queues_request() {
+    let mut app = make_test_app();
+    let temp = TempDir::new().unwrap();
+    let base = temp.path().join("base");
+    fs::create_dir_all(&base).unwrap();
+    app.go_to_mount_point(base.clone());
+    app.start_run_shell_command();
+
+    app.confirm_input_dialog("ls -la".to_string());
+
+    let request = app
+        .take_pending_terminal_command_request()
+        .expect("request should be queued");
+    assert_eq!(request.command, "ls -la");
+    assert_eq!(request.working_dir, base);
+    assert!(app.dialog.is_none());
+}
+
+#[test]
+fn test_confirm_input_dialog_terminal_command_ignores_blank_input() {
+    let mut app = make_test_app();
+    app.start_run_shell_command();
+
+    app.confirm_input_dialog("   ".to_string());
+
+    assert!(app.take_pending_terminal_command_request().is_none());
+    assert!(app.dialog.is_none());
+}
+
+#[test]
 fn test_apply_terminal_editor_result_sets_toast_on_success() {
     let mut app = make_test_app();
     let request = TerminalEditorRequest {
@@ -1244,6 +1295,42 @@ fn test_apply_terminal_editor_result_shows_error_on_failure() {
         Some(DialogKind::Error { message, .. }) => {
             assert!(message.contains("Open in terminal editor failed."));
             assert!(message.contains("Failed to start 'vi'"));
+        }
+        other => panic!("expected error dialog, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_apply_terminal_command_result_sets_toast_on_success() {
+    let mut app = make_test_app();
+    let request = TerminalCommandRequest {
+        command: "ls -la".to_string(),
+        working_dir: PathBuf::from("/tmp"),
+    };
+
+    app.apply_terminal_command_result(&request, Ok(()));
+
+    assert_eq!(app.toast_display(), Some("Command finished"));
+    assert!(app.dialog.is_none());
+}
+
+#[test]
+fn test_apply_terminal_command_result_shows_error_on_failure() {
+    let mut app = make_test_app();
+    let request = TerminalCommandRequest {
+        command: "badcommand".to_string(),
+        working_dir: PathBuf::from("/tmp"),
+    };
+
+    app.apply_terminal_command_result(
+        &request,
+        Err("Command 'badcommand' exited with status 127".to_string()),
+    );
+
+    match &app.dialog {
+        Some(DialogKind::Error { message, .. }) => {
+            assert!(message.contains("Run command failed."));
+            assert!(message.contains("badcommand"));
         }
         other => panic!("expected error dialog, got {:?}", other),
     }

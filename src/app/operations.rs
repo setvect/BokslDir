@@ -1087,7 +1087,11 @@ impl App {
             _ => return,
         };
 
-        let use_completion = !mask_input && !matches!(purpose, InputPurpose::ArchivePassword);
+        let use_completion = !mask_input
+            && !matches!(
+                purpose,
+                InputPurpose::ArchivePassword | InputPurpose::TerminalCommand
+            );
         let completion_candidates = if use_completion {
             self.collect_input_completion_candidates(&value, &base_path)
         } else {
@@ -1641,6 +1645,17 @@ impl App {
             }
             InputPurpose::ArchivePassword => {
                 self.confirm_archive_password_input(dest_path_str);
+            }
+            InputPurpose::TerminalCommand => {
+                let command = dest_path_str.trim().to_string();
+                self.close_dialog();
+                if command.is_empty() {
+                    return;
+                }
+                self.pending_terminal_command_request = Some(TerminalCommandRequest {
+                    command,
+                    working_dir: base_path,
+                });
             }
         }
     }
@@ -2420,8 +2435,19 @@ impl App {
         });
     }
 
+    /// 터미널 명령 실행 입력 다이얼로그 열기 (:)
+    pub fn start_run_shell_command(&mut self) {
+        let working_dir = self.active_panel_state().current_path.clone();
+        self.dialog = Some(DialogKind::terminal_command_input("", working_dir.clone()));
+        self.update_input_completion_state();
+    }
+
     pub fn take_pending_terminal_editor_request(&mut self) -> Option<TerminalEditorRequest> {
         self.pending_terminal_editor_request.take()
+    }
+
+    pub fn take_pending_terminal_command_request(&mut self) -> Option<TerminalCommandRequest> {
+        self.pending_terminal_command_request.take()
     }
 
     pub fn apply_terminal_editor_result(
@@ -2448,6 +2474,29 @@ impl App {
                         Some(&request.target_path),
                         &reason,
                         "Check editor command and file path.",
+                    ),
+                ));
+            }
+        }
+    }
+
+    pub fn apply_terminal_command_result(
+        &mut self,
+        request: &TerminalCommandRequest,
+        result: std::result::Result<(), String>,
+    ) {
+        match result {
+            Ok(()) => {
+                self.set_toast("Command finished");
+            }
+            Err(reason) => {
+                self.dialog = Some(DialogKind::error(
+                    "Error",
+                    Self::format_user_error(
+                        "Run command",
+                        Some(&request.working_dir),
+                        &reason,
+                        "Check shell command and current directory.",
                     ),
                 ));
             }

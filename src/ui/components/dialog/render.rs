@@ -274,7 +274,10 @@ impl<'a> Dialog<'a> {
                     .tr(TextKey::DialogPromptArchivePassword)
                     .to_string(),
             ),
-            InputPurpose::TerminalCommand => ("Run Command".to_string(), "Command:".to_string()),
+            InputPurpose::TerminalCommand => (
+                self.i18n().tr(TextKey::DialogTitleRunCommand).to_string(),
+                self.i18n().tr(TextKey::DialogPromptCommand).to_string(),
+            ),
             InputPurpose::OperationDestination => (
                 localize_runtime_text(self.language, title),
                 localize_runtime_text(self.language, prompt),
@@ -2111,6 +2114,37 @@ mod tests {
             "rendered=\n{}",
             rendered
         );
+    }
+
+    #[test]
+    fn test_terminal_command_input_localized_in_korean() {
+        let dialog = DialogKind::terminal_command_input("", PathBuf::from("/tmp"));
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 30,
+        };
+        let mut buf = Buffer::empty(area);
+        Dialog::new(&dialog)
+            .language(Language::Korean)
+            .render(area, &mut buf);
+
+        let mut rendered = String::new();
+        for y in 0..area.height {
+            let mut line = String::new();
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    line.push_str(cell.symbol());
+                }
+            }
+            rendered.push_str(&line);
+            rendered.push('\n');
+        }
+
+        let normalized: String = rendered.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(normalized.contains("명령:"), "rendered=\n{}", rendered);
+        assert!(!rendered.contains("Command:"), "rendered=\n{}", rendered);
     }
 
     #[test]

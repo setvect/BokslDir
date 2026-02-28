@@ -210,8 +210,8 @@ where
         run_result
     } else {
         let mut message = format!("Failed to restore terminal: {}", restore_errors.join(", "));
-        if let Err(editor_error) = run_result {
-            message.push_str(&format!(". Editor error: {}", editor_error));
+        if let Err(process_error) = run_result {
+            message.push_str(&format!(". Process error: {}", process_error));
         }
         Err(message)
     }
@@ -223,6 +223,10 @@ fn resolve_shell_for_command() -> String {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "/bin/sh".to_string())
+}
+
+fn fallback_shell_for_command() -> &'static str {
+    "/bin/sh"
 }
 
 fn parse_editor_command(
@@ -263,16 +267,54 @@ fn run_editor_process(editor_command: &str, target_path: &Path) -> std::result::
 }
 
 fn run_shell_command(command: &str, working_dir: &Path) -> std::result::Result<(), String> {
-    let shell = resolve_shell_for_command();
-    let status = Command::new(&shell)
+    let primary_shell = resolve_shell_for_command();
+    let fallback_shell = fallback_shell_for_command();
+
+    match run_shell_command_with(&primary_shell, command, working_dir) {
+        Ok(status) => shell_command_status_to_result(command, status, None),
+        Err(primary_err) => {
+            if primary_shell == fallback_shell {
+                return Err(primary_err);
+            }
+
+            match run_shell_command_with(fallback_shell, command, working_dir) {
+                Ok(status) => {
+                    shell_command_status_to_result(command, status, Some(fallback_shell))
+                }
+                Err(fallback_err) => Err(format!(
+                    "{}; fallback '{}' failed: {}",
+                    primary_err, fallback_shell, fallback_err
+                )),
+            }
+        }
+    }
+}
+
+fn run_shell_command_with(
+    shell: &str,
+    command: &str,
+    working_dir: &Path,
+) -> std::result::Result<std::process::ExitStatus, String> {
+    Command::new(shell)
         .arg("-lc")
         .arg(command)
         .current_dir(working_dir)
         .status()
-        .map_err(|e| format!("Failed to start shell '{}': {}", shell, e))?;
+        .map_err(|e| format!("Failed to start shell '{}': {}", shell, e))
+}
 
+fn shell_command_status_to_result(
+    command: &str,
+    status: std::process::ExitStatus,
+    fallback_shell: Option<&str>,
+) -> std::result::Result<(), String> {
     if status.success() {
         Ok(())
+    } else if let Some(shell) = fallback_shell {
+        Err(format!(
+            "Command '{}' exited with status {} (fallback shell: {})",
+            command, status, shell
+        ))
     } else {
         Err(format!(
             "Command '{}' exited with status {}",
@@ -1664,10 +1706,23 @@ mod tests {
     }
 
     #[test]
+    fn test_run_shell_command_fallback_path_is_defined() {
+        assert_eq!(fallback_shell_for_command(), "/bin/sh");
+    }
+
+    #[test]
     fn test_run_shell_command_success_and_failure() {
         let cwd = std::path::Path::new(".");
         assert!(run_shell_command("true", cwd).is_ok());
         assert!(run_shell_command("false", cwd).is_err());
+    }
+
+    #[test]
+    fn test_run_shell_command_skips_fallback_on_command_failure() {
+        let cwd = std::path::Path::new(".");
+        let error = run_shell_command("false", cwd).expect_err("false should fail");
+        assert!(error.contains("Command 'false' exited with status"));
+        assert!(!error.contains("fallback shell"));
     }
 
     #[test]
